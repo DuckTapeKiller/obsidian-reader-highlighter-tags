@@ -1,0 +1,28 @@
+{
+    "name": "reader-highlighter-tags",
+    "version": "1.0.0",
+    "description": "Highlight text in Reading View",
+    "main": "main.js",
+    "scripts": {
+        "dev": "node esbuild.config.mjs",
+        "build": "node esbuild.config.mjs production",
+        "lint": "eslint src/**"
+    },
+    "keywords": [
+        "obsidian",
+        "obsidian-plugin"
+    ],
+    "author": "DuckTapeKiller",
+    "license": "MIT",
+    "devDependencies": {
+        "@eslint/js": "^9.39.2",
+        "@types/node": "^16.11.6",
+        "builtin-modules": "^5.0.0",
+        "esbuild": "^0.17.0",
+        "eslint": "^9.39.2",
+        "globals": "^17.0.0",
+        "obsidian": "latest",
+        "tslib": "2.4.0",
+        "typescript": "4.7.4"
+    }
+}

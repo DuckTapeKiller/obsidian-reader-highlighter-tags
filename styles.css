@@ -1,0 +1,62 @@
+.reading-highlighter-float-container {
+    position: fixed;
+    z-index: 9999;
+    display: none;
+    /* Toggled via JS */
+    gap: 8px;
+    /* Space between buttons */
+}
+
+.reading-highlighter-btn {
+    /* Shape & Size */
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    /* Circular */
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+
+    /* Layout */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+
+    /* Glassmorphism */
+    background: rgba(var(--interactive-accent-rgb), 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+
+    /* Functionality */
+    color: var(--text-on-accent);
+    transition: transform 0.1s ease-in-out, opacity 0.2s;
+}
+
+.reading-highlighter-btn:active {
+    transform: scale(0.95);
+}
+
+.reading-highlighter-remove-btn {
+    /* Optional differentiation */
+}
+
+/* Fallback & Theme Support */
+.reading-highlighter-btn {
+    --interactive-accent-rgb: 0, 0, 0;
+}
+
+body.theme-light .reading-highlighter-btn {
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--text-normal);
+}
+
+body.theme-dark .reading-highlighter-btn {
+    background: rgba(40, 40, 40, 0.6);
+    color: var(--text-normal);
+}
+
+/* Use theme accent if available */
+.reading-highlighter-btn {
+    background-color: hsla(var(--interactive-accent-hsl), 0.8);
+}

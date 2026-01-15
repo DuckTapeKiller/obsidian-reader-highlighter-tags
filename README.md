@@ -1,6 +1,7 @@
 # Reader Highlighter Tags
 
 
+https://github.com/user-attachments/assets/35969bb0-54f0-404d-9cf8-acd0e7d44165
 
 A powerful Obsidian plugin that allows you to **highlight** and **tag** text directly while in **Reading View**. 
 

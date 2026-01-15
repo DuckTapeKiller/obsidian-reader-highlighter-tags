@@ -1,5 +1,7 @@
 # Reader Highlighter Tags
 
+
+
 A powerful Obsidian plugin that allows you to **highlight** and **tag** text directly while in **Reading View**. 
 
 Unlike other highlighting plugins, **Reader Highlighter Tags** is designed to be "smart" about your content—it understands lists, indentation, and identical text occurrences, ensuring your direct edits to the markdown source are precise and formatted correctly.

@@ -3,7 +3,7 @@
 	"name": "Reader Highlighter Tags",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Highlight text in Reading View",
+	"description": "Highlight text and add tags in Reading View.",
 	"author": "DuckTapeKiller",
 	"authorUrl": "https://github.com/DuckTapeKiller",
 	"isDesktopOnly": false

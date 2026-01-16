@@ -1,5 +1,6 @@
 # Reader Highlighter Tags
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ducktapekiller)
 
 https://github.com/user-attachments/assets/35969bb0-54f0-404d-9cf8-acd0e7d44165
 

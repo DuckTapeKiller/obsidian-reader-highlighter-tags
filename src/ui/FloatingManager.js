@@ -98,18 +98,58 @@ export class FloatingManager {
 
         this.containerEl.style.display = "flex";
 
-        const containerHeight = 40;
-        const containerWidth = 140; // Increased width for 3 buttons
+        // Reset dynamic styles & classes
+        this.containerEl.style.top = "";
+        this.containerEl.style.bottom = "";
+        this.containerEl.style.left = "";
+        this.containerEl.style.right = "";
+        this.containerEl.style.transform = "";
+        this.containerEl.removeClass("reading-highlighter-vertical");
 
-        let top = rect.top - containerHeight - 10;
-        let left = rect.left + (rect.width / 2) - (containerWidth / 2);
+        const pos = this.plugin.settings.toolbarPosition || "text";
 
-        if (top < 10) top = rect.bottom + 10;
-        if (left < 10) left = 10;
-        if (left + containerWidth > window.innerWidth - 10) left = window.innerWidth - containerWidth - 10;
+        if (pos === "text") {
+            // Default: Next to text
+            const containerHeight = 40;
+            const containerWidth = 140;
 
-        this.containerEl.style.top = `${top}px`;
-        this.containerEl.style.left = `${left}px`;
+            let top = rect.top - containerHeight - 10;
+            let left = rect.left + (rect.width / 2) - (containerWidth / 2);
+
+            if (top < 10) top = rect.bottom + 10;
+            if (left < 10) left = 10;
+            if (left + containerWidth > window.innerWidth - 10) left = window.innerWidth - containerWidth - 10;
+
+            this.containerEl.style.top = `${top}px`;
+            this.containerEl.style.left = `${left}px`;
+
+        } else if (pos === "top") {
+            // Fixed Top Center
+            this.containerEl.style.top = "80px";
+            this.containerEl.style.left = "50%";
+            this.containerEl.style.transform = "translateX(-50%)";
+
+        } else if (pos === "bottom") {
+            // Fixed Bottom Center
+            // Consider Mobile Nav Bar height? usually safest to leave ~60-80px padding if native.
+            this.containerEl.style.bottom = "100px";
+            this.containerEl.style.left = "50%";
+            this.containerEl.style.transform = "translateX(-50%)";
+
+        } else if (pos === "left") {
+            // Fixed Left Side
+            this.containerEl.style.top = "50%";
+            this.containerEl.style.left = "10px";
+            this.containerEl.style.transform = "translateY(-50%)";
+            this.containerEl.addClass("reading-highlighter-vertical");
+
+        } else if (pos === "right") {
+            // Fixed Right Side
+            this.containerEl.style.top = "50%";
+            this.containerEl.style.right = "10px";
+            this.containerEl.style.transform = "translateY(-50%)";
+            this.containerEl.addClass("reading-highlighter-vertical");
+        }
     }
 
     hide() {

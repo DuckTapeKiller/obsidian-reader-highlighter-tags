@@ -1,53 +1,69 @@
 # Reader Highlighter Tags
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ducktapekiller)
+A powerful Obsidian plugin that brings a **Medium-like highlighting experience** directly to **Reading View**. 
 
-https://github.com/user-attachments/assets/35969bb0-54f0-404d-9cf8-acd0e7d44165
+Designed for power users who read long-form content in Obsidian, this plugin allows you to highlight, tag, and organize your notes without ever switching to Edit mode. It is "smart" about your content—understanding lists, indentation, and identical text occurrences to ensure your markdown remains clean and valid.
 
-A powerful Obsidian plugin that allows you to **highlight** and **tag** text directly while in **Reading View**. 
+## ✨ Key Features
 
-Unlike other highlighting plugins, **Reader Highlighter Tags** is designed to be "smart" about your content—it understands lists, indentation, and identical text occurrences, ensuring your direct edits to the markdown source are precise and formatted correctly.
+### 🖍️ Smart Highlighting
+Select text in Reading View to see the floating toolbar.
+- **Context Aware**: Works perfectly with lists, blockquotes, and indented blocks.
+- **Smart Expansion**: Automatically expands selections to capture whole words or existing markers (`==`, `**`, `*`) to prevent messy formatting.
+- **Auto-Cleaning**: Prevents "stacking" styles. If you bold a text that is already italicized, it cleans the old style first.
 
-## Features
+### 🎨 Customizable Styles & Colors
+Customize how your highlights look in the **Settings**:
+- **Highlight Styles**: Choose between standard `==highlight==`, **Bold**, or *Italic*.
+- **Custom Color**: Enable **Color Highlighting** to choose a specific hex color (e.g., Yellow `#FFEE58`). This uses HTML `<mark>` tags to render the color perfectly in Obsidian.
 
-### 🖍️ Highlight in Reading View
-Select any text in Reading View, and a floating toolbar will appear. 
-- Click the **Highlighter Icon** to wrap your selection in `==markdown highlights==`.
-- Works perfectly with **lists**, **indented blocks**, and **formatted text**.
+### 🏷️ Powerful Tagging
+- **Manual Tagging**: Click the **Tag Icon** to open a fuzzy-search modal. Search your vault's existing tags or create new ones on the fly.
+- **Auto-Tagging**: Set a "Default Tag Prefix" (e.g., `book`) in settings. Every time you highlight text, it will automatically append that tag (e.g., `#book ==highlighted text==`).
 
-### 🏷️ Smart Tagging
-Add tags to your highlights instantly.
-- Click the **Tag Icon** in the floating toolbar.
-- **Search Existing Tags**: Fuzzy search through your vault's existing tags.
-- **Create New Tags**: Type a new tag name (e.g., "Horror Book") and it will automatically convert it to a valid tag (`#Horror_Book`) and create it.
-- **Auto-Formatting**: The plugin correctly places the tag *before* the highlight (e.g., `- #tag ==content==`), keeping your list formatting intact and your notes clean.
+### 🛠️ Floating Toolbar
+The toolbar appears instantly when you select text.
+- **Positioning**: Choose where it appears—**Next to Text** (Dynamic), or fixed at the **Top**, **Bottom**, **Left**, or **Right** of the screen.
+- **Custom Buttons**: Toggle visibility for the **Tag**, **Quote**, or **Remove** buttons in settings.
+- **Workflow Tools**:
+    - **Quote Button**: Copies the selection to your clipboard as a formatted Markdown blockquote with a backlink (`> text [[Link]]`).
+    - **Remove Button**: Cleanly strips highlighting and tags from the selected text.
 
-### 🧠 Intelligent Context Awareness
-- **Whitespace Agnostic**: Select text regardless of how the browser renders distinct spaces vs. the source file. The plugin figures it out.
-- **Duplicate Handling**: Have the same word appear 10 times in your note? The plugin knows exactly *which* one you selected and highlights only that specific instance.
-- **Undo/Redo Support**: Seamlessly undo your highlights or tags without breaking your reading flow.
+### 📱 Mobile Optimized
+- **Haptic Feedback**: Subtle vibration on success (configurable).
+- **Touch-Friendly**: Large buttons and improved selection logic prevent the keyboard from popping up accidentally.
 
-### ❌ Easy Removal
-- Click on an existing highlight to bring up the toolbar and select the **Remove** button to strip the highlighting (and associated tag, if applicable).
+---
 
-## How to Use
+## ⚙️ Settings Guide
 
-1. **Open a Note** in Reading View.
-2. **Select Text**: Drag to select any phrase, sentence, or list item.
-3. **Use the Toolbar**:
-    - **Highlight**: Click the marker icon.
-    - **Tag**: Click the tag icon. Type to search or create a new tag.
-    - **Remove**: Select already highlighted text to remove it.
+### Toolbar Position
+*   **Next to text**: The classic "floating" behavior.
+*   **Fixed Top / Bottom**: Good for mobile users who want consistent access.
+*   **Fixed Left / Right**: Ideal for tablet or desktop users (Default is **Right**).
 
-## Installation
+### Styling
+*   **Highlight Style**: Defines the markdown syntax applied (`==`, `**`, `*`).
+*   **Enable Color Highlighting**: Overrides the style to use a custom background color.
+*   **Highlight Color**: The hex code for your custom color.
+
+### Tags
+*   **Default Tag Prefix**: If set (e.g., `todo`), this tag is automatically added to *every* highlight. Leave empty for manual tagging only.
+
+### Buttons
+*   Toggle **Show Tag Button**, **Show Quote Button**, or **Show Remove Button** to de-clutter your toolbar.
+
+---
+
+## 📦 Installation
 
 ### Manually
-1. Download the latest release (`main.js`, `manifest.json`, `styles.css`).
-2. Create a folder named `reader-highlighter-tags` inside your `.obsidian/plugins/` directory.
-3. Move the downloaded files into that folder.
-4. Reload Obsidian and enable the plugin in **Settings > Community Plugins**.
+1.  Download the latest release (`main.js`, `manifest.json`, `styles.css`) from GitHub.
+2.  Create a folder named `reader-highlighter-tags` inside your `.obsidian/plugins/` directory.
+3.  Move the downloaded files into that folder.
+4.  Reload Obsidian and enable **Reader Highlighter Tags** in **Settings > Community Plugins**.
 
-## Development
+## 💻 Development
 
 ```bash
 npm install

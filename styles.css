@@ -1,34 +1,30 @@
+/* Existing Styles */
 .reading-highlighter-float-container {
     position: fixed;
     z-index: 9999;
     display: none;
-    /* Toggled via JS */
     gap: 8px;
-    /* Space between buttons */
+    flex-direction: row;
+}
+
+.reading-highlighter-vertical {
+    flex-direction: column;
 }
 
 .reading-highlighter-btn {
-    /* Shape & Size */
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    /* Circular */
     padding: 8px;
     border: 1px solid rgba(255, 255, 255, 0.2);
-
-    /* Layout */
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-
-    /* Glassmorphism */
     background: rgba(var(--interactive-accent-rgb), 0.7);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-
-    /* Functionality */
     color: var(--text-on-accent);
     transition: transform 0.1s ease-in-out, opacity 0.2s;
 }
@@ -37,26 +33,75 @@
     transform: scale(0.95);
 }
 
-.reading-highlighter-remove-btn {
-    /* Optional differentiation */
-}
-
-/* Fallback & Theme Support */
-.reading-highlighter-btn {
-    --interactive-accent-rgb: 0, 0, 0;
-}
-
-body.theme-light .reading-highlighter-btn {
-    background: rgba(255, 255, 255, 0.7);
-    color: var(--text-normal);
-}
-
-body.theme-dark .reading-highlighter-btn {
-    background: rgba(40, 40, 40, 0.6);
-    color: var(--text-normal);
-}
-
-/* Use theme accent if available */
 .reading-highlighter-btn {
     background-color: hsla(var(--interactive-accent-hsl), 0.8);
+}
+
+/* Multi-Select Tag Modal Styles */
+.reading-highlighter-tag-modal .selected-tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+    min-height: 32px;
+    padding: 4px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+}
+
+.reading-highlighter-tag-modal .tag-chip {
+    display: inline-flex;
+    align-items: center;
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+.reading-highlighter-tag-modal .tag-chip-close {
+    margin-left: 6px;
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+.reading-highlighter-tag-modal .tag-chip-close:hover {
+    opacity: 1;
+}
+
+.reading-highlighter-tag-modal .tag-search-input-container {
+    margin-bottom: 12px;
+}
+
+.reading-highlighter-tag-modal .tag-search-input {
+    width: 100%;
+}
+
+.reading-highlighter-tag-modal .tag-suggestions-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+}
+
+.reading-highlighter-tag-modal .suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+}
+
+.reading-highlighter-tag-modal .suggestion-item:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.reading-highlighter-tag-modal .suggestion-note {
+    color: var(--text-muted);
+    font-size: 0.8em;
+}
+
+.reading-highlighter-tag-modal .modal-footer {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
 }

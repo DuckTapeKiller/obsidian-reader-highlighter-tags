@@ -313,7 +313,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             } else {
                 fullTag = `#${cleanPayload}`;
             }
-        } else if (mode === "highlight" && this.settings.defaultTagPrefix) {
+        } else if ((mode === "highlight" || mode === "color") && this.settings.defaultTagPrefix) {
             const autoTag = this.settings.defaultTagPrefix.trim();
             if (autoTag) {
                 const cleanTag = autoTag.startsWith("#") ? autoTag.substring(1) : autoTag;

@@ -118,18 +118,45 @@ var FloatingManager = class {
     if (!this.containerEl || !rect)
       return;
     this.containerEl.style.display = "flex";
-    const containerHeight = 40;
-    const containerWidth = 140;
-    let top = rect.top - containerHeight - 10;
-    let left = rect.left + rect.width / 2 - containerWidth / 2;
-    if (top < 10)
-      top = rect.bottom + 10;
-    if (left < 10)
-      left = 10;
-    if (left + containerWidth > window.innerWidth - 10)
-      left = window.innerWidth - containerWidth - 10;
-    this.containerEl.style.top = `${top}px`;
-    this.containerEl.style.left = `${left}px`;
+    this.containerEl.style.top = "";
+    this.containerEl.style.bottom = "";
+    this.containerEl.style.left = "";
+    this.containerEl.style.right = "";
+    this.containerEl.style.transform = "";
+    this.containerEl.removeClass("reading-highlighter-vertical");
+    const pos = this.plugin.settings.toolbarPosition || "text";
+    if (pos === "text") {
+      const containerHeight = 40;
+      const containerWidth = 140;
+      let top = rect.top - containerHeight - 10;
+      let left = rect.left + rect.width / 2 - containerWidth / 2;
+      if (top < 10)
+        top = rect.bottom + 10;
+      if (left < 10)
+        left = 10;
+      if (left + containerWidth > window.innerWidth - 10)
+        left = window.innerWidth - containerWidth - 10;
+      this.containerEl.style.top = `${top}px`;
+      this.containerEl.style.left = `${left}px`;
+    } else if (pos === "top") {
+      this.containerEl.style.top = "80px";
+      this.containerEl.style.left = "50%";
+      this.containerEl.style.transform = "translateX(-50%)";
+    } else if (pos === "bottom") {
+      this.containerEl.style.bottom = "100px";
+      this.containerEl.style.left = "50%";
+      this.containerEl.style.transform = "translateX(-50%)";
+    } else if (pos === "left") {
+      this.containerEl.style.top = "50%";
+      this.containerEl.style.left = "10px";
+      this.containerEl.style.transform = "translateY(-50%)";
+      this.containerEl.addClass("reading-highlighter-vertical");
+    } else if (pos === "right") {
+      this.containerEl.style.top = "50%";
+      this.containerEl.style.right = "10px";
+      this.containerEl.style.transform = "translateY(-50%)";
+      this.containerEl.addClass("reading-highlighter-vertical");
+    }
   }
   hide() {
     if (this.containerEl) {
@@ -147,6 +174,9 @@ var SelectionLogic = class {
     const file = view.file;
     const raw = await this.app.vault.read(file);
     let candidates = this.findAllCandidates(raw, selectionSnippet);
+    if (candidates.length === 0) {
+      candidates = this.findCandidatesStripped(raw, selectionSnippet);
+    }
     if (candidates.length === 0)
       return null;
     if (context) {
@@ -190,6 +220,74 @@ var SelectionLogic = class {
     }
     return candidates;
   }
+  findCandidatesStripped(text, snippet) {
+    const map = [];
+    let strippedRaw = "";
+    const tokenRegex = /(\[(?:[^\]]+)\]\([^)]+\))|(\[\[(?:[^\]]+)\]\])|(\*|_|==|~~|<[^>]+>)/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = tokenRegex.exec(text)) !== null) {
+      for (let i = lastIndex; i < match.index; i++) {
+        map.push(i);
+        strippedRaw += text[i];
+      }
+      const fullMatch = match[0];
+      if (match[1]) {
+        const closingBracket = fullMatch.indexOf("](");
+        if (closingBracket !== -1) {
+          const linkTextStart = match.index + 1;
+          const linkTextEnd = match.index + closingBracket;
+          for (let i = linkTextStart; i < linkTextEnd; i++) {
+            map.push(i);
+            strippedRaw += text[i];
+          }
+        }
+      } else if (match[2]) {
+        const inner = fullMatch.substring(2, fullMatch.length - 2);
+        const pipeIndex = inner.indexOf("|");
+        let visibleStart, visibleEnd;
+        if (pipeIndex !== -1) {
+          visibleStart = match.index + 2 + pipeIndex + 1;
+          visibleEnd = match.index + fullMatch.length - 2;
+        } else {
+          visibleStart = match.index + 2;
+          visibleEnd = match.index + fullMatch.length - 2;
+        }
+        for (let i = visibleStart; i < visibleEnd; i++) {
+          map.push(i);
+          strippedRaw += text[i];
+        }
+      } else {
+      }
+      lastIndex = tokenRegex.lastIndex;
+    }
+    for (let i = lastIndex; i < text.length; i++) {
+      map.push(i);
+      strippedRaw += text[i];
+    }
+    const escaped = snippet.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = escaped.replace(/\s+/g, "\\s+");
+    const regex = new RegExp(pattern, "g");
+    const candidates = [];
+    let strippedMatch;
+    while ((strippedMatch = regex.exec(strippedRaw)) !== null) {
+      const strippedStart = strippedMatch.index;
+      const strippedEnd = strippedMatch.index + strippedMatch[0].length;
+      const rawStart = map[strippedStart];
+      let rawEnd;
+      if (strippedEnd < map.length) {
+        rawEnd = map[strippedEnd];
+      } else {
+        rawEnd = map[strippedEnd - 1] + 1;
+      }
+      candidates.push({
+        start: rawStart,
+        end: rawEnd,
+        text: text.substring(rawStart, rawEnd)
+      });
+    }
+    return candidates;
+  }
   calculateSimilarity(source, target) {
     if (source === target)
       return 1e3;
@@ -212,42 +310,110 @@ var SelectionLogic = class {
 
 // src/modals/TagSuggestModal.js
 var import_obsidian2 = require("obsidian");
-var TagSuggestModal = class extends import_obsidian2.FuzzySuggestModal {
+var TagSuggestModal = class extends import_obsidian2.Modal {
   constructor(plugin, onChoose) {
     super(plugin.app);
     this.plugin = plugin;
     this.onChoose = onChoose;
-    this.setPlaceholder("Select or type to create a tag...");
+    this.selectedTags = /* @__PURE__ */ new Set();
+    this.suggestions = [];
+    this.query = "";
+    this.suggestionEl = null;
+    this.selectedContainer = null;
   }
-  getItems() {
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("reading-highlighter-tag-modal");
+    contentEl.createEl("h2", { text: "Add Tags" });
+    this.selectedContainer = contentEl.createDiv({ cls: "selected-tags-container" });
+    this.updateSelectedView();
+    const inputContainer = contentEl.createDiv({ cls: "tag-search-input-container" });
+    const input = inputContainer.createEl("input", {
+      type: "text",
+      cls: "tag-search-input",
+      attr: { placeholder: "Search or create tag..." }
+    });
+    setTimeout(() => input.focus(), 50);
+    this.suggestionEl = contentEl.createDiv({ cls: "tag-suggestions-list" });
+    const footer = contentEl.createDiv({ cls: "modal-footer" });
+    const doneBtn = footer.createEl("button", { text: "Done", cls: "mod-cta" });
+    doneBtn.onclick = () => this.submit();
     const tagCounts = this.app.metadataCache.getTags();
-    return Object.keys(tagCounts).map((t) => ({ tag: t.substring(1), isNew: false }));
+    this.allTags = Object.keys(tagCounts).map((t) => t.substring(1));
+    input.addEventListener("input", (e) => {
+      this.query = e.target.value;
+      this.renderSuggestions(this.query);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        if (this.query.trim()) {
+          this.toggleTag(this.query.trim());
+          this.query = "";
+          input.value = "";
+          this.renderSuggestions("");
+        }
+      } else if (e.key === "Backspace" && !this.query) {
+      }
+    });
+    this.renderSuggestions("");
   }
-  getItemText(item) {
-    return item.tag;
-  }
-  getSuggestions(query) {
-    const searchResults = super.getSuggestions(query);
-    const cleanQuery = query.trim().replace(/\s+/g, "_");
-    if (!cleanQuery)
-      return searchResults;
-    const exactMatch = searchResults.some((m) => m.item.tag.toLowerCase() === cleanQuery.toLowerCase());
-    if (!exactMatch) {
-      searchResults.unshift({
-        item: { tag: cleanQuery, isNew: true },
-        match: { score: 0, matches: [[0, cleanQuery.length]] }
-      });
+  renderSuggestions(query) {
+    this.suggestionEl.empty();
+    const cleanQuery = query.toLowerCase().replace(/\s+/g, "_");
+    let matches = this.allTags.filter((t) => t.toLowerCase().includes(cleanQuery));
+    const isExact = matches.some((t) => t.toLowerCase() === cleanQuery);
+    if (cleanQuery && !isExact) {
+      this.renderItem(cleanQuery, true);
     }
-    return searchResults;
+    matches.slice(0, 50).forEach((tag) => {
+      if (!this.selectedTags.has(tag)) {
+        this.renderItem(tag, false);
+      }
+    });
   }
-  renderSuggestion(match, el) {
-    super.renderSuggestion(match, el);
-    if (match.item.isNew) {
-      el.createSpan({ text: " (Create new tag)", cls: "suggestion-aux" });
+  renderItem(tag, isNew) {
+    const el = this.suggestionEl.createDiv({ cls: "suggestion-item" });
+    el.createSpan({ text: isNew ? `#${tag}` : tag });
+    if (isNew) {
+      el.createSpan({ text: " (Create new)", cls: "suggestion-note" });
     }
+    el.addEventListener("click", () => {
+      this.toggleTag(tag);
+      this.query = "";
+      this.contentEl.querySelector(".tag-search-input").value = "";
+      this.contentEl.querySelector(".tag-search-input").focus();
+      this.renderSuggestions("");
+    });
   }
-  onChooseItem(item, _evt) {
-    this.onChoose(`#${item.tag}`);
+  toggleTag(tag) {
+    const cleanTag = tag.replace(/^#/, "").replace(/\s+/g, "_");
+    if (this.selectedTags.has(cleanTag)) {
+      this.selectedTags.delete(cleanTag);
+    } else {
+      this.selectedTags.add(cleanTag);
+    }
+    this.updateSelectedView();
+  }
+  updateSelectedView() {
+    this.selectedContainer.empty();
+    this.selectedTags.forEach((tag) => {
+      const chip = this.selectedContainer.createDiv({ cls: "tag-chip" });
+      chip.createSpan({ text: `#${tag}` });
+      const close = chip.createSpan({ cls: "tag-chip-close", text: "\xD7" });
+      close.onclick = (e) => {
+        e.stopPropagation();
+        this.toggleTag(tag);
+      };
+    });
+  }
+  submit() {
+    const result = Array.from(this.selectedTags).map((t) => `#${t}`).join(" ");
+    this.onChoose(result);
+    this.close();
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
   }
 };
 
@@ -277,10 +443,27 @@ function setFallbackScroll(view, { y }) {
 }
 
 // src/main.js
+var DEFAULT_SETTINGS = {
+  toolbarPosition: "right",
+  // text, top, bottom, left, right
+  // highlightStyle removed
+  enableColorHighlighting: false,
+  highlightColor: "",
+  // Default: None (Theme decides)
+  defaultTagPrefix: "",
+  enableHaptics: true,
+  showTagButton: true,
+  showRemoveButton: true,
+  showQuoteButton: true
+  // New
+  // showColorButtons removed
+};
 var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
-  onload() {
+  async onload() {
+    await this.loadSettings();
     this.floatingManager = new FloatingManager(this);
     this.logic = new SelectionLogic(this.app);
+    this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
     this.addCommand({
       id: "highlight-selection-reading",
       name: "Highlight selection (Reading View)",
@@ -316,6 +499,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
   }
   onunload() {
     this.floatingManager.unload();
+  }
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+  async saveSettings() {
+    await this.saveData(this.settings);
+    this.floatingManager.refresh();
   }
   getActiveReadingView() {
     const view = this.app.workspace.getActiveViewOfType(require("obsidian").MarkdownView);
@@ -380,7 +570,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
       new import_obsidian3.Notice("Could not locate selection in file.");
       return;
     }
-    await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "highlight");
+    let mode = "highlight";
+    let payload = "";
+    if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
+      mode = "color";
+      payload = this.settings.highlightColor;
+    }
+    await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, mode, payload);
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
   }
@@ -430,26 +626,94 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
   }
-  async applyMarkdownModification(file, raw, start, end, mode, tag = "") {
+  async copyAsQuote(view) {
+    var _a;
+    const sel = window.getSelection();
+    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    if (!snippet.trim()) {
+      new import_obsidian3.Notice("No text selected.");
+      return;
+    }
+    const quote = snippet.split("\n").map((l) => `> ${l}`).join("\n");
+    const link = `
+
+[[${view.file.basename}]]`;
+    await navigator.clipboard.writeText(quote + link);
+    new import_obsidian3.Notice("Copied as quote!");
+    sel == null ? void 0 : sel.removeAllRanges();
+  }
+  async applyColorHighlight(view, color) {
+    var _a;
+    const sel = window.getSelection();
+    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    if (!snippet.trim())
+      return;
+    const scrollPos = getScroll(view);
+    const contextEl = this.getSelectionContext();
+    const contextText = contextEl ? contextEl.innerText : null;
+    const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
+    const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
+    if (!result) {
+      new import_obsidian3.Notice("Could not locate selection.");
+      return;
+    }
+    await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "color", color);
+    this.restoreScroll(view, scrollPos);
+    sel == null ? void 0 : sel.removeAllRanges();
+  }
+  async applyMarkdownModification(file, raw, start, end, mode, payload = "") {
     let expandedStart = start;
     let expandedEnd = end;
-    while (expandedStart > 0 && raw.substring(expandedStart - 1, expandedStart) === "=") {
-      expandedStart--;
-    }
-    while (expandedEnd < raw.length && raw.substring(expandedEnd, expandedEnd + 1) === "=") {
-      expandedEnd++;
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+      const preceding = raw.substring(0, expandedStart);
+      const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[)$/);
+      if (matchBack) {
+        expandedStart -= matchBack[0].length;
+        expanded = true;
+      }
+      const following = raw.substring(expandedEnd);
+      const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\))/);
+      if (matchForward) {
+        expandedEnd += matchForward[0].length;
+        expanded = true;
+      }
     }
     const selectedText = raw.substring(expandedStart, expandedEnd);
     const paragraphs = selectedText.split(/\n\s*\n/);
+    let fullTag = "";
+    if (mode === "tag" && payload) {
+      const prefix = this.settings.defaultTagPrefix ? this.settings.defaultTagPrefix.trim() : "";
+      const cleanPayload = payload.startsWith("#") ? payload.substring(1) : payload;
+      if (prefix) {
+        const cleanPrefix = prefix.startsWith("#") ? prefix.substring(1) : prefix;
+        fullTag = `#${cleanPrefix} #${cleanPayload}`;
+      } else {
+        fullTag = `#${cleanPayload}`;
+      }
+    } else if ((mode === "highlight" || mode === "color") && this.settings.defaultTagPrefix) {
+      const autoTag = this.settings.defaultTagPrefix.trim();
+      if (autoTag) {
+        const cleanTag = autoTag.startsWith("#") ? autoTag.substring(1) : autoTag;
+        fullTag = `#${cleanTag}`;
+      }
+    }
     const processedParagraphs = paragraphs.map((paragraph) => {
       if (!paragraph.trim())
         return paragraph;
       const lines = paragraph.split("\n");
       const processedLines = lines.map((line) => {
-        const trimmed = line.trim();
-        if (!trimmed)
-          return line;
-        const cleanLine = line.replace(/==/g, "");
+        let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
+        if (mode === "highlight" || mode === "color" || mode === "tag") {
+          cleanLine = cleanLine.split("==").join("");
+        } else if (mode === "bold") {
+          cleanLine = cleanLine.split("**").join("");
+        } else if (mode === "italic") {
+          cleanLine = cleanLine.split("*").join("");
+        } else if (mode === "remove") {
+          cleanLine = cleanLine.split("==").join("");
+        }
         if (mode === "remove") {
           return cleanLine;
         }
@@ -464,8 +728,18 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
           prefix = matchPrefix[0];
           content = contentAfterIndent.substring(prefix.length);
         }
-        const tagStr = mode === "tag" && tag ? `${tag} ` : "";
-        return `${indent}${prefix}${tagStr}==${content}==`;
+        const tagStr = fullTag ? `${fullTag} ` : "";
+        let wrappedContent = content;
+        if (mode === "highlight" || mode === "tag") {
+          if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
+            wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${content}</mark>`;
+          } else {
+            wrappedContent = `==${content}==`;
+          }
+        } else if (mode === "color") {
+          wrappedContent = `<mark style="background: ${payload}; color: black;">${content}</mark>`;
+        }
+        return `${indent}${prefix}${tagStr}${wrappedContent}`;
       });
       return processedLines.join("\n");
     });
@@ -477,5 +751,55 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
     requestAnimationFrame(() => {
       applyScroll(view, pos);
     });
+  }
+};
+var ReadingHighlighterSettingTab = class extends import_obsidian3.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "Reader Highlighter Tags Settings" });
+    new import_obsidian3.Setting(containerEl).setName("Toolbar Position").setDesc("Choose where the floating toolbar should appear.").addDropdown((dropdown) => dropdown.addOption("text", "Next to text").addOption("top", "Fixed at Top Center").addOption("bottom", "Fixed at Bottom Center").addOption("left", "Fixed Left Side").addOption("right", "Fixed Right Side (Default)").setValue(this.plugin.settings.toolbarPosition).onChange(async (value) => {
+      this.plugin.settings.toolbarPosition = value;
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "Visuals & Workflow" });
+    new import_obsidian3.Setting(containerEl).setName("Enable Color Highlighting").setDesc("Use HTML <mark> tags with specific colors. Overrides 'Highlight Style'.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
+      this.plugin.settings.enableColorHighlighting = value;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    new import_obsidian3.Setting(containerEl).setName("Highlight Color").setDesc("Hex code for the highlight color (e.g. #FFEE58). Active when 'Enable Color Highlighting' is ON.").addColorPicker((color) => color.setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
+      this.plugin.settings.highlightColor = value;
+      await this.plugin.saveSettings();
+    })).addText((text) => text.setPlaceholder("#FFEE58").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
+      this.plugin.settings.highlightColor = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian3.Setting(containerEl).setName("Default Tag Prefix").setDesc("Automatically nest tags (e.g., 'book'). Leave empty for no prefix. No need for slashes.").addText((text) => text.setPlaceholder("book").setValue(this.plugin.settings.defaultTagPrefix).onChange(async (value) => {
+      this.plugin.settings.defaultTagPrefix = value;
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "Toolbar Buttons" });
+    new import_obsidian3.Setting(containerEl).setName("Show Tag Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
+      this.plugin.settings.showTagButton = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian3.Setting(containerEl).setName("Show Quote Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showQuoteButton).onChange(async (value) => {
+      this.plugin.settings.showQuoteButton = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian3.Setting(containerEl).setName("Show Remove Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showRemoveButton).onChange(async (value) => {
+      this.plugin.settings.showRemoveButton = value;
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "Mobile & UX" });
+    new import_obsidian3.Setting(containerEl).setName("Haptic Feedback").setDesc("Vibrate slightly on success (Mobile only).").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHaptics).onChange(async (value) => {
+      this.plugin.settings.enableHaptics = value;
+      await this.plugin.saveSettings();
+    }));
   }
 };

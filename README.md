@@ -1,5 +1,9 @@
 # Reader Highlighter Tags
 
+
+https://github.com/user-attachments/assets/dff37003-3d0d-4b25-9348-c9141bfe0029
+
+
 A powerful Obsidian plugin that brings a **Medium-like highlighting experience** directly to **Reading View**. 
 
 Designed for power users who read long-form content in Obsidian, this plugin allows you to highlight, tag, and organize your notes without ever switching to Edit mode. It is "smart" about your content—understanding lists, indentation, and identical text occurrences to ensure your markdown remains clean and valid.
@@ -17,6 +21,8 @@ Customize how your highlights look in the **Settings**:
 - **Highlight Styles**: Choose between standard `==highlight==`, **Bold**, or *Italic*.
 - **Custom Color**: Enable **Color Highlighting** to choose a specific hex color (e.g., Yellow `#FFEE58`). This uses HTML `<mark>` tags to render the color perfectly in Obsidian.
 
+<img width="1644" height="1002" alt="Settings" src="https://github.com/user-attachments/assets/e575b4fe-c31f-4660-9a09-003494d2cfc5" />
+
 ### 🏷️ Powerful Tagging
 - **Manual Tagging**: Click the **Tag Icon** to open a fuzzy-search modal. Search your vault's existing tags or create new ones on the fly.
 - **Auto-Tagging**: Set a "Default Tag Prefix" (e.g., `book`) in settings. Every time you highlight text, it will automatically append that tag (e.g., `#book ==highlighted text==`).
@@ -28,6 +34,9 @@ The toolbar appears instantly when you select text.
 - **Workflow Tools**:
     - **Quote Button**: Copies the selection to your clipboard as a formatted Markdown blockquote with a backlink (`> text [[Link]]`).
     - **Remove Button**: Cleanly strips highlighting and tags from the selected text.
+
+
+![location_buttons](https://github.com/user-attachments/assets/33e95fd7-f3fa-4bf7-a006-01c226b14662)
 
 ### 📱 Mobile Optimized
 - **Haptic Feedback**: Subtle vibration on success (configurable).

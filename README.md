@@ -13,11 +13,10 @@ Designed for power users who read long-form content in Obsidian, this plugin all
 Select text in Reading View to see the floating toolbar.
 - **Context Aware**: Works perfectly with lists, blockquotes, and indented blocks.
 - **Smart Expansion**: Automatically expands selections to capture whole words or existing markers (`==`, `**`, `*`) to prevent messy formatting.
-- **Auto-Cleaning**: Prevents "stacking" styles. If you bold a text that is already italicized, it cleans the old style first.
+- **Auto-Cleaning**: Prevents "stacking" styles. 
 
 ### 🎨 Customizable Styles & Colors
-Customize how your highlights look in the **Settings**:
-- **Highlight Styles**: Choose between standard `==highlight==`, **Bold**, or *Italic*.
+Customize how your highlights look in the **
 - **Custom Color**: Enable **Color Highlighting** to choose a specific hex color (e.g., Yellow `#FFEE58`). This uses HTML `<mark>` tags to render the color perfectly in Obsidian.
 
 <img width="1644" height="1002" alt="Settings" src="https://github.com/user-attachments/assets/e575b4fe-c31f-4660-9a09-003494d2cfc5" />
@@ -72,13 +71,6 @@ The toolbar appears instantly when you select text.
 2.  Create a folder named `reader-highlighter-tags` inside your `.obsidian/plugins/` directory.
 3.  Move the downloaded files into that folder.
 4.  Reload Obsidian and enable **Reader Highlighter Tags** in **Settings > Community Plugins**.
-
-## 💻 Development
-
-```bash
-npm install
-npm run build
-```
 
 ---
 Built by [DuckTapeKiller](https://github.com/DuckTapeKiller).

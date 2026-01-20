@@ -1,4 +1,3 @@
-readme_content = """
 # Reader Highlighter Tags
 
 <div align="center">
@@ -81,4 +80,4 @@ The toolbar appears instantly when you select text.
 
 ---
 Built by [DuckTapeKiller](https://github.com/DuckTapeKiller).
-"""
+

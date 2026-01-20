@@ -1,5 +1,9 @@
 # Reader Highlighter Tags
 
+
+![Reader Highlighter Tags Art](https://github.com/user-attachments/assets/33058bbe-8b95-46f2-974c-02c59e27820a)
+
+
 <div align="center">
   <video src="https://github.com/user-attachments/assets/dff37003-3d0d-4b25-9348-c9141bfe0029" controls="controls"></video>
 </div>

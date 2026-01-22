@@ -58,7 +58,6 @@ The toolbar appears instantly when you select text.
 * **Fixed Left / Right**: Ideal for tablet or desktop users (Default is **Right**).
 
 ### Styling
-* **Highlight Style**: Defines the markdown syntax applied (`==`, `**`, `*`).
 * **Enable Color Highlighting**: Overrides the style to use a custom background color.
 * **Highlight Color**: The hex code for your custom color.
 

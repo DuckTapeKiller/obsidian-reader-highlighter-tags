@@ -400,7 +400,74 @@ var SelectionLogic = class {
   findCandidatesStripped(text, snippet) {
     const map = [];
     let strippedRaw = "";
-    const tokenRegex = /(\[(?:[^\]]+)\]\([^)]+\))|(\[\[(?:[^\]]+)\]\])|(\*|_|==|~~|<[^>]+>)/g;
+    const isFormattingMarker = (str, pos) => {
+      const char = str[pos];
+      const next1 = str[pos + 1];
+      const next2 = str[pos + 2];
+      if (char === "*" && next1 === "*" && next2 === "*") {
+        return 3;
+      }
+      if (char === "*" && next1 === "*" || char === "~" && next1 === "~" || char === "=" && next1 === "=") {
+        return 2;
+      }
+      if (char === "*" || char === "_") {
+        return 1;
+      }
+      return 0;
+    };
+    const extractVisibleText = (startPos, endPos) => {
+      for (let i = startPos; i < endPos; i++) {
+        const skip = isFormattingMarker(text, i);
+        if (skip > 0) {
+          i += skip - 1;
+          continue;
+        }
+        map.push(i);
+        strippedRaw += text[i];
+      }
+    };
+    const addRawText = (startPos, endPos) => {
+      for (let i = startPos; i < endPos; i++) {
+        map.push(i);
+        strippedRaw += text[i];
+      }
+    };
+    const tokenRegex = new RegExp([
+      // Group 1: Obsidian embed ![[...]]
+      /(!\[\[(?:[^\]]+)\]\])/.source,
+      // Group 2: Image with reference ![alt][ref]
+      /(!\[(?:[^\]]*)\]\[(?:[^\]]*)\])/.source,
+      // Group 3: Image with URL ![alt](url) or ![alt](url "title")
+      /(!\[(?:[^\]]*)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
+      // Group 4: Reference-style link [text][ref]
+      /(\[(?:[^\]]+)\]\[(?:[^\]]*)\])/.source,
+      // Group 5: Markdown link [text](url) or [text](url "title")
+      /(\[(?:[^\]]+)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
+      // Group 6: Wiki link [[...]]
+      /(\[\[(?:[^\]]+)\]\])/.source,
+      // Group 7: Footnote reference [^id]
+      /(\[\^[^\]]+\])/.source,
+      // Group 8: Block math $$...$$
+      /(\$\$[^$]+\$\$)/.source,
+      // Group 9: Inline math $...$  (non-greedy, no spaces around)
+      /(\$(?:[^$\s]|[^$\s][^$]*[^$\s])\$)/.source,
+      // Group 10: Obsidian comment %%...%%
+      /(%%[^%]*%%)/.source,
+      // Group 11: Inline code `...`
+      /(`[^`]+`)/.source,
+      // Group 12: Autolink <https://...> or <email@...>
+      /(<(?:https?:\/\/[^>]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>)/.source,
+      // Group 13: HTML tag <tag> or </tag>
+      /(<\/?[a-zA-Z][^>]*>)/.source,
+      // Group 14: Escaped character \X
+      /(\\[*_\[\](){}#>+\-.!`~=|\\])/.source,
+      // Group 15: Triple formatting ***
+      /(\*\*\*)/.source,
+      // Group 16: Double formatting ** ~~ ==
+      /(\*\*|~~|==)/.source,
+      // Group 17: Single formatting * _
+      /(\*|_)/.source
+    ].join("|"), "g");
     let lastIndex = 0;
     let match;
     while ((match = tokenRegex.exec(text)) !== null) {
@@ -409,32 +476,86 @@ var SelectionLogic = class {
         strippedRaw += text[i];
       }
       const fullMatch = match[0];
+      const matchStart = match.index;
       if (match[1]) {
-        const closingBracket = fullMatch.indexOf("](");
-        if (closingBracket !== -1) {
-          const linkTextStart = match.index + 1;
-          const linkTextEnd = match.index + closingBracket;
-          for (let i = linkTextStart; i < linkTextEnd; i++) {
-            map.push(i);
-            strippedRaw += text[i];
-          }
+        const inner = fullMatch.substring(3, fullMatch.length - 2);
+        const pipeIndex = inner.indexOf("|");
+        if (pipeIndex !== -1) {
+          const visibleStart = matchStart + 3 + pipeIndex + 1;
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
+        } else {
+          const visibleStart = matchStart + 3;
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
         }
       } else if (match[2]) {
+        const closingBracket = fullMatch.indexOf("][");
+        if (closingBracket !== -1) {
+          const altStart = matchStart + 2;
+          const altEnd = matchStart + closingBracket;
+          extractVisibleText(altStart, altEnd);
+        }
+      } else if (match[3]) {
+        const closingBracket = fullMatch.indexOf("](");
+        if (closingBracket !== -1) {
+          const altStart = matchStart + 2;
+          const altEnd = matchStart + closingBracket;
+          extractVisibleText(altStart, altEnd);
+        }
+      } else if (match[4]) {
+        const closingBracket = fullMatch.indexOf("][");
+        if (closingBracket !== -1) {
+          const textStart = matchStart + 1;
+          const textEnd = matchStart + closingBracket;
+          extractVisibleText(textStart, textEnd);
+        }
+      } else if (match[5]) {
+        const closingBracket = fullMatch.indexOf("](");
+        if (closingBracket !== -1) {
+          const textStart = matchStart + 1;
+          const textEnd = matchStart + closingBracket;
+          extractVisibleText(textStart, textEnd);
+        }
+      } else if (match[6]) {
         const inner = fullMatch.substring(2, fullMatch.length - 2);
         const pipeIndex = inner.indexOf("|");
-        let visibleStart, visibleEnd;
         if (pipeIndex !== -1) {
-          visibleStart = match.index + 2 + pipeIndex + 1;
-          visibleEnd = match.index + fullMatch.length - 2;
+          const visibleStart = matchStart + 2 + pipeIndex + 1;
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
         } else {
-          visibleStart = match.index + 2;
-          visibleEnd = match.index + fullMatch.length - 2;
+          const visibleStart = matchStart + 2;
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
         }
-        for (let i = visibleStart; i < visibleEnd; i++) {
-          map.push(i);
-          strippedRaw += text[i];
-        }
-      } else {
+      } else if (match[7]) {
+        const idStart = matchStart + 2;
+        const idEnd = matchStart + fullMatch.length - 1;
+        addRawText(idStart, idEnd);
+      } else if (match[8]) {
+        const mathStart = matchStart + 2;
+        const mathEnd = matchStart + fullMatch.length - 2;
+        addRawText(mathStart, mathEnd);
+      } else if (match[9]) {
+        const mathStart = matchStart + 1;
+        const mathEnd = matchStart + fullMatch.length - 1;
+        addRawText(mathStart, mathEnd);
+      } else if (match[10]) {
+      } else if (match[11]) {
+        const codeStart = matchStart + 1;
+        const codeEnd = matchStart + fullMatch.length - 1;
+        addRawText(codeStart, codeEnd);
+      } else if (match[12]) {
+        const urlStart = matchStart + 1;
+        const urlEnd = matchStart + fullMatch.length - 1;
+        addRawText(urlStart, urlEnd);
+      } else if (match[13]) {
+      } else if (match[14]) {
+        const charPos = matchStart + 1;
+        map.push(charPos);
+        strippedRaw += text[charPos];
+      } else if (match[15] || match[16] || match[17]) {
       }
       lastIndex = tokenRegex.lastIndex;
     }
@@ -500,8 +621,9 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
     this.smartSuggestionEl = null;
   }
   onOpen() {
-    const { contentEl } = this;
+    const { contentEl, modalEl } = this;
     contentEl.addClass("reading-highlighter-tag-modal");
+    modalEl.addClass("reading-highlighter-tag-modal");
     contentEl.createEl("h2", { text: "Add Tags" });
     if (this.plugin.settings.enableSmartTagSuggestions) {
       const smartTags = this.getSuggestedTags();
@@ -529,10 +651,9 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
       cls: "tag-search-input",
       attr: { placeholder: "Search or create tag..." }
     });
+    const doneBtn = inputContainer.createEl("button", { text: "Done", cls: "mod-cta tag-done-btn" });
     setTimeout(() => input.focus(), 50);
     this.suggestionEl = contentEl.createDiv({ cls: "tag-suggestions-list" });
-    const footer = contentEl.createDiv({ cls: "modal-footer" });
-    const doneBtn = footer.createEl("button", { text: "Done", cls: "mod-cta" });
     doneBtn.onclick = () => this.submit();
     const tagCounts = this.app.metadataCache.getTags();
     this.allTags = Object.keys(tagCounts).map((t) => t.substring(1));
@@ -561,13 +682,10 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
    * 3. Frontmatter tags
    */
   getSuggestedTags() {
-    var _a, _b, _c;
+    var _a, _b;
     const suggestions = [];
-    if (((_a = this.plugin.settings.recentTags) == null ? void 0 : _a.length) > 0) {
-      suggestions.push(...this.plugin.settings.recentTags.slice(0, 5));
-    }
     const activeFile = this.app.workspace.getActiveFile();
-    if (((_b = activeFile == null ? void 0 : activeFile.parent) == null ? void 0 : _b.name) && activeFile.parent.name !== "/") {
+    if (((_a = activeFile == null ? void 0 : activeFile.parent) == null ? void 0 : _a.name) && activeFile.parent.name !== "/") {
       const folderTag = activeFile.parent.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-_]/g, "");
       if (folderTag && !suggestions.includes(folderTag)) {
         suggestions.push(folderTag);
@@ -575,7 +693,7 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
     }
     if (activeFile) {
       const cache = this.app.metadataCache.getFileCache(activeFile);
-      if ((_c = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _c.tags) {
+      if ((_b = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _b.tags) {
         const fmTags = Array.isArray(cache.frontmatter.tags) ? cache.frontmatter.tags : [cache.frontmatter.tags];
         fmTags.forEach((tag) => {
           const cleanTag = String(tag).replace(/^#/, "");

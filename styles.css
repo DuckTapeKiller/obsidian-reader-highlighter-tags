@@ -173,12 +173,21 @@
 
 .reading-highlighter-tag-modal .tag-search-input-container {
     margin-bottom: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
 .reading-highlighter-tag-modal .tag-search-input {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     padding: 8px 12px;
     border-radius: var(--tag-radius, 6px);
+}
+
+.reading-highlighter-tag-modal .tag-done-btn {
+    flex-shrink: 0;
+    padding: 8px 16px;
 }
 
 .reading-highlighter-tag-modal .tag-suggestions-list {
@@ -464,6 +473,98 @@
 .is-mobile .reading-highlighter-annotation-modal .modal-content {
     max-height: none !important;
     overflow-y: visible !important;
+}
+
+/* === Mobile: Push tag modal to top when keyboard is open === */
+.is-mobile .modal.reading-highlighter-tag-modal {
+    position: fixed !important;
+    top: 30px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    margin: 0 !important;
+
+    /* Allow modal to grow as needed */
+    height: auto !important;
+    max-height: none !important;
+    width: 94vw !important;
+
+    /* Ensure it floats above everything */
+    z-index: 10000 !important;
+
+    /* Align to top */
+    align-self: flex-start !important;
+
+    /* No animations */
+    transition: none !important;
+    animation: none !important;
+}
+
+/* Compact modal content on mobile - allow overflow */
+.is-mobile .reading-highlighter-tag-modal .modal-content {
+    padding: 12px !important;
+    overflow-y: visible !important;
+    max-height: none !important;
+}
+
+/* Smaller title */
+.is-mobile .reading-highlighter-tag-modal h2 {
+    font-size: 1em !important;
+    margin: 0 0 8px 0 !important;
+}
+
+/* Compact smart suggestions */
+.is-mobile .reading-highlighter-tag-modal .smart-suggestions-container {
+    margin-bottom: 8px !important;
+    padding: 6px 8px !important;
+}
+
+.is-mobile .reading-highlighter-tag-modal .smart-suggestions-chips {
+    margin-top: 4px !important;
+    gap: 4px !important;
+}
+
+.is-mobile .reading-highlighter-tag-modal .smart-suggestion-chip {
+    padding: 3px 8px !important;
+    font-size: 0.8em !important;
+}
+
+/* Compact selected tags container */
+.is-mobile .reading-highlighter-tag-modal .selected-tags-container {
+    margin-bottom: 8px !important;
+    min-height: 28px !important;
+    padding: 6px !important;
+    gap: 4px !important;
+}
+
+.is-mobile .reading-highlighter-tag-modal .tag-chip {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+}
+
+/* Compact search input */
+.is-mobile .reading-highlighter-tag-modal .tag-search-input-container {
+    margin-bottom: 8px !important;
+}
+
+.is-mobile .reading-highlighter-tag-modal .tag-search-input {
+    padding: 6px 10px !important;
+    font-size: 14px !important;
+}
+
+/* Suggestions list - allow it to show with scrolling */
+.is-mobile .reading-highlighter-tag-modal .tag-suggestions-list {
+    max-height: 150px !important;
+    overflow-y: auto !important;
+}
+
+.is-mobile .reading-highlighter-tag-modal .suggestion-item {
+    padding: 8px 10px !important;
+}
+
+/* Compact Done button on mobile */
+.is-mobile .reading-highlighter-tag-modal .tag-done-btn {
+    padding: 6px 12px !important;
+    font-size: 14px !important;
 }
 
 /* === Settings Page Enhancements === */

@@ -17,8 +17,9 @@ export class TagSuggestModal extends Modal {
     }
 
     onOpen() {
-        const { contentEl } = this;
+        const { contentEl, modalEl } = this;
         contentEl.addClass("reading-highlighter-tag-modal");
+        modalEl.addClass("reading-highlighter-tag-modal");
 
         contentEl.createEl("h2", { text: "Add Tags" });
 
@@ -47,23 +48,20 @@ export class TagSuggestModal extends Modal {
         this.selectedContainer = contentEl.createDiv({ cls: "selected-tags-container" });
         this.updateSelectedView();
 
-        // Search Input
+        // Search Input with Done button inline
         const inputContainer = contentEl.createDiv({ cls: "tag-search-input-container" });
         const input = inputContainer.createEl("input", {
             type: "text",
             cls: "tag-search-input",
             attr: { placeholder: "Search or create tag..." }
         });
+        const doneBtn = inputContainer.createEl("button", { text: "Done", cls: "mod-cta tag-done-btn" });
 
         // Focus input
         setTimeout(() => input.focus(), 50);
 
         // Results List
         this.suggestionEl = contentEl.createDiv({ cls: "tag-suggestions-list" });
-
-        // Footer / Done Button
-        const footer = contentEl.createDiv({ cls: "modal-footer" });
-        const doneBtn = footer.createEl("button", { text: "Done", cls: "mod-cta" });
 
         doneBtn.onclick = () => this.submit();
 
@@ -102,12 +100,7 @@ export class TagSuggestModal extends Modal {
     getSuggestedTags() {
         const suggestions = [];
 
-        // 1. Recent tags (MRU)
-        if (this.plugin.settings.recentTags?.length > 0) {
-            suggestions.push(...this.plugin.settings.recentTags.slice(0, 5));
-        }
-
-        // 2. Folder-based suggestion
+        // 1. Folder-based suggestion
         const activeFile = this.app.workspace.getActiveFile();
         if (activeFile?.parent?.name && activeFile.parent.name !== "/") {
             const folderTag = activeFile.parent.name
@@ -119,7 +112,7 @@ export class TagSuggestModal extends Modal {
             }
         }
 
-        // 3. Frontmatter tags
+        // 2. Frontmatter tags
         if (activeFile) {
             const cache = this.app.metadataCache.getFileCache(activeFile);
             if (cache?.frontmatter?.tags) {

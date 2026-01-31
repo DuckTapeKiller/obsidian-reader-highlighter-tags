@@ -7,6 +7,9 @@ var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -21,13 +24,105 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// src/utils/export.js
+var export_exports = {};
+__export(export_exports, {
+  exportHighlightsToMD: () => exportHighlightsToMD,
+  getHighlightsFromContent: () => getHighlightsFromContent
+});
+async function exportHighlightsToMD(app, file) {
+  const raw = await app.vault.read(file);
+  const highlights = [];
+  const markdownPattern = /==(.*?)==/gs;
+  const htmlPattern = /<mark[^>]*>(.*?)<\/mark>/gs;
+  let match;
+  while ((match = markdownPattern.exec(raw)) !== null) {
+    highlights.push({
+      text: match[1].trim(),
+      type: "markdown",
+      position: match.index
+    });
+  }
+  while ((match = htmlPattern.exec(raw)) !== null) {
+    highlights.push({
+      text: match[1].trim(),
+      type: "html",
+      position: match.index
+    });
+  }
+  highlights.sort((a, b) => a.position - b.position);
+  if (highlights.length === 0) {
+    throw new Error("No highlights found in this file.");
+  }
+  const date = window.moment ? window.moment().format("YYYY-MM-DD HH:mm") : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const exportContent = `# Highlights from [[${file.basename}]]
+
+> Exported: ${date}
+> Source: [[${file.path}]]
+> Total highlights: ${highlights.length}
+
+---
+
+${highlights.map((h, i) => `${i + 1}. ${h.text}`).join("\n\n")}
+
+---
+
+*Exported by Reader Highlighter Tags*
+`;
+  let exportPath = `${file.parent.path}/${file.basename} - Highlights.md`;
+  const existingFile = app.vault.getAbstractFileByPath(exportPath);
+  if (existingFile) {
+    const timestamp = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
+    exportPath = `${file.parent.path}/${file.basename} - Highlights ${timestamp}.md`;
+  }
+  await app.vault.create(exportPath, exportContent);
+  return exportPath;
+}
+function getHighlightsFromContent(raw) {
+  const highlights = [];
+  const markdownPattern = /==(.*?)==/gs;
+  const htmlPattern = /<mark[^>]*>(.*?)<\/mark>/gs;
+  let match;
+  while ((match = markdownPattern.exec(raw)) !== null) {
+    const lineStart = raw.lastIndexOf("\n", match.index) + 1;
+    const lineEnd = raw.indexOf("\n", match.index + match[0].length);
+    const context = raw.substring(lineStart, lineEnd === -1 ? void 0 : lineEnd).trim();
+    highlights.push({
+      text: match[1].trim(),
+      type: "markdown",
+      position: match.index,
+      context
+    });
+  }
+  while ((match = htmlPattern.exec(raw)) !== null) {
+    const lineStart = raw.lastIndexOf("\n", match.index) + 1;
+    const lineEnd = raw.indexOf("\n", match.index + match[0].length);
+    const context = raw.substring(lineStart, lineEnd === -1 ? void 0 : lineEnd).trim();
+    const colorMatch = match[0].match(/background:\s*([^;>"]+)/);
+    const color = colorMatch ? colorMatch[1].trim() : null;
+    highlights.push({
+      text: match[1].trim(),
+      type: "html",
+      position: match.index,
+      context,
+      color
+    });
+  }
+  highlights.sort((a, b) => a.position - b.position);
+  return highlights;
+}
+var init_export = __esm({
+  "src/utils/export.js"() {
+  }
+});
+
 // src/main.js
 var main_exports = {};
 __export(main_exports, {
   default: () => ReadingHighlighterPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/ui/FloatingManager.js
 var import_obsidian = require("obsidian");
@@ -39,11 +134,19 @@ var FloatingManager = class {
     this.highlightBtn = null;
     this.tagBtn = null;
     this.removeBtn = null;
+    this.quoteBtn = null;
+    this.annotateBtn = null;
+    this.colorButtons = [];
+    this.paletteContainer = null;
     this._handlers = [];
+    this.longPressTimer = null;
   }
   load() {
     this.createElements();
     this.registerEvents();
+    if (import_obsidian.Platform.isMobile) {
+      this.setupMobileGestures();
+    }
   }
   unload() {
     var _a;
@@ -52,24 +155,61 @@ var FloatingManager = class {
     this._handlers.forEach((cleanup) => cleanup());
     this._handlers = [];
   }
+  refresh() {
+    if (this.containerEl) {
+      this.containerEl.remove();
+      this.containerEl = null;
+    }
+    this.colorButtons = [];
+    this.createElements();
+    this.registerEvents();
+  }
   createElements() {
     if (this.containerEl)
       return;
     this.containerEl = document.createElement("div");
     this.containerEl.addClass("reading-highlighter-float-container");
-    this.highlightBtn = this.createButton("highlighter", "Subrayar selecci\xF3n");
-    this.tagBtn = this.createButton("tag", "Etiquetar selecci\xF3n");
-    this.removeBtn = this.createButton("minus", "Eliminar subrayado");
-    this.removeBtn.addClass("reading-highlighter-remove-btn");
+    this.highlightBtn = this.createButton("highlighter", "Highlight selection");
     this.containerEl.appendChild(this.highlightBtn);
-    this.containerEl.appendChild(this.tagBtn);
-    this.containerEl.appendChild(this.removeBtn);
+    if (this.plugin.settings.enableColorPalette) {
+      this.paletteContainer = document.createElement("div");
+      this.paletteContainer.addClass("reading-highlighter-palette");
+      this.plugin.settings.colorPalette.forEach((item, index) => {
+        const colorBtn = document.createElement("button");
+        colorBtn.addClass("reading-highlighter-color-btn");
+        colorBtn.style.backgroundColor = item.color;
+        colorBtn.setAttribute("aria-label", item.name);
+        colorBtn.setAttribute("data-color-index", index.toString());
+        this.colorButtons.push(colorBtn);
+        this.paletteContainer.appendChild(colorBtn);
+      });
+      this.containerEl.appendChild(this.paletteContainer);
+    }
+    if (this.plugin.settings.showTagButton) {
+      this.tagBtn = this.createButton("tag", "Tag selection");
+      this.containerEl.appendChild(this.tagBtn);
+    }
+    if (this.plugin.settings.showQuoteButton) {
+      this.quoteBtn = this.createButton("quote", "Copy as quote");
+      this.containerEl.appendChild(this.quoteBtn);
+    }
+    if (this.plugin.settings.enableAnnotations && this.plugin.settings.showAnnotationButton) {
+      this.annotateBtn = this.createButton("message-square", "Add annotation");
+      this.containerEl.appendChild(this.annotateBtn);
+    }
+    if (this.plugin.settings.showRemoveButton) {
+      this.removeBtn = this.createButton("eraser", "Remove highlight");
+      this.removeBtn.addClass("reading-highlighter-remove-btn");
+      this.containerEl.appendChild(this.removeBtn);
+    }
     document.body.appendChild(this.containerEl);
   }
   createButton(iconName, label) {
     const btn = document.createElement("button");
     (0, import_obsidian.setIcon)(btn, iconName);
-    btn.setAttribute("aria-label", label);
+    if (this.plugin.settings.showTooltips) {
+      btn.setAttribute("aria-label", label);
+    }
     btn.addClass("reading-highlighter-btn");
     return btn;
   }
@@ -78,24 +218,61 @@ var FloatingManager = class {
       evt.preventDefault();
       evt.stopPropagation();
     };
-    const attachAction = (btn, actionInfo) => {
+    const attachAction = (btn, actionName) => {
+      if (!btn)
+        return;
       const handler = (evt) => {
         preventFocus(evt);
         const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
         if (view && view.getMode() === "preview") {
-          this.plugin[actionInfo](view);
+          this.plugin[actionName](view);
         }
         this.hide();
       };
       btn.addEventListener("mousedown", handler);
       btn.addEventListener("touchstart", handler, { passive: false });
     };
-    if (this.highlightBtn)
-      attachAction(this.highlightBtn, "highlightSelection");
-    if (this.tagBtn)
-      attachAction(this.tagBtn, "tagSelection");
-    if (this.removeBtn)
-      attachAction(this.removeBtn, "removeHighlightSelection");
+    attachAction(this.highlightBtn, "highlightSelection");
+    attachAction(this.tagBtn, "tagSelection");
+    attachAction(this.quoteBtn, "copyAsQuote");
+    attachAction(this.annotateBtn, "annotateSelection");
+    attachAction(this.removeBtn, "removeHighlightSelection");
+    this.colorButtons.forEach((btn, index) => {
+      const handler = (evt) => {
+        preventFocus(evt);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+        if (view && view.getMode() === "preview") {
+          this.plugin.applyColorByIndex(view, index);
+        }
+        this.hide();
+      };
+      btn.addEventListener("mousedown", handler);
+      btn.addEventListener("touchstart", handler, { passive: false });
+    });
+  }
+  setupMobileGestures() {
+    document.addEventListener("touchstart", (e) => {
+      this.longPressTimer = setTimeout(() => {
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+        const sel = window.getSelection();
+        if (view && view.getMode() === "preview" && (sel == null ? void 0 : sel.toString().trim())) {
+          this.plugin.highlightSelection(view);
+          this.hide();
+        }
+      }, 600);
+    }, { passive: true });
+    document.addEventListener("touchmove", () => {
+      if (this.longPressTimer) {
+        clearTimeout(this.longPressTimer);
+        this.longPressTimer = null;
+      }
+    }, { passive: true });
+    document.addEventListener("touchend", () => {
+      if (this.longPressTimer) {
+        clearTimeout(this.longPressTimer);
+        this.longPressTimer = null;
+      }
+    }, { passive: true });
   }
   handleSelection() {
     var _a;
@@ -126,8 +303,8 @@ var FloatingManager = class {
     this.containerEl.removeClass("reading-highlighter-vertical");
     const pos = this.plugin.settings.toolbarPosition || "text";
     if (pos === "text") {
-      const containerHeight = 40;
-      const containerWidth = 140;
+      const containerHeight = 50;
+      const containerWidth = this.plugin.settings.enableColorPalette ? 280 : 180;
       let top = rect.top - containerHeight - 10;
       let left = rect.left + rect.width / 2 - containerWidth / 2;
       if (top < 10)
@@ -320,11 +497,30 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
     this.query = "";
     this.suggestionEl = null;
     this.selectedContainer = null;
+    this.smartSuggestionEl = null;
   }
   onOpen() {
     const { contentEl } = this;
     contentEl.addClass("reading-highlighter-tag-modal");
     contentEl.createEl("h2", { text: "Add Tags" });
+    if (this.plugin.settings.enableSmartTagSuggestions) {
+      const smartTags = this.getSuggestedTags();
+      if (smartTags.length > 0) {
+        this.smartSuggestionEl = contentEl.createDiv({ cls: "smart-suggestions-container" });
+        this.smartSuggestionEl.createEl("span", { text: "Suggestions: ", cls: "smart-suggestions-label" });
+        const chipsContainer = this.smartSuggestionEl.createDiv({ cls: "smart-suggestions-chips" });
+        smartTags.forEach((tag) => {
+          const chip = chipsContainer.createEl("button", {
+            text: `#${tag}`,
+            cls: "smart-suggestion-chip"
+          });
+          chip.onclick = () => {
+            this.toggleTag(tag);
+            chip.addClass("selected");
+          };
+        });
+      }
+    }
     this.selectedContainer = contentEl.createDiv({ cls: "selected-tags-container" });
     this.updateSelectedView();
     const inputContainer = contentEl.createDiv({ cls: "tag-search-input-container" });
@@ -352,10 +548,44 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
           input.value = "";
           this.renderSuggestions("");
         }
-      } else if (e.key === "Backspace" && !this.query) {
+      } else if (e.key === "Escape") {
+        this.close();
       }
     });
     this.renderSuggestions("");
+  }
+  /**
+   * Get smart tag suggestions based on:
+   * 1. Recent tags (MRU)
+   * 2. Current folder name
+   * 3. Frontmatter tags
+   */
+  getSuggestedTags() {
+    var _a, _b, _c;
+    const suggestions = [];
+    if (((_a = this.plugin.settings.recentTags) == null ? void 0 : _a.length) > 0) {
+      suggestions.push(...this.plugin.settings.recentTags.slice(0, 5));
+    }
+    const activeFile = this.app.workspace.getActiveFile();
+    if (((_b = activeFile == null ? void 0 : activeFile.parent) == null ? void 0 : _b.name) && activeFile.parent.name !== "/") {
+      const folderTag = activeFile.parent.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-_]/g, "");
+      if (folderTag && !suggestions.includes(folderTag)) {
+        suggestions.push(folderTag);
+      }
+    }
+    if (activeFile) {
+      const cache = this.app.metadataCache.getFileCache(activeFile);
+      if ((_c = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _c.tags) {
+        const fmTags = Array.isArray(cache.frontmatter.tags) ? cache.frontmatter.tags : [cache.frontmatter.tags];
+        fmTags.forEach((tag) => {
+          const cleanTag = String(tag).replace(/^#/, "");
+          if (cleanTag && !suggestions.includes(cleanTag)) {
+            suggestions.push(cleanTag);
+          }
+        });
+      }
+    }
+    return [...new Set(suggestions)].slice(0, 8);
   }
   renderSuggestions(query) {
     this.suggestionEl.empty();
@@ -373,7 +603,7 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
   }
   renderItem(tag, isNew) {
     const el = this.suggestionEl.createDiv({ cls: "suggestion-item" });
-    el.createSpan({ text: isNew ? `#${tag}` : tag });
+    el.createSpan({ text: isNew ? `#${tag}` : `#${tag}` });
     if (isNew) {
       el.createSpan({ text: " (Create new)", cls: "suggestion-note" });
     }
@@ -396,6 +626,13 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
   }
   updateSelectedView() {
     this.selectedContainer.empty();
+    if (this.selectedTags.size === 0) {
+      this.selectedContainer.createSpan({
+        text: "No tags selected",
+        cls: "no-tags-hint"
+      });
+      return;
+    }
     this.selectedTags.forEach((tag) => {
       const chip = this.selectedContainer.createDiv({ cls: "tag-chip" });
       chip.createSpan({ text: `#${tag}` });
@@ -414,6 +651,183 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
   onClose() {
     const { contentEl } = this;
     contentEl.empty();
+  }
+};
+
+// src/modals/AnnotationModal.js
+var import_obsidian3 = require("obsidian");
+var AnnotationModal = class extends import_obsidian3.Modal {
+  constructor(app, onSubmit) {
+    super(app);
+    this.onSubmit = onSubmit;
+    this.comment = "";
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("reading-highlighter-annotation-modal");
+    contentEl.createEl("h2", { text: "Add Annotation" });
+    contentEl.createEl("p", {
+      text: "Your comment will be added as a footnote at the bottom of the document.",
+      cls: "annotation-description"
+    });
+    const textArea = new import_obsidian3.TextAreaComponent(contentEl);
+    textArea.inputEl.addClass("annotation-textarea");
+    textArea.setPlaceholder("Enter your annotation...");
+    textArea.onChange((value) => {
+      this.comment = value;
+    });
+    setTimeout(() => textArea.inputEl.focus(), 50);
+    textArea.inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        this.submit();
+      }
+    });
+    const footer = contentEl.createDiv({ cls: "modal-footer" });
+    const cancelBtn = footer.createEl("button", { text: "Cancel" });
+    cancelBtn.onclick = () => this.close();
+    const submitBtn = footer.createEl("button", { text: "Add Annotation", cls: "mod-cta" });
+    submitBtn.onclick = () => this.submit();
+  }
+  submit() {
+    if (this.comment.trim()) {
+      this.onSubmit(this.comment.trim());
+    }
+    this.close();
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+};
+
+// src/views/HighlightNavigator.js
+var import_obsidian4 = require("obsidian");
+init_export();
+var HIGHLIGHT_NAVIGATOR_VIEW = "highlight-navigator";
+var HighlightNavigatorView = class extends import_obsidian4.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.highlights = [];
+    this.currentFile = null;
+  }
+  getViewType() {
+    return HIGHLIGHT_NAVIGATOR_VIEW;
+  }
+  getDisplayText() {
+    return "Highlights";
+  }
+  getIcon() {
+    return "highlighter";
+  }
+  async onOpen() {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass("highlight-navigator-container");
+    const header = container.createDiv({ cls: "highlight-navigator-header" });
+    header.createEl("h4", { text: "Highlights" });
+    const refreshBtn = header.createEl("button", { cls: "clickable-icon" });
+    refreshBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`;
+    refreshBtn.setAttribute("aria-label", "Refresh");
+    refreshBtn.onclick = () => this.refresh();
+    this.contentEl = container.createDiv({ cls: "highlight-navigator-content" });
+    const footer = container.createDiv({ cls: "highlight-navigator-footer" });
+    const exportBtn = footer.createEl("button", { text: "Export to MD", cls: "mod-cta" });
+    exportBtn.onclick = () => this.exportHighlights();
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => {
+        this.refresh();
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (this.currentFile && file.path === this.currentFile.path) {
+          this.refresh();
+        }
+      })
+    );
+    this.refresh();
+  }
+  async refresh() {
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+    if (!view || !view.file) {
+      this.showEmpty("Open a note to see its highlights.");
+      return;
+    }
+    this.currentFile = view.file;
+    try {
+      const raw = await this.app.vault.read(view.file);
+      this.highlights = getHighlightsFromContent(raw);
+      this.renderHighlights();
+    } catch (err) {
+      this.showEmpty("Error loading highlights.");
+      console.error(err);
+    }
+  }
+  showEmpty(message) {
+    this.contentEl.empty();
+    this.contentEl.createDiv({ cls: "highlight-navigator-empty", text: message });
+  }
+  renderHighlights() {
+    this.contentEl.empty();
+    if (this.highlights.length === 0) {
+      this.showEmpty("No highlights in this file.");
+      return;
+    }
+    const stats = this.contentEl.createDiv({ cls: "highlight-navigator-stats" });
+    stats.createSpan({ text: `${this.highlights.length} highlight${this.highlights.length !== 1 ? "s" : ""}` });
+    const list = this.contentEl.createDiv({ cls: "highlight-navigator-list" });
+    this.highlights.forEach((highlight, index) => {
+      const item = list.createDiv({ cls: "highlight-navigator-item" });
+      if (highlight.color) {
+        const colorDot = item.createSpan({ cls: "highlight-color-dot" });
+        colorDot.style.backgroundColor = highlight.color;
+      } else {
+        const colorDot = item.createSpan({ cls: "highlight-color-dot highlight-default" });
+      }
+      const textPreview = highlight.text.length > 80 ? highlight.text.substring(0, 80) + "..." : highlight.text;
+      const textEl = item.createSpan({ cls: "highlight-text", text: textPreview });
+      item.createSpan({ cls: "highlight-number", text: `${index + 1}` });
+      item.onclick = () => this.jumpToHighlight(highlight);
+    });
+  }
+  async jumpToHighlight(highlight) {
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+    if (!view)
+      return;
+    const previewEl = view.containerEl.querySelector(".markdown-reading-view") || view.containerEl.querySelector(".markdown-preview-view");
+    if (!previewEl)
+      return;
+    const walker = document.createTreeWalker(previewEl, NodeFilter.SHOW_TEXT);
+    let node;
+    while (node = walker.nextNode()) {
+      if (node.textContent.includes(highlight.text.substring(0, 20))) {
+        const parent = node.parentElement;
+        if (parent) {
+          parent.scrollIntoView({ behavior: "smooth", block: "center" });
+          parent.addClass("highlight-flash");
+          setTimeout(() => parent.removeClass("highlight-flash"), 1e3);
+          break;
+        }
+      }
+    }
+  }
+  async exportHighlights() {
+    if (!this.currentFile)
+      return;
+    try {
+      const { exportHighlightsToMD: exportHighlightsToMD2 } = await Promise.resolve().then(() => (init_export(), export_exports));
+      const exportPath = await exportHighlightsToMD2(this.app, this.currentFile);
+      const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
+      if (exportFile) {
+        await this.app.workspace.getLeaf().openFile(exportFile);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  async onClose() {
   }
 };
 
@@ -443,27 +857,92 @@ function setFallbackScroll(view, { y }) {
 }
 
 // src/main.js
+init_export();
 var DEFAULT_SETTINGS = {
   toolbarPosition: "right",
-  // text, top, bottom, left, right
-  // highlightStyle removed
   enableColorHighlighting: false,
   highlightColor: "",
-  // Default: None (Theme decides)
   defaultTagPrefix: "",
   enableHaptics: true,
   showTagButton: true,
   showRemoveButton: true,
-  showQuoteButton: true
-  // New
-  // showColorButtons removed
+  showQuoteButton: true,
+  // NEW: Color Palette (optional, disabled by default = use == highlight)
+  enableColorPalette: false,
+  colorPalette: [
+    { name: "Yellow", color: "#FFEE58", tag: "" },
+    { name: "Blue", color: "#64B5F6", tag: "" },
+    { name: "Green", color: "#81C784", tag: "" },
+    { name: "Red", color: "#EF5350", tag: "" },
+    { name: "Purple", color: "#BA68C8", tag: "" }
+  ],
+  // NEW: Highlight Styles (presets with color + tag)
+  highlightStyles: [
+    { name: "Important", color: "#FFEE58", tag: "important" },
+    { name: "Question", color: "#64B5F6", tag: "question" },
+    { name: "Definition", color: "#81C784", tag: "definition" }
+  ],
+  // NEW: Quote Template
+  quoteTemplate: "> {{text}}\n>\n> \u2014 [[{{file}}]]",
+  // NEW: Annotations
+  enableAnnotations: true,
+  showAnnotationButton: true,
+  // NEW: Reading Progress
+  enableReadingProgress: true,
+  readingPositions: {},
+  // NEW: Smart Tags
+  enableSmartTagSuggestions: true,
+  recentTags: [],
+  maxRecentTags: 10,
+  // NEW: Navigator
+  showNavigatorButton: true,
+  // NEW: Tooltips (disabled by default)
+  showTooltips: false
 };
-var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
+var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   async onload() {
     await this.loadSettings();
     this.floatingManager = new FloatingManager(this);
     this.logic = new SelectionLogic(this.app);
+    this.lastModification = null;
+    this.lastScrollPosition = null;
+    this.registerView(
+      HIGHLIGHT_NAVIGATOR_VIEW,
+      (leaf) => new HighlightNavigatorView(leaf, this)
+    );
     this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
+    this.registerCommands();
+    this.registerDomEvent(document, "selectionchange", () => {
+      this.floatingManager.handleSelection();
+    });
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => {
+        this.floatingManager.handleSelection();
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (this.settings.enableReadingProgress) {
+          this.saveReadingProgress();
+        }
+      })
+    );
+    if (import_obsidian5.Platform.isMobile) {
+      const btn = this.addRibbonIcon("highlighter", "Highlight Selection", () => {
+        const view = this.getActiveReadingView();
+        if (view)
+          this.highlightSelection(view);
+        else
+          new import_obsidian5.Notice("Open a note in Reading View first.");
+      });
+      this.register(() => btn.remove());
+    }
+    this.addRibbonIcon("list", "Highlight Navigator", () => {
+      this.activateNavigatorView();
+    });
+    this.floatingManager.load();
+  }
+  registerCommands() {
     this.addCommand({
       id: "highlight-selection-reading",
       name: "Highlight selection (Reading View)",
@@ -477,28 +956,132 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
         return true;
       }
     });
-    this.registerDomEvent(document, "selectionchange", () => {
-      this.floatingManager.handleSelection();
-    });
-    this.registerEvent(
-      this.app.workspace.on("active-leaf-change", () => {
-        this.floatingManager.handleSelection();
-      })
-    );
-    if (import_obsidian3.Platform.isMobile) {
-      const btn = this.addRibbonIcon("highlighter", "Highlight Selection", () => {
+    this.addCommand({
+      id: "tag-selection",
+      name: "Tag selection (Reading View)",
+      checkCallback: (checking) => {
         const view = this.getActiveReadingView();
-        if (view)
-          this.highlightSelection(view);
-        else
-          new import_obsidian3.Notice("Open a note in Reading View first.");
+        if (!view)
+          return false;
+        if (checking)
+          return true;
+        this.tagSelection(view);
+        return true;
+      }
+    });
+    this.addCommand({
+      id: "annotate-selection",
+      name: "Add annotation to selection (Reading View)",
+      checkCallback: (checking) => {
+        const view = this.getActiveReadingView();
+        if (!view)
+          return false;
+        if (checking)
+          return true;
+        this.annotateSelection(view);
+        return true;
+      }
+    });
+    this.addCommand({
+      id: "copy-as-quote",
+      name: "Copy selection as quote (Reading View)",
+      checkCallback: (checking) => {
+        const view = this.getActiveReadingView();
+        if (!view)
+          return false;
+        if (checking)
+          return true;
+        this.copyAsQuote(view);
+        return true;
+      }
+    });
+    this.addCommand({
+      id: "remove-highlight",
+      name: "Remove highlight from selection (Reading View)",
+      checkCallback: (checking) => {
+        const view = this.getActiveReadingView();
+        if (!view)
+          return false;
+        if (checking)
+          return true;
+        this.removeHighlightSelection(view);
+        return true;
+      }
+    });
+    this.addCommand({
+      id: "undo-last-highlight",
+      name: "Undo last highlight",
+      callback: () => {
+        this.undoLastHighlight();
+      }
+    });
+    this.addCommand({
+      id: "open-highlight-navigator",
+      name: "Open highlight navigator",
+      callback: () => {
+        this.activateNavigatorView();
+      }
+    });
+    this.addCommand({
+      id: "export-highlights",
+      name: "Export highlights to new note",
+      checkCallback: (checking) => {
+        const view = this.getActiveReadingView();
+        if (!view)
+          return false;
+        if (checking)
+          return true;
+        this.exportHighlights(view);
+        return true;
+      }
+    });
+    this.addCommand({
+      id: "remove-all-highlights",
+      name: "Remove all highlights from note",
+      checkCallback: (checking) => {
+        const view = this.getActiveReadingView();
+        if (!view)
+          return false;
+        if (checking)
+          return true;
+        this.removeAllHighlights(view);
+        return true;
+      }
+    });
+    this.addCommand({
+      id: "resume-reading",
+      name: "Resume reading (jump to last position)",
+      checkCallback: (checking) => {
+        const view = this.getActiveReadingView();
+        if (!view)
+          return false;
+        if (checking)
+          return true;
+        this.resumeReading(view);
+        return true;
+      }
+    });
+    for (let i = 0; i < 5; i++) {
+      this.addCommand({
+        id: `apply-color-${i + 1}`,
+        name: `Apply highlight color ${i + 1}`,
+        checkCallback: (checking) => {
+          if (!this.settings.enableColorPalette)
+            return false;
+          const view = this.getActiveReadingView();
+          if (!view)
+            return false;
+          if (checking)
+            return true;
+          this.applyColorByIndex(view, i);
+          return true;
+        }
       });
-      this.register(() => btn.remove());
     }
-    this.floatingManager.load();
   }
   onunload() {
     this.floatingManager.unload();
+    this.app.workspace.detachLeavesOfType(HIGHLIGHT_NAVIGATOR_VIEW);
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -553,21 +1136,47 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
     }
     return foundIndex;
   }
+  // Save state for undo
+  async saveUndoState(file) {
+    this.lastModification = {
+      file,
+      original: await this.app.vault.read(file)
+    };
+  }
+  // Undo last highlight
+  async undoLastHighlight() {
+    if (!this.lastModification) {
+      new import_obsidian5.Notice("Nothing to undo.");
+      return;
+    }
+    try {
+      await this.app.vault.modify(
+        this.lastModification.file,
+        this.lastModification.original
+      );
+      new import_obsidian5.Notice("Undone last highlight.");
+      this.lastModification = null;
+    } catch (err) {
+      new import_obsidian5.Notice("Failed to undo.");
+      console.error(err);
+    }
+  }
   async highlightSelection(view) {
-    var _a;
+    var _a, _b;
     const sel = window.getSelection();
     const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
     if (!snippet.trim()) {
-      new import_obsidian3.Notice("No text selected.");
+      new import_obsidian5.Notice("No text selected.");
       return;
     }
     const scrollPos = getScroll(view);
+    await this.saveUndoState(view.file);
     const contextEl = this.getSelectionContext();
     const contextText = contextEl ? contextEl.innerText : null;
     const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
     const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
     if (!result) {
-      new import_obsidian3.Notice("Could not locate selection in file.");
+      new import_obsidian5.Notice("Could not locate selection in file.");
       return;
     }
     let mode = "highlight";
@@ -579,13 +1188,65 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
     await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, mode, payload);
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
+    if (this.settings.enableHaptics && import_obsidian5.Platform.isMobile) {
+      (_b = navigator.vibrate) == null ? void 0 : _b.call(navigator, 10);
+    }
+    new import_obsidian5.Notice("Highlighted!");
+  }
+  // Apply color by palette index
+  async applyColorByIndex(view, index) {
+    if (index < 0 || index >= this.settings.colorPalette.length)
+      return;
+    const palette = this.settings.colorPalette[index];
+    await this.applyColorHighlight(view, palette.color, palette.tag);
   }
   async tagSelection(view) {
     var _a;
     const sel = window.getSelection();
     const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
     if (!snippet.trim()) {
-      new import_obsidian3.Notice("No text selected.");
+      new import_obsidian5.Notice("No text selected.");
+      return;
+    }
+    const scrollPos = getScroll(view);
+    await this.saveUndoState(view.file);
+    const contextEl = this.getSelectionContext();
+    const contextText = contextEl ? contextEl.innerText : null;
+    const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
+    const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
+    if (!result) {
+      new import_obsidian5.Notice("Could not locate selection in file.");
+      return;
+    }
+    new TagSuggestModal(this, async (tag) => {
+      var _a2;
+      if (tag && this.settings.enableSmartTagSuggestions) {
+        this.addRecentTag(tag);
+      }
+      await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "tag", tag);
+      this.restoreScroll(view, scrollPos);
+      (_a2 = window.getSelection()) == null ? void 0 : _a2.removeAllRanges();
+    }).open();
+  }
+  // Add to recent tags
+  addRecentTag(tag) {
+    const cleanTag = tag.replace(/^#/, "").trim();
+    if (!cleanTag)
+      return;
+    this.settings.recentTags = this.settings.recentTags.filter((t) => t !== cleanTag);
+    this.settings.recentTags.unshift(cleanTag);
+    if (this.settings.recentTags.length > this.settings.maxRecentTags) {
+      this.settings.recentTags = this.settings.recentTags.slice(0, this.settings.maxRecentTags);
+    }
+    this.saveSettings();
+  }
+  // Annotate selection with footnote
+  async annotateSelection(view) {
+    var _a;
+    const sel = window.getSelection();
+    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    if (!snippet.trim()) {
+      new import_obsidian5.Notice("No text selected.");
       return;
     }
     const scrollPos = getScroll(view);
@@ -594,74 +1255,157 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
     const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
     const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
     if (!result) {
-      new import_obsidian3.Notice("Could not locate selection in file.");
+      new import_obsidian5.Notice("Could not locate selection in file.");
       return;
     }
-    new TagSuggestModal(this, async (tag) => {
+    new AnnotationModal(this.app, async (comment) => {
       var _a2;
-      await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "tag", tag);
+      if (!comment.trim())
+        return;
+      await this.saveUndoState(view.file);
+      await this.applyAnnotation(view.file, result.raw, result.start, result.end, comment);
       this.restoreScroll(view, scrollPos);
       (_a2 = window.getSelection()) == null ? void 0 : _a2.removeAllRanges();
+      new import_obsidian5.Notice("Annotation added!");
     }).open();
+  }
+  // Apply annotation as footnote
+  async applyAnnotation(file, raw, start, end, comment) {
+    const footnotePattern = /\[\^(\d+)\]/g;
+    let maxNumber = 0;
+    let match;
+    while ((match = footnotePattern.exec(raw)) !== null) {
+      const num = parseInt(match[1]);
+      if (num > maxNumber)
+        maxNumber = num;
+    }
+    const footnoteNum = maxNumber + 1;
+    const beforeSelection = raw.substring(0, end);
+    const afterSelection = raw.substring(end);
+    const footnoteRef = `[^${footnoteNum}]`;
+    const footnoteDef = `
+
+[^${footnoteNum}]: ${comment}`;
+    let newContent = beforeSelection + footnoteRef + afterSelection;
+    newContent = newContent.trimEnd() + footnoteDef + "\n";
+    await this.app.vault.modify(file, newContent);
   }
   async removeHighlightSelection(view) {
     var _a;
     const sel = window.getSelection();
     const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
     if (!snippet.trim()) {
-      new import_obsidian3.Notice("Select highlighted text to remove.");
+      new import_obsidian5.Notice("Select highlighted text to remove.");
       return;
     }
     const scrollPos = getScroll(view);
+    await this.saveUndoState(view.file);
     const contextEl = this.getSelectionContext();
     const contextText = contextEl ? contextEl.innerText : null;
     const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
     const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
     if (!result) {
-      new import_obsidian3.Notice("Could not locate selection in file.");
+      new import_obsidian5.Notice("Could not locate selection in file.");
       return;
     }
     await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "remove");
-    new import_obsidian3.Notice("Highlighting removed.");
+    new import_obsidian5.Notice("Highlighting removed.");
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
+  }
+  // Remove all highlights from file
+  async removeAllHighlights(view) {
+    await this.saveUndoState(view.file);
+    let raw = await this.app.vault.read(view.file);
+    raw = raw.replace(/==(.*?)==/g, "$1");
+    raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/g, "$1");
+    await this.app.vault.modify(view.file, raw);
+    new import_obsidian5.Notice("All highlights removed.");
+  }
+  // Export highlights to new MD file
+  async exportHighlights(view) {
+    try {
+      const exportPath = await exportHighlightsToMD(this.app, view.file);
+      new import_obsidian5.Notice(`Highlights exported to ${exportPath}`);
+      const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
+      if (exportFile) {
+        await this.app.workspace.getLeaf().openFile(exportFile);
+      }
+    } catch (err) {
+      new import_obsidian5.Notice("Failed to export highlights.");
+      console.error(err);
+    }
   }
   async copyAsQuote(view) {
     var _a;
     const sel = window.getSelection();
     const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
     if (!snippet.trim()) {
-      new import_obsidian3.Notice("No text selected.");
+      new import_obsidian5.Notice("No text selected.");
       return;
     }
-    const quote = snippet.split("\n").map((l) => `> ${l}`).join("\n");
-    const link = `
-
-[[${view.file.basename}]]`;
-    await navigator.clipboard.writeText(quote + link);
-    new import_obsidian3.Notice("Copied as quote!");
+    const quotedText = snippet.split("\n").map((l) => `> ${l}`).join("\n");
+    let quote = this.settings.quoteTemplate.replace("{{text}}", quotedText).replace("{{file}}", view.file.basename).replace("{{path}}", view.file.path).replace("{{date}}", window.moment ? window.moment().format("YYYY-MM-DD") : (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+    await navigator.clipboard.writeText(quote);
+    new import_obsidian5.Notice("Copied as quote!");
     sel == null ? void 0 : sel.removeAllRanges();
   }
-  async applyColorHighlight(view, color) {
+  async applyColorHighlight(view, color, autoTag = "") {
     var _a;
     const sel = window.getSelection();
     const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
     if (!snippet.trim())
       return;
     const scrollPos = getScroll(view);
+    await this.saveUndoState(view.file);
     const contextEl = this.getSelectionContext();
     const contextText = contextEl ? contextEl.innerText : null;
     const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
     const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
     if (!result) {
-      new import_obsidian3.Notice("Could not locate selection.");
+      new import_obsidian5.Notice("Could not locate selection.");
       return;
     }
-    await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "color", color);
+    await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "color", color, autoTag);
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
+    new import_obsidian5.Notice("Highlighted!");
   }
-  async applyMarkdownModification(file, raw, start, end, mode, payload = "") {
+  // Reading progress
+  saveReadingProgress() {
+    const view = this.getActiveReadingView();
+    if (!view || !view.file)
+      return;
+    const pos = getScroll(view);
+    if (pos && pos.y > 0) {
+      this.settings.readingPositions[view.file.path] = pos.y;
+      this.saveSettings();
+    }
+  }
+  async resumeReading(view) {
+    const pos = this.settings.readingPositions[view.file.path];
+    if (pos) {
+      applyScroll(view, { y: pos });
+      new import_obsidian5.Notice("Resumed reading position.");
+    } else {
+      new import_obsidian5.Notice("No saved position for this file.");
+    }
+  }
+  // Activate navigator view
+  async activateNavigatorView() {
+    const existing = this.app.workspace.getLeavesOfType(HIGHLIGHT_NAVIGATOR_VIEW);
+    if (existing.length) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getRightLeaf(false);
+    await leaf.setViewState({
+      type: HIGHLIGHT_NAVIGATOR_VIEW,
+      active: true
+    });
+    this.app.workspace.revealLeaf(leaf);
+  }
+  async applyMarkdownModification(file, raw, start, end, mode, payload = "", autoTag = "") {
     let expandedStart = start;
     let expandedEnd = end;
     let expanded = true;
@@ -693,11 +1437,15 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
         fullTag = `#${cleanPayload}`;
       }
     } else if ((mode === "highlight" || mode === "color") && this.settings.defaultTagPrefix) {
-      const autoTag = this.settings.defaultTagPrefix.trim();
-      if (autoTag) {
-        const cleanTag = autoTag.startsWith("#") ? autoTag.substring(1) : autoTag;
+      const autoTagSetting = this.settings.defaultTagPrefix.trim();
+      if (autoTagSetting) {
+        const cleanTag = autoTagSetting.startsWith("#") ? autoTagSetting.substring(1) : autoTagSetting;
         fullTag = `#${cleanTag}`;
       }
+    }
+    if (autoTag) {
+      const cleanAutoTag = autoTag.startsWith("#") ? autoTag : `#${autoTag}`;
+      fullTag = fullTag ? `${fullTag} ${cleanAutoTag}` : cleanAutoTag;
     }
     const processedParagraphs = paragraphs.map((paragraph) => {
       if (!paragraph.trim())
@@ -753,7 +1501,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian3.Plugin {
     });
   }
 };
-var ReadingHighlighterSettingTab = class extends import_obsidian3.PluginSettingTab {
+var ReadingHighlighterSettingTab = class extends import_obsidian5.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -762,43 +1510,93 @@ var ReadingHighlighterSettingTab = class extends import_obsidian3.PluginSettingT
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Reader Highlighter Tags Settings" });
-    new import_obsidian3.Setting(containerEl).setName("Toolbar Position").setDesc("Choose where the floating toolbar should appear.").addDropdown((dropdown) => dropdown.addOption("text", "Next to text").addOption("top", "Fixed at Top Center").addOption("bottom", "Fixed at Bottom Center").addOption("left", "Fixed Left Side").addOption("right", "Fixed Right Side (Default)").setValue(this.plugin.settings.toolbarPosition).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Toolbar Position").setDesc("Choose where the floating toolbar should appear.").addDropdown((dropdown) => dropdown.addOption("text", "Next to text").addOption("top", "Fixed at Top Center").addOption("bottom", "Fixed at Bottom Center").addOption("left", "Fixed Left Side").addOption("right", "Fixed Right Side (Default)").setValue(this.plugin.settings.toolbarPosition).onChange(async (value) => {
       this.plugin.settings.toolbarPosition = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "Visuals & Workflow" });
-    new import_obsidian3.Setting(containerEl).setName("Enable Color Highlighting").setDesc("Use HTML <mark> tags with specific colors. Overrides 'Highlight Style'.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
+    containerEl.createEl("h3", { text: "Highlighting" });
+    new import_obsidian5.Setting(containerEl).setName("Enable Color Highlighting").setDesc("Use HTML <mark> tags with specific colors instead of == syntax.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
       this.plugin.settings.enableColorHighlighting = value;
       await this.plugin.saveSettings();
       this.display();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Highlight Color").setDesc("Hex code for the highlight color (e.g. #FFEE58). Active when 'Enable Color Highlighting' is ON.").addColorPicker((color) => color.setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
-      this.plugin.settings.highlightColor = value;
+    if (this.plugin.settings.enableColorHighlighting) {
+      new import_obsidian5.Setting(containerEl).setName("Highlight Color").setDesc("Hex code for the default highlight color.").addColorPicker((color) => color.setValue(this.plugin.settings.highlightColor || "#FFEE58").onChange(async (value) => {
+        this.plugin.settings.highlightColor = value;
+        await this.plugin.saveSettings();
+      }));
+    }
+    new import_obsidian5.Setting(containerEl).setName("Enable Color Palette").setDesc("Show a palette of 5 colors in the toolbar for quick selection.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
+      this.plugin.settings.enableColorPalette = value;
       await this.plugin.saveSettings();
-    })).addText((text) => text.setPlaceholder("#FFEE58").setValue(this.plugin.settings.highlightColor).onChange(async (value) => {
-      this.plugin.settings.highlightColor = value;
-      await this.plugin.saveSettings();
+      this.display();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Default Tag Prefix").setDesc("Automatically nest tags (e.g., 'book'). Leave empty for no prefix. No need for slashes.").addText((text) => text.setPlaceholder("book").setValue(this.plugin.settings.defaultTagPrefix).onChange(async (value) => {
+    if (this.plugin.settings.enableColorPalette) {
+      containerEl.createEl("h4", { text: "Color Palette" });
+      this.plugin.settings.colorPalette.forEach((item, index) => {
+        new import_obsidian5.Setting(containerEl).setName(`Color ${index + 1}: ${item.name}`).addColorPicker((color) => color.setValue(item.color).onChange(async (value) => {
+          this.plugin.settings.colorPalette[index].color = value;
+          await this.plugin.saveSettings();
+        })).addText((text) => text.setPlaceholder("Auto-tag (optional)").setValue(item.tag).onChange(async (value) => {
+          this.plugin.settings.colorPalette[index].tag = value;
+          await this.plugin.saveSettings();
+        }));
+      });
+    }
+    containerEl.createEl("h3", { text: "Tags" });
+    new import_obsidian5.Setting(containerEl).setName("Default Tag Prefix").setDesc("Automatically add this tag to every highlight (e.g., 'book').").addText((text) => text.setPlaceholder("book").setValue(this.plugin.settings.defaultTagPrefix).onChange(async (value) => {
       this.plugin.settings.defaultTagPrefix = value;
       await this.plugin.saveSettings();
     }));
+    new import_obsidian5.Setting(containerEl).setName("Smart Tag Suggestions").setDesc("Suggest tags based on recent usage, folder, and frontmatter.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSmartTagSuggestions).onChange(async (value) => {
+      this.plugin.settings.enableSmartTagSuggestions = value;
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "Quote Template" });
+    new import_obsidian5.Setting(containerEl).setName("Quote Format").setDesc("Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}").addTextArea((text) => text.setValue(this.plugin.settings.quoteTemplate).onChange(async (value) => {
+      this.plugin.settings.quoteTemplate = value;
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "Annotations" });
+    new import_obsidian5.Setting(containerEl).setName("Enable Annotations").setDesc("Add comments to selections as footnotes.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAnnotations).onChange(async (value) => {
+      this.plugin.settings.enableAnnotations = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Show Annotation Button").setDesc("Show the annotation button in the toolbar.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showAnnotationButton).onChange(async (value) => {
+      this.plugin.settings.showAnnotationButton = value;
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "Reading Progress" });
+    new import_obsidian5.Setting(containerEl).setName("Track Reading Progress").setDesc("Remember scroll position when leaving a file.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableReadingProgress).onChange(async (value) => {
+      this.plugin.settings.enableReadingProgress = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Clear Reading Positions").setDesc(`Currently tracking ${Object.keys(this.plugin.settings.readingPositions).length} file(s).`).addButton((button) => button.setButtonText("Clear All").onClick(async () => {
+      this.plugin.settings.readingPositions = {};
+      await this.plugin.saveSettings();
+      new import_obsidian5.Notice("Reading positions cleared.");
+      this.display();
+    }));
     containerEl.createEl("h3", { text: "Toolbar Buttons" });
-    new import_obsidian3.Setting(containerEl).setName("Show Tag Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Show Tag Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
       this.plugin.settings.showTagButton = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Show Quote Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showQuoteButton).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Show Quote Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showQuoteButton).onChange(async (value) => {
       this.plugin.settings.showQuoteButton = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Show Remove Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showRemoveButton).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Show Remove Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showRemoveButton).onChange(async (value) => {
       this.plugin.settings.showRemoveButton = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Mobile & UX" });
-    new import_obsidian3.Setting(containerEl).setName("Haptic Feedback").setDesc("Vibrate slightly on success (Mobile only).").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHaptics).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Haptic Feedback").setDesc("Vibrate slightly on success (Mobile only).").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHaptics).onChange(async (value) => {
       this.plugin.settings.enableHaptics = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Show Button Tooltips").setDesc("Show tooltips when hovering over toolbar buttons.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTooltips).onChange(async (value) => {
+      this.plugin.settings.showTooltips = value;
       await this.plugin.saveSettings();
     }));
   }

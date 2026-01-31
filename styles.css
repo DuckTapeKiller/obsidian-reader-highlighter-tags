@@ -1,16 +1,27 @@
-/* Existing Styles */
+/* ========================================
+   Reader Highlighter Tags - Styles
+   ======================================== */
+
+/* === Floating Toolbar === */
 .reading-highlighter-float-container {
     position: fixed;
     z-index: 9999;
     display: none;
     gap: 8px;
     flex-direction: row;
+    align-items: center;
+    /* No background - individual glass buttons */
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
 }
 
 .reading-highlighter-vertical {
     flex-direction: column;
 }
 
+/* Glass effect buttons - individual circles */
 .reading-highlighter-btn {
     width: 40px;
     height: 40px;
@@ -21,32 +32,88 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    /* Glassmorphism effect */
     background: rgba(var(--interactive-accent-rgb), 0.7);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     color: var(--text-on-accent);
-    transition: transform 0.1s ease-in-out, opacity 0.2s;
+    transition: transform 0.1s ease-in-out, background-color 0.15s, box-shadow 0.15s;
+}
+
+.reading-highlighter-btn:hover {
+    background: rgba(var(--interactive-accent-rgb), 0.9);
+    transform: scale(1.08);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
 }
 
 .reading-highlighter-btn:active {
     transform: scale(0.95);
 }
 
-.reading-highlighter-btn {
-    background-color: hsla(var(--interactive-accent-hsl), 0.8);
+.reading-highlighter-remove-btn {
+    background: rgba(128, 128, 128, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 
-/* Multi-Select Tag Modal Styles */
+.reading-highlighter-remove-btn:hover {
+    background: rgba(239, 83, 80, 0.8);
+}
+
+/* === Color Palette === */
+.reading-highlighter-palette {
+    display: flex;
+    gap: 6px;
+    padding: 0;
+    border: none;
+    margin-left: 0;
+}
+
+.reading-highlighter-color-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.15s;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.reading-highlighter-color-btn:hover {
+    transform: scale(1.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.reading-highlighter-color-btn:active {
+    transform: scale(0.95);
+}
+
+/* Vertical layout adjustments */
+.reading-highlighter-vertical .reading-highlighter-palette {
+    flex-direction: column;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+/* === Tag Modal === */
 .reading-highlighter-tag-modal .selected-tags-container {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 12px;
-    min-height: 32px;
-    padding: 4px;
+    min-height: 36px;
+    padding: 8px;
     border: 1px solid var(--background-modifier-border);
-    border-radius: 4px;
+    border-radius: var(--tag-radius, 6px);
+    background: var(--background-secondary);
+}
+
+.reading-highlighter-tag-modal .no-tags-hint {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 0.9em;
 }
 
 .reading-highlighter-tag-modal .tag-chip {
@@ -54,15 +121,17 @@
     align-items: center;
     background-color: var(--interactive-accent);
     color: var(--text-on-accent);
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: 4px 10px;
+    border-radius: var(--tag-radius, 16px);
     font-size: 12px;
+    font-weight: 500;
 }
 
 .reading-highlighter-tag-modal .tag-chip-close {
     margin-left: 6px;
     cursor: pointer;
     opacity: 0.8;
+    font-size: 14px;
 }
 
 .reading-highlighter-tag-modal .tag-chip-close:hover {
@@ -75,20 +144,25 @@
 
 .reading-highlighter-tag-modal .tag-search-input {
     width: 100%;
+    padding: 8px 12px;
+    border-radius: var(--tag-radius, 6px);
 }
 
 .reading-highlighter-tag-modal .tag-suggestions-list {
-    max-height: 300px;
+    max-height: 250px;
     overflow-y: auto;
     border: 1px solid var(--background-modifier-border);
-    border-radius: 4px;
+    border-radius: var(--tag-radius, 6px);
+    background: var(--background-secondary);
 }
 
 .reading-highlighter-tag-modal .suggestion-item {
-    padding: 8px 12px;
+    padding: 10px 14px;
     cursor: pointer;
     display: flex;
     justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.1s;
 }
 
 .reading-highlighter-tag-modal .suggestion-item:hover {
@@ -104,4 +178,254 @@
     margin-top: 16px;
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
+}
+
+/* === Smart Suggestions === */
+.smart-suggestions-container {
+    margin-bottom: 12px;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: var(--tag-radius, 6px);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.smart-suggestions-label {
+    color: var(--text-muted);
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.smart-suggestions-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.smart-suggestion-chip {
+    padding: 4px 10px;
+    border-radius: var(--tag-radius, 12px);
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-normal);
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: all 0.15s;
+}
+
+.smart-suggestion-chip:hover {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+.smart-suggestion-chip.selected {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+/* === Annotation Modal === */
+.reading-highlighter-annotation-modal .annotation-description {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    margin-bottom: 12px;
+}
+
+.reading-highlighter-annotation-modal .annotation-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 12px;
+    border-radius: 6px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.reading-highlighter-annotation-modal .modal-footer {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* === Highlight Navigator View === */
+.highlight-navigator-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 0;
+}
+
+.highlight-navigator-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.highlight-navigator-header h4 {
+    margin: 0;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.highlight-navigator-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.highlight-navigator-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 32px 16px;
+    font-style: italic;
+}
+
+.highlight-navigator-stats {
+    padding: 8px 12px;
+    color: var(--text-muted);
+    font-size: 0.85em;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.highlight-navigator-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.highlight-navigator-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.1s;
+}
+
+.highlight-navigator-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.highlight-color-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.highlight-color-dot.highlight-default {
+    background: var(--text-highlight-bg);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.highlight-text {
+    flex: 1;
+    font-size: 0.9em;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.highlight-number {
+    font-size: 0.75em;
+    color: var(--text-muted);
+    background: var(--background-secondary);
+    padding: 2px 6px;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.highlight-navigator-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.highlight-navigator-footer button {
+    width: 100%;
+}
+
+/* === Highlight Flash Effect === */
+@keyframes highlightFlash {
+    0% {
+        background-color: var(--text-highlight-bg);
+    }
+
+    100% {
+        background-color: transparent;
+    }
+}
+
+.highlight-flash {
+    animation: highlightFlash 1s ease-out;
+}
+
+/* === Mobile Adjustments === */
+@media (max-width: 768px) {
+    .reading-highlighter-float-container {
+        gap: 10px;
+    }
+
+    .reading-highlighter-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    .reading-highlighter-color-btn {
+        width: 32px;
+        height: 32px;
+    }
+
+    .highlight-navigator-item {
+        padding: 14px 12px;
+    }
+
+    /* Annotation modal - push to top to avoid keyboard */
+    .reading-highlighter-annotation-modal.modal {
+        top: 10px !important;
+        transform: translateX(-50%) !important;
+        max-height: 40vh;
+    }
+
+    .reading-highlighter-annotation-modal .modal-content {
+        max-height: calc(40vh - 40px);
+        overflow-y: auto;
+    }
+
+    .reading-highlighter-annotation-modal .annotation-textarea {
+        min-height: 80px;
+        max-height: 100px;
+    }
+}
+
+/* === Mobile: Push annotation modal to top when keyboard is open === */
+.is-mobile .reading-highlighter-annotation-modal.modal {
+    position: fixed;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: auto;
+    max-height: 45vh;
+    margin: 0;
+}
+
+.is-mobile .reading-highlighter-annotation-modal .modal-content {
+    overflow-y: auto;
+}
+
+/* === Settings Page Enhancements === */
+.setting-item-description {
+    line-height: 1.4;
+}
+
+/* Quote template textarea */
+.setting-item textarea {
+    min-height: 80px;
+    font-family: var(--font-monospace);
+    font-size: 0.9em;
 }

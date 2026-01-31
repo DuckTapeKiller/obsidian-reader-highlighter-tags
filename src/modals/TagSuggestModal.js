@@ -1,5 +1,8 @@
 import { Modal } from "obsidian";
 
+/**
+ * Multi-select tag modal with fuzzy search and smart suggestions.
+ */
 export class TagSuggestModal extends Modal {
     constructor(plugin, onChoose) {
         super(plugin.app);
@@ -10,6 +13,7 @@ export class TagSuggestModal extends Modal {
         this.query = "";
         this.suggestionEl = null;
         this.selectedContainer = null;
+        this.smartSuggestionEl = null;
     }
 
     onOpen() {
@@ -17,6 +21,27 @@ export class TagSuggestModal extends Modal {
         contentEl.addClass("reading-highlighter-tag-modal");
 
         contentEl.createEl("h2", { text: "Add Tags" });
+
+        // Smart suggestions section (if enabled)
+        if (this.plugin.settings.enableSmartTagSuggestions) {
+            const smartTags = this.getSuggestedTags();
+            if (smartTags.length > 0) {
+                this.smartSuggestionEl = contentEl.createDiv({ cls: "smart-suggestions-container" });
+                this.smartSuggestionEl.createEl("span", { text: "Suggestions: ", cls: "smart-suggestions-label" });
+
+                const chipsContainer = this.smartSuggestionEl.createDiv({ cls: "smart-suggestions-chips" });
+                smartTags.forEach(tag => {
+                    const chip = chipsContainer.createEl("button", {
+                        text: `#${tag}`,
+                        cls: "smart-suggestion-chip"
+                    });
+                    chip.onclick = () => {
+                        this.toggleTag(tag);
+                        chip.addClass("selected");
+                    };
+                });
+            }
+        }
 
         // Container for selected chips
         this.selectedContainer = contentEl.createDiv({ cls: "selected-tags-container" });
@@ -54,21 +79,64 @@ export class TagSuggestModal extends Modal {
 
         input.addEventListener("keydown", (e) => {
             if (e.key === "Enter") {
-                // If text exists and no suggestion selected (implied)
-                // Just add the current query as a tag
                 if (this.query.trim()) {
                     this.toggleTag(this.query.trim());
                     this.query = "";
                     input.value = "";
                     this.renderSuggestions("");
                 }
-            } else if (e.key === "Backspace" && !this.query) {
-                // Optional: remove last tag on backspace empty?
-                // Skipping for simplicity/safety
+            } else if (e.key === "Escape") {
+                this.close();
             }
         });
 
         this.renderSuggestions("");
+    }
+
+    /**
+     * Get smart tag suggestions based on:
+     * 1. Recent tags (MRU)
+     * 2. Current folder name
+     * 3. Frontmatter tags
+     */
+    getSuggestedTags() {
+        const suggestions = [];
+
+        // 1. Recent tags (MRU)
+        if (this.plugin.settings.recentTags?.length > 0) {
+            suggestions.push(...this.plugin.settings.recentTags.slice(0, 5));
+        }
+
+        // 2. Folder-based suggestion
+        const activeFile = this.app.workspace.getActiveFile();
+        if (activeFile?.parent?.name && activeFile.parent.name !== "/") {
+            const folderTag = activeFile.parent.name
+                .toLowerCase()
+                .replace(/\s+/g, "-")
+                .replace(/[^a-z0-9-_]/g, "");
+            if (folderTag && !suggestions.includes(folderTag)) {
+                suggestions.push(folderTag);
+            }
+        }
+
+        // 3. Frontmatter tags
+        if (activeFile) {
+            const cache = this.app.metadataCache.getFileCache(activeFile);
+            if (cache?.frontmatter?.tags) {
+                const fmTags = Array.isArray(cache.frontmatter.tags)
+                    ? cache.frontmatter.tags
+                    : [cache.frontmatter.tags];
+                fmTags.forEach(tag => {
+                    const cleanTag = String(tag).replace(/^#/, "");
+                    if (cleanTag && !suggestions.includes(cleanTag)) {
+                        suggestions.push(cleanTag);
+                    }
+                });
+            }
+        }
+
+        // Dedupe and limit
+        return [...new Set(suggestions)].slice(0, 8);
     }
 
     renderSuggestions(query) {
@@ -79,7 +147,6 @@ export class TagSuggestModal extends Modal {
         let matches = this.allTags.filter(t => t.toLowerCase().includes(cleanQuery));
 
         // Exact Match / Create Logic
-        // If cleanQuery is effectively new
         const isExact = matches.some(t => t.toLowerCase() === cleanQuery);
 
         if (cleanQuery && !isExact) {
@@ -97,15 +164,13 @@ export class TagSuggestModal extends Modal {
 
     renderItem(tag, isNew) {
         const el = this.suggestionEl.createDiv({ cls: "suggestion-item" });
-        el.createSpan({ text: isNew ? `#${tag}` : tag });
+        el.createSpan({ text: isNew ? `#${tag}` : `#${tag}` });
         if (isNew) {
             el.createSpan({ text: " (Create new)", cls: "suggestion-note" });
         }
 
         el.addEventListener("click", () => {
             this.toggleTag(tag);
-            // Reset search slightly or keep it? 
-            // Better to clear input? Yes, standard multi-select behavior.
             this.query = "";
             this.contentEl.querySelector(".tag-search-input").value = "";
             this.contentEl.querySelector(".tag-search-input").focus();
@@ -127,6 +192,15 @@ export class TagSuggestModal extends Modal {
 
     updateSelectedView() {
         this.selectedContainer.empty();
+
+        if (this.selectedTags.size === 0) {
+            this.selectedContainer.createSpan({
+                text: "No tags selected",
+                cls: "no-tags-hint"
+            });
+            return;
+        }
+
         this.selectedTags.forEach(tag => {
             const chip = this.selectedContainer.createDiv({ cls: "tag-chip" });
             chip.createSpan({ text: `#${tag}` });

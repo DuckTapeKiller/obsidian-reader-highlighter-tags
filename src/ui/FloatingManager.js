@@ -1,4 +1,4 @@
-import { setIcon, MarkdownView } from "obsidian";
+import { setIcon, MarkdownView, Platform } from "obsidian";
 
 export class FloatingManager {
     constructor(plugin) {
@@ -8,19 +8,40 @@ export class FloatingManager {
         this.highlightBtn = null;
         this.tagBtn = null;
         this.removeBtn = null;
+        this.quoteBtn = null;
+        this.annotateBtn = null;
+        this.colorButtons = [];
+        this.paletteContainer = null;
         this._handlers = [];
+
+        // Mobile gesture state
+        this.longPressTimer = null;
     }
 
     load() {
         this.createElements();
         this.registerEvents();
+        if (Platform.isMobile) {
+            this.setupMobileGestures();
+        }
     }
 
     unload() {
         this.containerEl?.remove();
-        this.containerEl = null; // Detach ref
+        this.containerEl = null;
         this._handlers.forEach(cleanup => cleanup());
         this._handlers = [];
+    }
+
+    refresh() {
+        // Rebuild toolbar when settings change
+        if (this.containerEl) {
+            this.containerEl.remove();
+            this.containerEl = null;
+        }
+        this.colorButtons = [];
+        this.createElements();
+        this.registerEvents();
     }
 
     createElements() {
@@ -29,14 +50,52 @@ export class FloatingManager {
         this.containerEl = document.createElement("div");
         this.containerEl.addClass("reading-highlighter-float-container");
 
-        this.highlightBtn = this.createButton("highlighter", "Subrayar selección");
-        this.tagBtn = this.createButton("tag", "Etiquetar selección"); // New Button
-        this.removeBtn = this.createButton("minus", "Eliminar subrayado");
-        this.removeBtn.addClass("reading-highlighter-remove-btn");
-
+        // Main highlight button
+        this.highlightBtn = this.createButton("highlighter", "Highlight selection");
         this.containerEl.appendChild(this.highlightBtn);
-        this.containerEl.appendChild(this.tagBtn);
-        this.containerEl.appendChild(this.removeBtn);
+
+        // Color palette (only if enabled)
+        if (this.plugin.settings.enableColorPalette) {
+            this.paletteContainer = document.createElement("div");
+            this.paletteContainer.addClass("reading-highlighter-palette");
+
+            this.plugin.settings.colorPalette.forEach((item, index) => {
+                const colorBtn = document.createElement("button");
+                colorBtn.addClass("reading-highlighter-color-btn");
+                colorBtn.style.backgroundColor = item.color;
+                colorBtn.setAttribute("aria-label", item.name);
+                colorBtn.setAttribute("data-color-index", index.toString());
+                this.colorButtons.push(colorBtn);
+                this.paletteContainer.appendChild(colorBtn);
+            });
+
+            this.containerEl.appendChild(this.paletteContainer);
+        }
+
+        // Tag button
+        if (this.plugin.settings.showTagButton) {
+            this.tagBtn = this.createButton("tag", "Tag selection");
+            this.containerEl.appendChild(this.tagBtn);
+        }
+
+        // Quote button
+        if (this.plugin.settings.showQuoteButton) {
+            this.quoteBtn = this.createButton("quote", "Copy as quote");
+            this.containerEl.appendChild(this.quoteBtn);
+        }
+
+        // Annotation button
+        if (this.plugin.settings.enableAnnotations && this.plugin.settings.showAnnotationButton) {
+            this.annotateBtn = this.createButton("message-square", "Add annotation");
+            this.containerEl.appendChild(this.annotateBtn);
+        }
+
+        // Remove button
+        if (this.plugin.settings.showRemoveButton) {
+            this.removeBtn = this.createButton("eraser", "Remove highlight");
+            this.removeBtn.addClass("reading-highlighter-remove-btn");
+            this.containerEl.appendChild(this.removeBtn);
+        }
 
         document.body.appendChild(this.containerEl);
     }
@@ -44,7 +103,10 @@ export class FloatingManager {
     createButton(iconName, label) {
         const btn = document.createElement("button");
         setIcon(btn, iconName);
-        btn.setAttribute("aria-label", label);
+        // Only add tooltip if enabled in settings
+        if (this.plugin.settings.showTooltips) {
+            btn.setAttribute("aria-label", label);
+        }
         btn.addClass("reading-highlighter-btn");
         return btn;
     }
@@ -55,12 +117,14 @@ export class FloatingManager {
             evt.stopPropagation();
         };
 
-        const attachAction = (btn, actionInfo) => {
+        const attachAction = (btn, actionName) => {
+            if (!btn) return;
+
             const handler = (evt) => {
                 preventFocus(evt);
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (view && view.getMode() === "preview") {
-                    this.plugin[actionInfo](view);
+                    this.plugin[actionName](view);
                 }
                 this.hide();
             };
@@ -69,9 +133,56 @@ export class FloatingManager {
             btn.addEventListener("touchstart", handler, { passive: false });
         };
 
-        if (this.highlightBtn) attachAction(this.highlightBtn, "highlightSelection");
-        if (this.tagBtn) attachAction(this.tagBtn, "tagSelection"); // New Handler
-        if (this.removeBtn) attachAction(this.removeBtn, "removeHighlightSelection");
+        // Main actions
+        attachAction(this.highlightBtn, "highlightSelection");
+        attachAction(this.tagBtn, "tagSelection");
+        attachAction(this.quoteBtn, "copyAsQuote");
+        attachAction(this.annotateBtn, "annotateSelection");
+        attachAction(this.removeBtn, "removeHighlightSelection");
+
+        // Color palette buttons
+        this.colorButtons.forEach((btn, index) => {
+            const handler = (evt) => {
+                preventFocus(evt);
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (view && view.getMode() === "preview") {
+                    this.plugin.applyColorByIndex(view, index);
+                }
+                this.hide();
+            };
+
+            btn.addEventListener("mousedown", handler);
+            btn.addEventListener("touchstart", handler, { passive: false });
+        });
+    }
+
+    setupMobileGestures() {
+        // Long press to highlight without showing toolbar
+        document.addEventListener("touchstart", (e) => {
+            this.longPressTimer = setTimeout(() => {
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                const sel = window.getSelection();
+
+                if (view && view.getMode() === "preview" && sel?.toString().trim()) {
+                    this.plugin.highlightSelection(view);
+                    this.hide();
+                }
+            }, 600);
+        }, { passive: true });
+
+        document.addEventListener("touchmove", () => {
+            if (this.longPressTimer) {
+                clearTimeout(this.longPressTimer);
+                this.longPressTimer = null;
+            }
+        }, { passive: true });
+
+        document.addEventListener("touchend", () => {
+            if (this.longPressTimer) {
+                clearTimeout(this.longPressTimer);
+                this.longPressTimer = null;
+            }
+        }, { passive: true });
     }
 
     handleSelection() {
@@ -109,9 +220,8 @@ export class FloatingManager {
         const pos = this.plugin.settings.toolbarPosition || "text";
 
         if (pos === "text") {
-            // Default: Next to text
-            const containerHeight = 40;
-            const containerWidth = 140;
+            const containerHeight = 50;
+            const containerWidth = this.plugin.settings.enableColorPalette ? 280 : 180;
 
             let top = rect.top - containerHeight - 10;
             let left = rect.left + (rect.width / 2) - (containerWidth / 2);
@@ -124,27 +234,22 @@ export class FloatingManager {
             this.containerEl.style.left = `${left}px`;
 
         } else if (pos === "top") {
-            // Fixed Top Center
             this.containerEl.style.top = "80px";
             this.containerEl.style.left = "50%";
             this.containerEl.style.transform = "translateX(-50%)";
 
         } else if (pos === "bottom") {
-            // Fixed Bottom Center
-            // Consider Mobile Nav Bar height? usually safest to leave ~60-80px padding if native.
             this.containerEl.style.bottom = "100px";
             this.containerEl.style.left = "50%";
             this.containerEl.style.transform = "translateX(-50%)";
 
         } else if (pos === "left") {
-            // Fixed Left Side
             this.containerEl.style.top = "50%";
             this.containerEl.style.left = "10px";
             this.containerEl.style.transform = "translateY(-50%)";
             this.containerEl.addClass("reading-highlighter-vertical");
 
         } else if (pos === "right") {
-            // Fixed Right Side
             this.containerEl.style.top = "50%";
             this.containerEl.style.right = "10px";
             this.containerEl.style.transform = "translateY(-50%)";

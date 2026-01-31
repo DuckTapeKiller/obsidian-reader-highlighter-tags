@@ -13,7 +13,13 @@ export class AnnotationModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.addClass("reading-highlighter-annotation-modal");
+        this.modalEl.addClass("reading-highlighter-annotation-modal");
+
+        // Add class to container to manage animations
+        if (this.containerEl) {
+            this.containerEl.addClass("reading-highlighter-modal-container");
+        }
+
 
         contentEl.createEl("h2", { text: "Add Annotation" });
 

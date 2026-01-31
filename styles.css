@@ -21,30 +21,52 @@
     flex-direction: column;
 }
 
-/* Glass effect buttons - individual circles */
+/* High-Visibility Milky Blur (Uniform across themes) */
 .reading-highlighter-btn {
     width: 40px;
     height: 40px;
     border-radius: 50%;
     padding: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+
+    /* Dark Mode: Suburban Border added */
+    border: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    /* Glassmorphism effect */
-    background: rgba(var(--interactive-accent-rgb), 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    color: var(--text-on-accent);
-    transition: transform 0.1s ease-in-out, background-color 0.15s, box-shadow 0.15s;
+
+    /* Dark Mode: Lighter grey to ensure visibility against dark bg */
+    background: rgba(80, 80, 80, 0.85);
+
+    /* High blur to smooth things out without sparkle (opacity helps) */
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+
+    /* Standard Shadow */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    color: var(--text-normal);
+    transition: transform 0.1s ease-in-out, background-color 0.15s;
+}
+
+/* Light Mode Consistency */
+.theme-light .reading-highlighter-btn {
+    /* Match the Erase Button look EXACTLY: rgba(200, 200, 200, 0.95) */
+    background: rgba(200, 200, 200, 0.95);
+    color: var(--text-normal);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    /* Remove the border in light mode if erase doesn't have it */
+    border: none;
 }
 
 .reading-highlighter-btn:hover {
-    background: rgba(var(--interactive-accent-rgb), 0.9);
-    transform: scale(1.08);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    transform: scale(1.05);
+}
+
+.theme-light .reading-highlighter-btn:hover {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
 }
 
 .reading-highlighter-btn:active {
@@ -52,13 +74,19 @@
 }
 
 .reading-highlighter-remove-btn {
-    background: rgba(128, 128, 128, 0.6);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(80, 80, 80, 0.95);
 }
 
-.reading-highlighter-remove-btn:hover {
-    background: rgba(239, 83, 80, 0.8);
+.theme-light .reading-highlighter-remove-btn {
+    background: rgba(200, 200, 200, 0.95);
+    border: none;
+}
+
+/* Standardized Erase Hover - Red in BOTH modes */
+.reading-highlighter-remove-btn:hover,
+.theme-light .reading-highlighter-remove-btn:hover {
+    background: rgba(239, 83, 80, 1) !important;
+    color: white !important;
 }
 
 /* === Color Palette === */
@@ -78,6 +106,11 @@
     cursor: pointer;
     transition: transform 0.1s, box-shadow 0.15s;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.theme-light .reading-highlighter-color-btn {
+    border: 2px solid rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .reading-highlighter-color-btn:hover {
@@ -384,38 +417,53 @@
     .highlight-navigator-item {
         padding: 14px 12px;
     }
-
-    /* Annotation modal - push to top to avoid keyboard */
-    .reading-highlighter-annotation-modal.modal {
-        top: 10px !important;
-        transform: translateX(-50%) !important;
-        max-height: 40vh;
-    }
-
-    .reading-highlighter-annotation-modal .modal-content {
-        max-height: calc(40vh - 40px);
-        overflow-y: auto;
-    }
-
-    .reading-highlighter-annotation-modal .annotation-textarea {
-        min-height: 80px;
-        max-height: 100px;
-    }
 }
 
 /* === Mobile: Push annotation modal to top when keyboard is open === */
-.is-mobile .reading-highlighter-annotation-modal.modal {
-    position: fixed;
-    top: 60px;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: auto;
-    max-height: 45vh;
-    margin: 0;
+/* Force position using !important to override element-level styles from Obsidian */
+
+/* We now target the modal element itself which has the class 'reading-highlighter-annotation-modal' */
+.is-mobile .modal.reading-highlighter-annotation-modal {
+    position: fixed !important;
+    top: 60px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    margin: 0 !important;
+
+    /* Grow to fit content, up to 85vh */
+    height: auto !important;
+    max-height: 85vh !important;
+    width: 90vw !important;
+
+    /* Ensure it floats above everything */
+    z-index: 10000 !important;
+
+    /* Align to top */
+    align-self: flex-start !important;
+
+    /* KILL ALL ANIMATIONS/TRANSITIONS aggressively to stop glitches */
+    transition: none !important;
+    animation: none !important;
+    transform: translateX(-50%) !important;
+    /* Ensure transform is static */
+}
+
+.reading-highlighter-modal-container,
+.reading-highlighter-modal-container .modal-bg,
+.reading-highlighter-modal-container .modal {
+    transition: none !important;
+    animation: none !important;
+}
+
+/* Also kill container animations if possible via descendent selection hack or general reset */
+.is-mobile .modal-container:has(.reading-highlighter-annotation-modal) {
+    transition: none !important;
+    animation: none !important;
 }
 
 .is-mobile .reading-highlighter-annotation-modal .modal-content {
-    overflow-y: auto;
+    max-height: none !important;
+    overflow-y: visible !important;
 }
 
 /* === Settings Page Enhancements === */

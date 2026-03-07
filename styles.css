@@ -48,6 +48,13 @@
     transition: transform 0.1s ease-in-out, background-color 0.15s;
 }
 
+.reading-highlighter-btn svg,
+.reading-highlighter-btn .svg-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
 /* Light Mode Consistency */
 .theme-light .reading-highlighter-btn {
     /* Match the Erase Button look EXACTLY: rgba(200, 200, 200, 0.95) */

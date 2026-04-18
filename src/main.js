@@ -810,6 +810,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                     content = contentAfterIndent.substring(prefix.length);
                 }
 
+                content = content.trim();
                 const tagStr = fullTag ? `${fullTag} ` : "";
                 let wrappedContent = content;
 

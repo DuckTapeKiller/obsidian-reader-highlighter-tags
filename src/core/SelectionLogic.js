@@ -240,7 +240,7 @@ export class SelectionLogic {
     createFlexiblePattern(snippet) {
         // NON-BACKTRACKING GAP PATTERN
         // This includes whitespace, arrows, markers, and Markdown symbols (*, _, ~, =).
-        const gapPattern = '[\\s\\u21a9\\u21b5\\ufe0e\\ufe0f\\d\\.\\[\\](){}\\^:>\\*\\+\\#\\u00a0_~=\\-\\|]';
+        const gapPattern = '[\\s\\u21a9\\u21b5\\ufe0e\\ufe0f\\d\\.\\[\\](){}\\^:>\\*\\+\\#\\u00a0_~=\\-\\|\\u2013\\u2014\\u201c\\u201d\\u2018\\u2019\\u00ab\\u00bb]';
         
         // TOKENIZED PATTERN BUILDER
         // Every character in the snippet gets an optional gap after it to handle 
@@ -280,13 +280,16 @@ export class SelectionLogic {
     stripBrowserJunk(text) {
         if (!text) return text;
         
-        return text
+        return text.normalize('NFC')
             // 1. Arrows and variants -> space
             .replace(/[\u21a9\u21b5\ufe0e\ufe0f]+/g, ' ') 
             // 2. Normalized whitespace
             .replace(/[\u00a0\s]+/g, ' ')
-            // 3. Bracketed markers like [why?], [PDF], [123] at line/selection edges
-            .replace(/\[(?:[0-9-]+|[a-zA-Z?]+)\](?=\s|$)/g, ' ')
+            // 3. Smart Punctuation (em-dash, guillemets, etc.) -> space
+            .replace(/[\u2013\u2014\u201c\u201d\u2018\u2019\u00ab\u00bb]+/g, ' ')
+            // 4. Bracketed markers like [why?], [PDF], [123] (Footnotes in Reading View)
+            // Removed trailing lookahead to handle notes followed by punctuation like [7])
+            .replace(/\[(?:[0-9-]+|[a-zA-Z?]+)\]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
     }
@@ -497,6 +500,8 @@ export class SelectionLogic {
             /(\|[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|)/.source,
             // Group 22: Table Bar |
             /(\|)/.source,
+            // Group 23: Smart Punctuation & Dashes
+            /([\u2013\u2014\u201c\u201d\u2018\u2019\u00ab\u00bb])/.source,
         ].join('|'), 'gm'); // Multiline mode is REQUIRED for the ^ marker in Group 19 (Callouts)
 
         let lastIndex = 0;
@@ -639,6 +644,8 @@ export class SelectionLogic {
                 // TABLE SEPARATOR: Skip entirely
             } else if (match[22]) {
                 // TABLE BAR: Skip entirely
+            } else if (match[23]) {
+                // SMART PUNCTUATION: Skip entirely
             }
 
             lastIndex = tokenRegex.lastIndex;

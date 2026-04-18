@@ -4,15 +4,17 @@ import { getHighlightsFromContent } from "../utils/export";
 export const HIGHLIGHT_NAVIGATOR_VIEW = "highlight-navigator";
 
 /**
- * Sidebar view that displays all highlights in the current document.
- * Allows clicking to jump to location and filtering by type/color.
+ * Enhanced Sidebar view that displays all highlights and footnotes in the current document.
+ * Includes tabbed switching and split views for premium navigator experience.
  */
 export class HighlightNavigatorView extends ItemView {
     constructor(leaf, plugin) {
         super(leaf);
         this.plugin = plugin;
         this.highlights = [];
+        this.footnotes = [];
         this.currentFile = null;
+        this.viewMode = "highlights"; // 'highlights', 'footnotes', or 'split'
     }
 
     getViewType() {
@@ -34,18 +36,32 @@ export class HighlightNavigatorView extends ItemView {
 
         // Header
         const header = container.createDiv({ cls: "highlight-navigator-header" });
-        header.createEl("h4", { text: "Highlights" });
+        header.createEl("h4", { text: "Navigator" });
 
-        // Refresh button
-        const refreshBtn = header.createEl("button", { cls: "clickable-icon" });
-        refreshBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`;
-        refreshBtn.setAttribute("aria-label", "Refresh");
-        refreshBtn.onclick = () => this.refresh();
+        // View Mode Switcher
+        const btnGroup = header.createDiv({ cls: "highlight-navigator-btn-group" });
+        const modes = [
+            { label: "Highlights", value: "highlights" },
+            { label: "Footnotes", value: "footnotes" },
+            { label: "Both", value: "split" }
+        ];
+
+        modes.forEach((m) => {
+            const btn = btnGroup.createEl("button", { text: m.label, cls: "nav-btn" });
+            if (this.viewMode === m.value) btn.addClass("is-active");
+            
+            btn.onclick = () => {
+                btnGroup.querySelectorAll(".nav-btn").forEach((el) => el.removeClass("is-active"));
+                btn.addClass("is-active");
+                this.viewMode = m.value;
+                this.renderContent();
+            };
+        });
 
         // Content area
         this.contentEl = container.createDiv({ cls: "highlight-navigator-content" });
 
-        // Export button
+        // Footer with Export
         const footer = container.createDiv({ cls: "highlight-navigator-footer" });
         const exportBtn = footer.createEl("button", { text: "Export to MD", cls: "mod-cta" });
         exportBtn.onclick = () => this.exportHighlights();
@@ -60,7 +76,7 @@ export class HighlightNavigatorView extends ItemView {
         this.registerEvent(
             this.app.vault.on("modify", (file) => {
                 if (this.currentFile && file.path === this.currentFile.path) {
-                    this.refresh();
+                    this.refresh(true);
                 }
             })
         );
@@ -68,11 +84,16 @@ export class HighlightNavigatorView extends ItemView {
         this.refresh();
     }
 
-    async refresh() {
+    async refresh(force = false) {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 
+        // Prevent wiping list on brief focus loss
         if (!view || !view.file) {
-            this.showEmpty("Open a note to see its highlights.");
+            return;
+        }
+
+        // Only re-parse if file changed or forced (on modify)
+        if (!force && this.currentFile && view.file.path === this.currentFile.path) {
             return;
         }
 
@@ -81,86 +102,113 @@ export class HighlightNavigatorView extends ItemView {
         try {
             const raw = await this.app.vault.read(view.file);
             this.highlights = getHighlightsFromContent(raw);
-            this.renderHighlights();
+            this.footnotes = this.getFootnotesFromContent(raw);
+            this.renderContent();
         } catch (err) {
-            this.showEmpty("Error loading highlights.");
+            this.showEmpty("Error loading content.");
             console.error(err);
         }
     }
 
-    showEmpty(message) {
-        this.contentEl.empty();
-        this.contentEl.createDiv({ cls: "highlight-navigator-empty", text: message });
+    getFootnotesFromContent(raw) {
+        const footnotes = [];
+        const lines = raw.split("\n");
+        // Matches [^id]: text
+        const pattern = /\[\^([^\]]+)\]:\s*([^\n]+)/g;
+
+        lines.forEach((line, lineIdx) => {
+            let match;
+            while ((match = pattern.exec(line)) !== null) {
+                footnotes.push({
+                    id: match[1],
+                    text: match[2].trim(),
+                    line: lineIdx
+                });
+            }
+        });
+        return footnotes;
     }
 
-    renderHighlights() {
-        this.contentEl.empty();
+    showEmpty(message, container = this.contentEl) {
+        container.empty();
+        container.createDiv({ cls: "highlight-navigator-empty", text: message });
+    }
 
-        if (this.highlights.length === 0) {
-            this.showEmpty("No highlights in this file.");
+    renderContent() {
+        this.contentEl.empty();
+        this.contentEl.removeClass("split-view");
+
+        if (this.viewMode === "highlights") {
+            this.renderList(this.contentEl, this.highlights, "highlights");
+        } else if (this.viewMode === "footnotes") {
+            this.renderList(this.contentEl, this.footnotes, "footnotes");
+        } else if (this.viewMode === "split") {
+            this.contentEl.addClass("split-view");
+            const topHalf = this.contentEl.createDiv({ cls: "split-half split-top" });
+            const bottomHalf = this.contentEl.createDiv({ cls: "split-half split-bottom" });
+            this.renderList(topHalf, this.highlights, "highlights");
+            this.renderList(bottomHalf, this.footnotes, "footnotes");
+        }
+    }
+
+    renderList(container, items, type) {
+        if (items.length === 0) {
+            this.showEmpty(`No ${type} found.`, container);
             return;
         }
 
-        // Stats
-        const stats = this.contentEl.createDiv({ cls: "highlight-navigator-stats" });
-        stats.createSpan({ text: `${this.highlights.length} highlight${this.highlights.length !== 1 ? "s" : ""}` });
+        const title = type === "highlights" ? "Highlights" : "Footnotes";
+        const stats = container.createDiv({ cls: "highlight-navigator-stats" });
+        stats.createSpan({ text: `${items.length} ${title.toLowerCase()}` });
 
-        // List
-        const list = this.contentEl.createDiv({ cls: "highlight-navigator-list" });
+        const list = container.createDiv({ cls: "highlight-navigator-list" });
 
-        this.highlights.forEach((highlight, index) => {
-            const item = list.createDiv({ cls: "highlight-navigator-item" });
+        items.forEach((item, index) => {
+            const el = list.createDiv({ cls: "highlight-navigator-item" });
 
-            // Color indicator
-            if (highlight.color) {
-                const colorDot = item.createSpan({ cls: "highlight-color-dot" });
-                colorDot.style.backgroundColor = highlight.color;
+            if (type === "highlights") {
+                // Color indicator
+                if (item.color) {
+                    const colorDot = el.createSpan({ cls: "highlight-color-dot" });
+                    colorDot.style.backgroundColor = item.color;
+                } else {
+                    el.createSpan({ cls: "highlight-color-dot highlight-default" });
+                }
             } else {
-                const colorDot = item.createSpan({ cls: "highlight-color-dot highlight-default" });
+                // Footnote ID indicator
+                const idSpan = el.createSpan({ cls: "footnote-id", text: `[${item.id}] ` });
+                idSpan.style.marginRight = "5px";
+                idSpan.style.color = "var(--text-muted)";
             }
 
             // Text preview
-            const textPreview = highlight.text.length > 80
-                ? highlight.text.substring(0, 80) + "..."
-                : highlight.text;
+            const textPreview = item.text.length > 80
+                ? item.text.substring(0, 80) + "..."
+                : item.text;
 
-            const textEl = item.createSpan({ cls: "highlight-text", text: textPreview });
+            el.createSpan({ cls: "highlight-text", text: textPreview });
 
-            // Number badge
-            item.createSpan({ cls: "highlight-number", text: `${index + 1}` });
+            if (type === "highlights") {
+                // Number badge
+                el.createSpan({ cls: "highlight-number", text: `${index + 1}` });
+            }
 
-            // Click to jump
-            item.onclick = () => this.jumpToHighlight(highlight);
+            // Click to jump to line
+            el.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.jumpToLine(item.line);
+            };
         });
     }
 
-    async jumpToHighlight(highlight) {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!view) return;
-
-        // Get the reading view content element
-        const previewEl = view.containerEl.querySelector(".markdown-reading-view") ||
-            view.containerEl.querySelector(".markdown-preview-view");
-
-        if (!previewEl) return;
-
-        // Find the highlight text in the rendered content
-        const walker = document.createTreeWalker(previewEl, NodeFilter.SHOW_TEXT);
-        let node;
-
-        while ((node = walker.nextNode())) {
-            if (node.textContent.includes(highlight.text.substring(0, 20))) {
-                // Found it - scroll to parent element
-                const parent = node.parentElement;
-                if (parent) {
-                    parent.scrollIntoView({ behavior: "smooth", block: "center" });
-
-                    // Brief highlight effect
-                    parent.addClass("highlight-flash");
-                    setTimeout(() => parent.removeClass("highlight-flash"), 1000);
-                    break;
-                }
-            }
+    async jumpToLine(line) {
+        const leaf = this.app.workspace.getMostRecentLeaf();
+        if (leaf && leaf.view instanceof MarkdownView) {
+            leaf.setEphemeralState({ 
+                line: line,
+                focus: true 
+            });
         }
     }
 
@@ -182,6 +230,6 @@ export class HighlightNavigatorView extends ItemView {
     }
 
     async onClose() {
-        // Cleanup
+        // Cleanup if needed
     }
 }

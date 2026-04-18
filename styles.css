@@ -25,7 +25,7 @@
 .reading-highlighter-btn {
     width: 40px;
     height: 40px;
-    border-radius: 50%;
+    border-radius: var(--button-radius);
     padding: 8px;
 
     /* Dark Mode: Suburban Border added */
@@ -89,7 +89,7 @@
     border: none;
 }
 
-/* Standardized Erase Hover - Red in BOTH modes */
+/* Standardised Erase Hover - Red in BOTH modes */
 .reading-highlighter-remove-btn:hover,
 .theme-light .reading-highlighter-remove-btn:hover {
     background: rgba(239, 83, 80, 1) !important;
@@ -108,7 +108,7 @@
 .reading-highlighter-color-btn {
     width: 28px;
     height: 28px;
-    border-radius: 50%;
+    border-radius: var(--button-radius);
     border: 2px solid rgba(255, 255, 255, 0.4);
     cursor: pointer;
     transition: transform 0.1s, box-shadow 0.15s;
@@ -146,7 +146,7 @@
     min-height: 36px;
     padding: 8px;
     border: 1px solid var(--background-modifier-border);
-    border-radius: var(--tag-radius, 6px);
+    border-radius: var(--radius-m);
     background: var(--background-secondary);
 }
 
@@ -162,7 +162,7 @@
     background-color: var(--interactive-accent);
     color: var(--text-on-accent);
     padding: 4px 10px;
-    border-radius: var(--tag-radius, 16px);
+    border-radius: var(--radius-s);
     font-size: 12px;
     font-weight: 500;
 }
@@ -189,19 +189,20 @@
     flex: 1;
     min-width: 0;
     padding: 8px 12px;
-    border-radius: var(--tag-radius, 6px);
+    border-radius: var(--input-radius);
 }
 
 .reading-highlighter-tag-modal .tag-done-btn {
     flex-shrink: 0;
     padding: 8px 16px;
+    border-radius: var(--button-radius);
 }
 
 .reading-highlighter-tag-modal .tag-suggestions-list {
     max-height: 250px;
     overflow-y: auto;
     border: 1px solid var(--background-modifier-border);
-    border-radius: var(--tag-radius, 6px);
+    border-radius: var(--radius-m);
     background: var(--background-secondary);
 }
 
@@ -235,7 +236,7 @@
     margin-bottom: 12px;
     padding: 10px;
     background: var(--background-secondary);
-    border-radius: var(--tag-radius, 6px);
+    border-radius: var(--radius-m);
     border: 1px solid var(--background-modifier-border);
 }
 
@@ -254,7 +255,7 @@
 
 .smart-suggestion-chip {
     padding: 4px 10px;
-    border-radius: var(--tag-radius, 12px);
+    border-radius: var(--radius-s);
     background: var(--background-primary);
     border: 1px solid var(--background-modifier-border);
     color: var(--text-normal);
@@ -286,7 +287,7 @@
     width: 100%;
     min-height: 120px;
     padding: 12px;
-    border-radius: 6px;
+    border-radius: var(--input-radius);
     resize: vertical;
     font-family: inherit;
 }
@@ -308,10 +309,10 @@
 
 .highlight-navigator-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
     padding: 12px 16px;
     border-bottom: 1px solid var(--background-modifier-border);
+    gap: 12px;
 }
 
 .highlight-navigator-header h4 {
@@ -320,10 +321,61 @@
     font-weight: 600;
 }
 
+.highlight-navigator-btn-group {
+    display: flex;
+    background: var(--background-secondary-alt);
+    border-radius: var(--radius-m);
+    padding: 2px;
+    width: 100%;
+}
+
+.nav-btn {
+    flex: 1;
+    padding: 4px 2px;
+    font-size: 0.75em;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-radius: var(--button-radius);
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.nav-btn:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+}
+
+.nav-btn.is-active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
 .highlight-navigator-content {
     flex: 1;
     overflow-y: auto;
     padding: 8px;
+    display: flex;
+    flex-direction: column;
+}
+
+.highlight-navigator-content.split-view {
+    overflow: hidden;
+    padding: 0;
+}
+
+.split-half {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.split-top {
+    border-bottom: 3px solid var(--background-modifier-border);
 }
 
 .highlight-navigator-empty {
@@ -351,7 +403,7 @@
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
-    border-radius: 6px;
+    border-radius: var(--radius-s);
     cursor: pointer;
     transition: background-color 0.1s;
 }
@@ -363,13 +415,18 @@
 .highlight-color-dot {
     width: 12px;
     height: 12px;
-    border-radius: 50%;
+    border-radius: var(--button-radius);
     flex-shrink: 0;
 }
 
 .highlight-color-dot.highlight-default {
     background: var(--text-highlight-bg);
     border: 1px solid var(--background-modifier-border);
+}
+
+.footnote-id {
+    font-size: 0.85em;
+    font-weight: 600;
 }
 
 .highlight-text {
@@ -386,7 +443,7 @@
     color: var(--text-muted);
     background: var(--background-secondary);
     padding: 2px 6px;
-    border-radius: 10px;
+    border-radius: var(--radius-s);
     flex-shrink: 0;
 }
 
@@ -397,6 +454,7 @@
 
 .highlight-navigator-footer button {
     width: 100%;
+    border-radius: var(--button-radius);
 }
 
 /* === Highlight Flash Effect === */
@@ -443,7 +501,7 @@
     background: rgba(30, 30, 30, 0.45);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border-radius: 28px;
+    border-radius: var(--radius-l);
     padding: 6px 10px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
@@ -477,7 +535,7 @@
 
 /* Vertical layout: also apply container styling */
 .is-android .reading-highlighter-vertical {
-    border-radius: 24px;
+    border-radius: var(--radius-l);
     padding: 10px 6px;
 }
 
@@ -508,6 +566,7 @@
     animation: none !important;
     transform: translateX(-50%) !important;
     /* Ensure transform is static */
+    border-radius: var(--radius-l) !important;
 }
 
 .reading-highlighter-modal-container,
@@ -550,6 +609,7 @@
     /* No animations */
     transition: none !important;
     animation: none !important;
+    border-radius: var(--radius-l) !important;
 }
 
 /* Compact modal content on mobile - allow overflow */
@@ -569,6 +629,7 @@
 .is-mobile .reading-highlighter-tag-modal .smart-suggestions-container {
     margin-bottom: 8px !important;
     padding: 6px 8px !important;
+    border-radius: var(--radius-m) !important;
 }
 
 .is-mobile .reading-highlighter-tag-modal .smart-suggestions-chips {
@@ -579,6 +640,7 @@
 .is-mobile .reading-highlighter-tag-modal .smart-suggestion-chip {
     padding: 3px 8px !important;
     font-size: 0.8em !important;
+    border-radius: var(--radius-s) !important;
 }
 
 /* Compact selected tags container */
@@ -587,11 +649,13 @@
     min-height: 28px !important;
     padding: 6px !important;
     gap: 4px !important;
+    border-radius: var(--radius-m) !important;
 }
 
 .is-mobile .reading-highlighter-tag-modal .tag-chip {
     padding: 3px 8px !important;
     font-size: 11px !important;
+    border-radius: var(--radius-s) !important;
 }
 
 /* Compact search input */
@@ -602,12 +666,14 @@
 .is-mobile .reading-highlighter-tag-modal .tag-search-input {
     padding: 6px 10px !important;
     font-size: 14px !important;
+    border-radius: var(--input-radius) !important;
 }
 
 /* Suggestions list - allow it to show with scrolling */
 .is-mobile .reading-highlighter-tag-modal .tag-suggestions-list {
     max-height: 150px !important;
     overflow-y: auto !important;
+    border-radius: var(--radius-m) !important;
 }
 
 .is-mobile .reading-highlighter-tag-modal .suggestion-item {
@@ -618,6 +684,7 @@
 .is-mobile .reading-highlighter-tag-modal .tag-done-btn {
     padding: 6px 12px !important;
     font-size: 14px !important;
+    border-radius: var(--button-radius) !important;
 }
 
 /* === Settings Page Enhancements === */
@@ -630,4 +697,5 @@
     min-height: 80px;
     font-family: var(--font-monospace);
     font-size: 0.9em;
+    border-radius: var(--input-radius);
 }

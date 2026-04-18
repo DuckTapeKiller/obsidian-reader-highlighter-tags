@@ -83,50 +83,29 @@ ${highlights.map((h, i) => `${i + 1}. ${h.text}`).join("\n\n")}
  */
 export function getHighlightsFromContent(raw) {
     const highlights = [];
+    const lines = raw.split("\n");
+    const markdownPattern = /==(.*?)==/g;
+    const htmlPattern = /<mark[^>]*>(.*?)<\/mark>/g;
 
-    // Pattern for ==text== (markdown highlights)
-    const markdownPattern = /==(.*?)==/gs;
-
-    // Pattern for <mark>text</mark> (HTML highlights)
-    const htmlPattern = /<mark[^>]*>(.*?)<\/mark>/gs;
-
-    // Extract markdown highlights
-    let match;
-    while ((match = markdownPattern.exec(raw)) !== null) {
-        // Get surrounding context (line it's on)
-        const lineStart = raw.lastIndexOf("\n", match.index) + 1;
-        const lineEnd = raw.indexOf("\n", match.index + match[0].length);
-        const context = raw.substring(lineStart, lineEnd === -1 ? undefined : lineEnd).trim();
-
-        highlights.push({
-            text: match[1].trim(),
-            type: "markdown",
-            position: match.index,
-            context: context
-        });
-    }
-
-    // Extract HTML highlights
-    while ((match = htmlPattern.exec(raw)) !== null) {
-        const lineStart = raw.lastIndexOf("\n", match.index) + 1;
-        const lineEnd = raw.indexOf("\n", match.index + match[0].length);
-        const context = raw.substring(lineStart, lineEnd === -1 ? undefined : lineEnd).trim();
-
-        // Try to extract color from style
-        const colorMatch = match[0].match(/background:\s*([^;>"]+)/);
-        const color = colorMatch ? colorMatch[1].trim() : null;
-
-        highlights.push({
-            text: match[1].trim(),
-            type: "html",
-            position: match.index,
-            context: context,
-            color: color
-        });
-    }
-
-    // Sort by position in document
-    highlights.sort((a, b) => a.position - b.position);
+    lines.forEach((line, lineIdx) => {
+        let match;
+        while ((match = markdownPattern.exec(line)) !== null) {
+            highlights.push({
+                text: match[1].trim(),
+                line: lineIdx,
+                type: "markdown"
+            });
+        }
+        while ((match = htmlPattern.exec(line)) !== null) {
+            const colorMatch = match[0].match(/background:\s*([^;>"]+)/);
+            highlights.push({
+                text: match[1].trim(),
+                line: lineIdx,
+                type: "html",
+                color: colorMatch ? colorMatch[1].trim() : null
+            });
+        }
+    });
 
     return highlights;
 }

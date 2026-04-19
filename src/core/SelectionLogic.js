@@ -173,7 +173,10 @@ export var SelectionLogic = class {
       } else {
         parts.push(this.escapeRegex(char));
         if (i < snippet.length - 1) {
-          parts.push(`(?:${gapPattern}|[\\*_~=]|\\[\\^[^\\]]+\\])*?`);
+          // FIX 3: Bounded quantifier {0,3} instead of *? to prevent catastrophic
+          // backtracking on mobile regex engines (JSC / mobile V8) when the snippet
+          // contains URL characters or other long non-space sequences.
+          parts.push(`(?:${gapPattern}|[\\*_~=]|\\[\\^[^\\]]+\\]){0,3}`);
         }
       }
     }
@@ -191,26 +194,61 @@ export var SelectionLogic = class {
       .replace(/\s+/g, " ")
       .trim();
   }
+  // FIX 1: Strip markdown link URLs before building regex patterns.
+  // URLs fed into createFlexiblePattern generate ~100+ nested lazy quantifiers
+  // which cause catastrophic backtracking and crash mobile regex engines.
+  // We keep the visible link text (which is what the user selected) and discard
+  // the URL entirely — it is never needed for position matching in source text.
+  stripUrlsForPatternMatch(snippet) {
+    return snippet
+      // Markdown links [text](url) → keep text only
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      // Bare angle-bracket URLs <https://...> → remove entirely
+      .replace(/<https?:\/\/[^>]+>/g, "");
+  }
   findAllCandidates(text, snippet, bodyStart = 0) {
     const cleanSnippet = snippet.trim();
     if (!cleanSnippet)
       return [];
-    if (cleanSnippet.length > 800) {
-      const startAnchor = cleanSnippet.substring(0, 150);
-      const endAnchor = cleanSnippet.substring(cleanSnippet.length - 150);
+
+    // FIX 1 (applied): sanitize URLs out of the snippet before pattern building
+    const patternSnippet = this.stripUrlsForPatternMatch(cleanSnippet);
+
+    if (patternSnippet.length > 800) {
+      const startAnchor = patternSnippet.substring(0, 150);
+      const endAnchor = patternSnippet.substring(patternSnippet.length - 150);
       const startP = this.createFlexiblePattern(startAnchor);
-      const startRegex = new RegExp(startP, "g");
-      const endRegex = new RegExp(this.createFlexiblePattern(endAnchor), "g");
+      const endP = this.createFlexiblePattern(endAnchor);
+      let startRegex, endRegex;
+      try {
+        startRegex = new RegExp(startP, "g");
+        endRegex = new RegExp(endP, "g");
+      } catch (e) {
+        console.error("INVALID REGEX PATTERN (anchor):", e);
+        return [];
+      }
       const startMatches = [];
       const endMatches = [];
       let m;
-      while ((m = startRegex.exec(text)) !== null) {
-        if (m.index >= bodyStart)
-          startMatches.push(m);
+      // FIX 2: Wrap exec loops in try/catch — the crash happens at execution
+      // time on mobile, not at construction time, so we must guard here too.
+      try {
+        while ((m = startRegex.exec(text)) !== null) {
+          if (m.index >= bodyStart)
+            startMatches.push(m);
+        }
+      } catch (e) {
+        console.warn("Regex execution failed on startRegex (mobile backtracking limit):", e);
+        return [];
       }
-      while ((m = endRegex.exec(text)) !== null) {
-        if (m.index >= bodyStart)
-          endMatches.push(m);
+      try {
+        while ((m = endRegex.exec(text)) !== null) {
+          if (m.index >= bodyStart)
+            endMatches.push(m);
+        }
+      } catch (e) {
+        console.warn("Regex execution failed on endRegex (mobile backtracking limit):", e);
+        return [];
       }
       if (startMatches.length > 0 && endMatches.length > 0) {
         for (const startM of startMatches) {
@@ -225,22 +263,28 @@ export var SelectionLogic = class {
         }
       }
     }
-    const pattern = this.createFlexiblePattern(cleanSnippet);
+    const pattern = this.createFlexiblePattern(patternSnippet);
     let regex;
     try {
       regex = new RegExp(pattern, "g");
     } catch (e) {
       console.error("INVALID REGEX PATTERN:", pattern);
-      throw e;
+      return [];
     }
     const candidates = [];
     let match;
-    while ((match = regex.exec(text)) !== null) {
-      candidates.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        text: match[0]
-      });
+    // FIX 2: Guard execution — mobile engines can throw on backtracking overflow
+    try {
+      while ((match = regex.exec(text)) !== null) {
+        candidates.push({
+          start: match.index,
+          end: match.index + match[0].length,
+          text: match[0]
+        });
+      }
+    } catch (e) {
+      console.warn("Regex execution failed in findAllCandidates (mobile backtracking limit):", e);
+      return [];
     }
     return candidates;
   }
@@ -309,72 +353,92 @@ export var SelectionLogic = class {
     ].join("|"), "gm");
     let lastIndex = 0;
     let match;
-    while ((match = tokenRegex.exec(text)) !== null) {
-      for (let i = lastIndex; i < match.index; i++) {
-        map.push(i);
-        strippedRaw += text[i];
-      }
-      const fullMatch = match[0];
-      const matchStart = match.index;
-      if (match[1]) {
-        const firstNewline = fullMatch.indexOf("\n");
-        if (firstNewline !== -1) {
-          const codeStart = matchStart + firstNewline + 1;
-          const closingFence = fullMatch.lastIndexOf("```");
-          const codeEnd = closingFence !== -1 ? matchStart + closingFence : matchStart + fullMatch.length;
-          addRawText(codeStart, codeEnd);
+    // FIX 2: tokenRegex itself can backtrack on mobile for pathological input
+    try {
+      while ((match = tokenRegex.exec(text)) !== null) {
+        for (let i = lastIndex; i < match.index; i++) {
+          map.push(i);
+          strippedRaw += text[i];
         }
-      } else if (match[2]) {
-        const inner = fullMatch.substring(3, fullMatch.length - 2);
-        const pipeIndex = inner.indexOf("|");
-        const visibleStart = matchStart + 3 + (pipeIndex !== -1 ? pipeIndex + 1 : 0);
-        const visibleEnd = matchStart + fullMatch.length - 2;
-        extractVisibleText(visibleStart, visibleEnd);
-      } else if (match[3] || match[4] || match[5] || match[6]) {
-        const closingBracket = fullMatch.indexOf(match[3] || match[5] ? "][" : "](");
-        const textStart = matchStart + (match[3] || match[4] ? 2 : 1);
-        const textEnd = matchStart + (closingBracket !== -1 ? closingBracket : fullMatch.indexOf("]"));
-        extractVisibleText(textStart, textEnd);
-      } else if (match[7]) {
-        const inner = fullMatch.substring(2, fullMatch.length - 2);
-        const pipeIndex = inner.indexOf("|");
-        const visibleStart = matchStart + 2 + (pipeIndex !== -1 ? pipeIndex + 1 : 0);
-        const visibleEnd = matchStart + fullMatch.length - 2;
-        extractVisibleText(visibleStart, visibleEnd);
-      } else if (match[8]) {
-      } else if (match[9] || match[10]) {
-        const mStart = matchStart + (match[9] ? 2 : 1);
-        const mEnd = matchStart + fullMatch.length - (match[9] ? 2 : 1);
-        addRawText(mStart, mEnd);
-      } else if (match[12] || match[13]) {
-        const cStart = matchStart + 1;
-        const cEnd = matchStart + fullMatch.length - 1;
-        addRawText(cStart, cEnd);
-      } else if (match[15]) {
-        const charPos = matchStart + 1;
-        map.push(charPos);
-        strippedRaw += text[charPos];
+        const fullMatch = match[0];
+        const matchStart = match.index;
+        if (match[1]) {
+          const firstNewline = fullMatch.indexOf("\n");
+          if (firstNewline !== -1) {
+            const codeStart = matchStart + firstNewline + 1;
+            const closingFence = fullMatch.lastIndexOf("```");
+            const codeEnd = closingFence !== -1 ? matchStart + closingFence : matchStart + fullMatch.length;
+            addRawText(codeStart, codeEnd);
+          }
+        } else if (match[2]) {
+          const inner = fullMatch.substring(3, fullMatch.length - 2);
+          const pipeIndex = inner.indexOf("|");
+          const visibleStart = matchStart + 3 + (pipeIndex !== -1 ? pipeIndex + 1 : 0);
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
+        } else if (match[3] || match[4] || match[5] || match[6]) {
+          const closingBracket = fullMatch.indexOf(match[3] || match[5] ? "][" : "](");
+          const textStart = matchStart + (match[3] || match[4] ? 2 : 1);
+          const textEnd = matchStart + (closingBracket !== -1 ? closingBracket : fullMatch.indexOf("]"));
+          extractVisibleText(textStart, textEnd);
+        } else if (match[7]) {
+          const inner = fullMatch.substring(2, fullMatch.length - 2);
+          const pipeIndex = inner.indexOf("|");
+          const visibleStart = matchStart + 2 + (pipeIndex !== -1 ? pipeIndex + 1 : 0);
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
+        } else if (match[8]) {
+        } else if (match[9] || match[10]) {
+          const mStart = matchStart + (match[9] ? 2 : 1);
+          const mEnd = matchStart + fullMatch.length - (match[9] ? 2 : 1);
+          addRawText(mStart, mEnd);
+        } else if (match[12] || match[13]) {
+          const cStart = matchStart + 1;
+          const cEnd = matchStart + fullMatch.length - 1;
+          addRawText(cStart, cEnd);
+        } else if (match[15]) {
+          const charPos = matchStart + 1;
+          map.push(charPos);
+          strippedRaw += text[charPos];
+        }
+        lastIndex = tokenRegex.lastIndex;
       }
-      lastIndex = tokenRegex.lastIndex;
+    } catch (e) {
+      console.warn("tokenRegex execution failed in findCandidatesStripped (mobile backtracking limit):", e);
+      return [];
     }
     for (let i = lastIndex; i < text.length; i++) {
       map.push(i);
       strippedRaw += text[i];
     }
-    const pattern = this.createFlexiblePattern(snippet.trim());
-    const regex = new RegExp(pattern, "g");
+    // FIX 1 (applied): strip URLs from snippet before building pattern
+    const patternSnippet = this.stripUrlsForPatternMatch(snippet.trim());
+    const pattern = this.createFlexiblePattern(patternSnippet);
+    let regex;
+    try {
+      regex = new RegExp(pattern, "g");
+    } catch (e) {
+      console.error("INVALID REGEX PATTERN in findCandidatesStripped:", e);
+      return [];
+    }
     const candidates = [];
     let strippedMatch;
-    while ((strippedMatch = regex.exec(strippedRaw)) !== null) {
-      const strippedStart = strippedMatch.index;
-      const strippedEnd = strippedMatch.index + strippedMatch[0].length;
-      const rawStart = map[strippedStart];
-      const rawEnd = strippedEnd < map.length ? map[strippedEnd] : map[strippedEnd - 1] + 1;
-      candidates.push({
-        start: rawStart,
-        end: rawEnd,
-        text: text.substring(rawStart, rawEnd)
-      });
+    // FIX 2: Guard execution here too
+    try {
+      while ((strippedMatch = regex.exec(strippedRaw)) !== null) {
+        const strippedStart = strippedMatch.index;
+        const strippedEnd = strippedMatch.index + strippedMatch[0].length;
+        const rawStart = map[strippedStart];
+        const rawEnd = strippedEnd < map.length ? map[strippedEnd] : map[strippedEnd - 1] + 1;
+        candidates.push({
+          start: rawStart,
+          end: rawEnd,
+          text: text.substring(rawStart, rawEnd)
+        });
+      }
+    } catch (e) {
+      console.warn("Regex execution failed in findCandidatesStripped (mobile backtracking limit):", e);
+      return [];
     }
     return candidates;
   }

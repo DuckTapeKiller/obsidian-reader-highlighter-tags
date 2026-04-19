@@ -4,6 +4,7 @@ import { SelectionLogic } from "./core/SelectionLogic";
 import { TagSuggestModal } from "./modals/TagSuggestModal";
 import { AnnotationModal } from "./modals/AnnotationModal";
 import { HighlightNavigatorView, HIGHLIGHT_NAVIGATOR_VIEW } from "./views/HighlightNavigator";
+import { ResearchView, RESEARCH_VIEW } from "./views/ResearchView";
 import { getScroll, applyScroll } from "./utils/dom";
 import { exportHighlightsToMD } from "./utils/export";
 
@@ -99,6 +100,12 @@ export default class ReadingHighlighterPlugin extends Plugin {
         this.registerView(
             HIGHLIGHT_NAVIGATOR_VIEW,
             (leaf) => new HighlightNavigatorView(leaf, this)
+        );
+
+        // Register the Global Research View
+        this.registerView(
+            RESEARCH_VIEW,
+            (leaf) => new ResearchView(leaf, this)
         );
 
         // -- Settings Tab --
@@ -232,6 +239,15 @@ export default class ReadingHighlighterPlugin extends Plugin {
             },
         });
 
+        // Open global research view
+        this.addCommand({
+            id: "open-research-view",
+            name: "Open global research view",
+            callback: () => {
+                this.activateResearchView();
+            },
+        });
+
         // Export highlights
         this.addCommand({
             id: "export-highlights",
@@ -287,6 +303,25 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 },
             });
         }
+    }
+
+    async activateResearchView() {
+        const { workspace } = this.app;
+
+        let leaf = null;
+        const leaves = workspace.getLeavesOfType(RESEARCH_VIEW);
+
+        if (leaves.length > 0) {
+            // A leaf with our view already exists, use that
+            leaf = leaves[0];
+        } else {
+            // Create a new leaf in the main workspace center
+            leaf = workspace.getLeaf("tab");
+            await leaf.setViewState({ type: RESEARCH_VIEW, active: true });
+        }
+
+        // "Reveal" the leaf in case it is hidden
+        workspace.revealLeaf(leaf);
     }
 
     onunload() {
@@ -896,6 +931,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             /^[-*+]\s+/,
             /^\d{1,3}[.)]\s+/,
             /^\[\^[^\]]+\]:\s*/,
+            /^\[![^\]]+\]\s*/,
         ];
 
         let matched = true;
@@ -1353,6 +1389,8 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
         // === Frontmatter Integration ===
         containerEl.createEl("h3", { text: "Frontmatter Integration" });
 
+        let tagSetting;
+
         new Setting(containerEl)
             .setName("Auto-tag highlight in Frontmatter")
             .setDesc("Automatically inject a specific tag into the note's frontmatter whenever you highlight text.")
@@ -1361,20 +1399,24 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.enableFrontmatterTag = value;
                     await this.plugin.saveSettings();
-                    this.display(); // Refresh to show/hide the tag field
+                    // Fix jumping scroll: toggle visibility via CSS instead of this.display()
+                    if (tagSetting) {
+                        tagSetting.settingEl.style.display = value ? "" : "none";
+                    }
                 }));
 
-        if (this.plugin.settings.enableFrontmatterTag) {
-            new Setting(containerEl)
-                .setName("Frontmatter highlight tag")
-                .setDesc("The tag to add (e.g. 'resaltados'). Do not include the # symbol.")
-                .addText(text => text
-                    .setPlaceholder("resaltados")
-                    .setValue(this.plugin.settings.frontmatterTag)
-                    .onChange(async (value) => {
-                        this.plugin.settings.frontmatterTag = value.replace(/^#/, ''); // Strip # if user adds it
-                        await this.plugin.saveSettings();
-                    }));
-        }
+        tagSetting = new Setting(containerEl)
+            .setName("Frontmatter highlight tag")
+            .setDesc("The tag to add (e.g. 'resaltados'). Do not include the # symbol.")
+            .addText(text => text
+                .setPlaceholder("resaltados")
+                .setValue(this.plugin.settings.frontmatterTag)
+                .onChange(async (value) => {
+                    this.plugin.settings.frontmatterTag = value.replace(/^#/, ''); // Strip # if user adds it
+                    await this.plugin.saveSettings();
+                }));
+
+        // Set initial visibility without calling this.display()
+        tagSetting.settingEl.style.display = this.plugin.settings.enableFrontmatterTag ? "" : "none";
     }
 }

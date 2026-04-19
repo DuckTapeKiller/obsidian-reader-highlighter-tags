@@ -77,17 +77,16 @@ describe("createFlexibleLinePattern", () => {
   it("matches source with inline footnotes skipped", () => {
     const pattern = logic.createFlexibleLinePattern("end. Next");
     const regex = new RegExp(pattern, "gmu");
-    expect(regex.test("end.[^8] Next")).toBe(true);
+    // Filter out the noise using our new Structural Filter!
+    const filtered = logic.applyStructuralFilter({ text: "end.[^8] Next", segments: [] }).text;
+    expect(regex.test(filtered)).toBe(true);
   });
 
   it("matches source with bold/italic formatting", () => {
     const pattern = logic.createFlexibleLinePattern("las Lista Real");
     const regex = new RegExp(pattern, "gmu");
-    // Single * between space and L is absorbed by the space-gap pattern
-    expect(regex.test("las *Lista Real")).toBe(true);
-    // ** and *** cases: inter-char filler absorbs adjacent formatting chars
-    // The full pipeline (createFlexiblePattern) handles these; at line level,
-    // only the space-adjacent case is guaranteed to absorb formatting.
+    const filtered = logic.applyStructuralFilter({ text: "las *Lista Real", segments: [] }).text;
+    expect(regex.test(filtered)).toBe(true);
   });
 
   it("generates valid regex for mixed cuneiform + ASCII", () => {
@@ -124,7 +123,8 @@ describe("createFlexiblePattern", () => {
     const snippet = "mundo. Ensor interpretaba temas";
     const pattern = logic.createFlexiblePattern(snippet);
     const regex = new RegExp(pattern, "gmu");
-    expect(regex.test(source)).toBe(true);
+    const filtered = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    expect(regex.test(filtered)).toBe(true);
   });
 
   it("matches cuneiform paragraph against source", () => {
@@ -132,7 +132,8 @@ describe("createFlexiblePattern", () => {
     const snippet = "Atrahasis (𒀜𒊏𒄩𒋀) es un poema épico";
     const pattern = logic.createFlexiblePattern(snippet);
     const regex = new RegExp(pattern, "gmu");
-    expect(regex.test(source)).toBe(true);
+    const filtered = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    expect(regex.test(filtered)).toBe(true);
   });
 
   it("matches italic text against source", () => {
@@ -140,7 +141,8 @@ describe("createFlexiblePattern", () => {
     const snippet = "en una de las Lista Real Sumerias. La copia";
     const pattern = logic.createFlexiblePattern(snippet);
     const regex = new RegExp(pattern, "gmu");
-    expect(regex.test(source)).toBe(true);
+    const filtered = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    expect(regex.test(filtered)).toBe(true);
   });
 
   it("matches footnote list entries", () => {
@@ -251,10 +253,82 @@ title: Test
     const bodyStart = source.indexOf("\n\n") + 2;
     const body = source.substring(bodyStart);
 
+    const filteredBody = logic.applyStructuralFilter({ text: body, segments: [] }).text;
     const cleanSnippet = logic.stripBrowserJunk(snippet);
-    const candidates = logic.findAllCandidates(body, cleanSnippet, 0);
+    const candidates = logic.findAllCandidates(filteredBody, cleanSnippet, 0);
 
     expect(candidates.length).toBeGreaterThan(0);
     expect(candidates[0].text).toContain("𒀜𒊏𒄩𒋀");
+  });
+});
+
+// ====================================================================
+// Structural Filter (Noise Shield) Edge Cases
+// ====================================================================
+describe("Structural Filter (Noise Shield) Integration", () => {
+  it("Issue B: Deeply Nested Lists with Checkboxes & Links", () => {
+    const source = `- Elemento principal de la lista, con un pie de página temprano[^1].
+	- Nivel dos: Aquí hay algo de texto normal.
+		- Nivel tres: Citas superpuestas: «Los dioses dijeron: "Que haya luz"[^2] pero nadie escuchó».
+			- Nivel cuatro: Esta línea termina abruptamente.[^3]
+				- Nivel cinco: El corazón de las tinieblas. Textos en **negrita y *cursiva al mismo tiempo***.
+	- De vuelta al nivel dos. ¿Sobrevivirá el motor de Regex a este salto?
+		- [x] Una tarea completada con un enlace a [Wikipedia](https://wikipedia.org) y un footnote[^4].
+		- [ ] Una tarea sin completar con ~~texto tachado~~ y \`código en línea\`.`;
+    const snippet = "Elemento principal de la lista, con un pie de página temprano. Nivel dos: Aquí hay algo de texto normal. Nivel tres: Citas superpuestas: \"Los dioses dijeron: \"Que haya luz\" pero nadie escuchó\". Nivel cuatro: Esta línea termina abruptamente. Nivel cinco: El corazón de las tinieblas. Textos en negrita y cursiva al mismo tiempo. De vuelta al nivel dos. ¿Sobrevivirá el motor de Regex a este salto? Una tarea completada con un enlace a Wikipedia y un footnote. Una tarea sin completar con texto tachado y código en línea.";
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
+  });
+
+  it("Issue C: Intersecting Blockquotes & Math Formulas", () => {
+    const source = `> "El conocimiento es poder", dijo Sir Francis Bacon.
+> Pero, ¿qué pasa cuando el texto...
+>> ...se anida profundamente dentro de citas ocultas?
+>> Y además contiene matemáticas en línea como $\\sqrt{a^2 + b^2} = c$?
+> 
+> Y luego regresa e incluye footnotes [^5] dentro del formato de la cita.`;
+    const snippet = `"El conocimiento es poder", dijo Sir Francis Bacon. Pero, ¿qué pasa cuando el texto... ...se anida profundamente dentro de citas ocultas? Y además contiene matemáticas en línea como sqrt{a^2 + b^2} = c? Y luego regresa e incluye footnotes dentro del formato de la cita.`;
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
+  });
+
+  it("Issue D: Markdown Tables with Alignment Rows", () => {
+    const source = `| Header A (Left)          |  Header B (Center)   |  Header C (Right) |
+| :----------------------- | :------------------: | ----------------: |
+| Fila 1, **Columna 1**    | Fila 1, *Columna 2*  | Fila 1, ~~Col 3~~ |
+| Una celda [^6] muy larga | Texto con emojis 🚀✨ |          $E=mc^2$ |
+| Nested \`code\`            | «Tablas y comillas»  |        Fila final |`;
+    const snippet = `Header A (Left) Header B (Center) Header C (Right) Fila 1, Columna 1 Fila 1, Columna 2 Fila 1, Col 3 Una celda muy larga Texto con emojis 🚀✨ E=mc^2 Nested code «Tablas y comillas» Fila final`;
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
+  });
+
+  it("Issue E: Callout Borders", () => {
+    const source = `> [!WARNING] Cuidado con los Callouts
+> Este bloque es un callout de Obsidian. Internamente, Obsidian genera un div con múltiples capas (\`callout-title\`, \`callout-content\`). Resaltar entre párrafos aquí es una prueba ácida.`;
+    const snippet = `Cuidado con los Callouts
+Este bloque es un callout de Obsidian. Internamente, Obsidian genera un div con múltiples capas (callout-title, callout-content). Resaltar entre párrafos aquí es una prueba ácida.`;
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
   });
 });

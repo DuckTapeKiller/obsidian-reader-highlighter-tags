@@ -115,7 +115,7 @@ __export(main_exports, {
   default: () => ReadingHighlighterPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/ui/FloatingManager.js
 var import_obsidian = require("obsidian");
@@ -401,10 +401,10 @@ var BLOCK_LEVEL_TAGS_FOR_SPLIT = /* @__PURE__ */ new Set([
   "TD",
   "TH"
 ]);
+var INLINE_DECORATION_PATTERN = "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^";
 var GAP_PATTERN = "[\\s\\u00a0\\u1680\\u2000-\\u200b\\u202f\\u205f\\u3000\\u21a9\\u21b5\\ufe0e\\ufe0f]";
-var INLINE_DECORATION_PATTERN = "(?:<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`)";
-var OPTIONAL_MARKDOWN_LINE_PREFIX = "[ \\t]{0,3}(?:(?:>\\s*)*(?:#{1,6}[ \\t]+|-\\s\\[[ xX]\\][ \\t]+|[-*+][ \\t]+|\\d{1,3}[.)][ \\t]+|\\[\\^[^\\]]+\\]:[ \\t]*))?";
-var MARKDOWN_PREFIX_ONLY_RE = /^[ \t]*(?:(?:>\s*)+|#{1,6}[ \t]*|-\s\[[ xX]\][ \t]*|[-*+][ \t]*|\d{1,3}[.)][ \t]*|\[\^[^\]]+\]:[ \t]*)+$/;
+var OPTIONAL_MARKDOWN_LINE_PREFIX = `[ \\t]{0,3}(?:(?:>\\s*)*)(?:#{1,6}[ \\t]+|-\\s\\[[ xX]\\][ \\t]+|[-*+][ \\t]+|\\d{1,3}[.)][ \\t]+|\\[\\^[^\\]]+\\]:[ \\t]*|>\\[![^\\]]+\\][ \\t]*)?(?:(?:${INLINE_DECORATION_PATTERN})){0,3}[ \\t]*`;
+var MARKDOWN_PREFIX_ONLY_RE = /^[ \t]*(?:(?:>\s*)+|#{1,6}[ \t]*|-\s\[[ xX]\][ \t]*|[-*+][ \t]*|\d{1,3}[.)][ \t]*|\[\^[^\]]+\]:[ \t]*|>\s*\[![^\]]+\][ \t]*)+$/;
 var INLINE_DECORATION_RE = /<mark[^>]*>|<\/mark>|==|\*\*|~~|\*|_|`/g;
 var SelectionLogic = class {
   constructor(app) {
@@ -612,9 +612,74 @@ var SelectionLogic = class {
       file,
       pOffset: lastOffset + fmOffset
     });
-    const result = { text: virtualText, segments };
+    const result = this.applyStructuralFilter({ text: virtualText, segments });
     opContext.cache.set(file.path, result);
     return result;
+  }
+  // Structural Filtering Engine (Noise Shield)
+  // Computationally strips invisible markdown syntax while keeping offsets perfectly mapped
+  applyStructuralFilter({ text, segments }) {
+    const patterns = [
+      // Footnotes: [^123]
+      /\[\^[^\]]+\]/g,
+      // Task checkmarks: - [x] or - [ ] 
+      /-\s\[[ xX]\]/g,
+      // Callout prefixes: > [!WARNING]
+      />\s*\[![^\]]+\]/g,
+      // Plugin-injected highlighting
+      /==|<mark[^>]*>|<\/mark>/g,
+      // Table alignment rows
+      /(?:^|\n)[ \t]*\|?[ \t:|-]+\|[ \t:|-]*(?=\n|$)/g,
+      // Link URL portion: ](https://...)
+      /\]\([^)]+\)/g,
+      // Markdown Images: ![caption](url)
+      /!\[[^\]]*\]\([^)]+\)/g,
+      // Global HTML Tags (Reading view strips these)
+      /<[^>]+>/g
+    ];
+    let currentText = text;
+    let currentSegments = [...segments];
+    for (const regex of patterns) {
+      let match;
+      regex.lastIndex = 0;
+      const matches = [];
+      while ((match = regex.exec(currentText)) !== null) {
+        matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
+      }
+      for (let i = matches.length - 1; i >= 0; i--) {
+        const { start, end, length } = matches[i];
+        currentText = currentText.substring(0, start) + currentText.substring(end);
+        const newSegments = [];
+        for (const seg of currentSegments) {
+          if (seg.vEnd <= start) {
+            newSegments.push(seg);
+          } else if (seg.vStart >= end) {
+            newSegments.push({
+              ...seg,
+              vStart: seg.vStart - length,
+              vEnd: seg.vEnd - length
+            });
+          } else {
+            if (seg.vStart < start) {
+              newSegments.push({
+                ...seg,
+                vEnd: start
+              });
+            }
+            if (seg.vEnd > end) {
+              newSegments.push({
+                ...seg,
+                vStart: start,
+                vEnd: seg.vEnd - length,
+                pOffset: seg.pOffset + (end - seg.vStart)
+              });
+            }
+          }
+        }
+        currentSegments = newSegments;
+      }
+    }
+    return { text: currentText, segments: currentSegments };
   }
   mapVirtualToPhysical(vStart, vEnd, segments) {
     const startSeg = segments.find((s) => vStart >= s.vStart && vStart < s.vEnd);
@@ -659,7 +724,7 @@ var SelectionLogic = class {
       return "";
     }
     const contentPatterns = lines.map((line) => this.createFlexibleLinePattern(line));
-    const lineBridge = `(?:[ \\t]*(?:${INLINE_DECORATION_PATTERN}){0,3}[ \\t]*\\r?\\n(?:[ \\t>]*\\r?\\n){0,3})`;
+    const lineBridge = `(?:[ \\t]*(?:(?:${INLINE_DECORATION_PATTERN})){0,3}[ \\t]*\\r?\\n(?:[ \\t>]*\\r?\\n){0,3})`;
     const joined = contentPatterns.map((pattern, index) => {
       const linePattern = `${OPTIONAL_MARKDOWN_LINE_PREFIX}${pattern}`;
       return index === 0 ? linePattern : `${lineBridge}${linePattern}`;
@@ -678,12 +743,12 @@ var SelectionLogic = class {
         continue;
       }
       if (pendingGap && parts.length > 0) {
-        parts.push(`(?:${GAP_PATTERN}|[-\u2010-\u2015]|"|'|[\u201C\u201D\u2018\u2019\xAB\xBB]|[\\*_~=]|\\[\\^[^\\]]+\\]){1,5}`);
+        parts.push(`(?:${GAP_PATTERN}|[-\u2010-\u2015]|"|'|[\u201C\u201D\u2018\u2019\xAB\xBB]|\\\\|\\||>|#|\\*|_|~|=|\\$|\\^|\\{|\\}|\\(|\\]|\\[|\\)|\`){1,15}`);
         pendingGap = false;
       }
       parts.push(this.getFlexibleCharPattern(char));
       if (i < codePoints.length - 1) {
-        parts.push(`(?:${GAP_PATTERN}|[-\u2010-\u2015]|"|'|[\u201C\u201D\u2018\u2019\xAB\xBB]|[\\*_~=]|\\[\\^[^\\]]+\\]){0,3}`);
+        parts.push(`(?:${GAP_PATTERN}|[-\u2010-\u2015]|"|'|[\u201C\u201D\u2018\u2019\xAB\xBB]|\\\\|\\||>|#|\\*|_|~|=|\\$|\\^|\\{|\\}|\\(|\\]|\\[|\\)|\`){0,5}`);
       }
     }
     if (parts.length === 0) {
@@ -707,10 +772,10 @@ var SelectionLogic = class {
     if (!text) {
       return text;
     }
-    return text.normalize("NFC").replace(/#:~:text=[^&\s]+(?:&|$)?/g, "").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/(?:\u21a9|\u21b5|\ufe0e|\ufe0f)+/g, " ").replace(/[\u00a0\u202f]/g, " ").replace(/[‐‑‒–—―]/g, "-").replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'").replace(/\[\^?(?:[0-9-]+|[a-zA-Z?]+)\]/g, "").replace(/\s+/g, " ").trim();
+    return text.normalize("NFC").replace(/#:~:text=[^&\s]+(?:&|$)?/g, "").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/(?:\u21a9|\u21b5|\ufe0e|\ufe0f)+/g, " ").replace(/[\u00a0\u202f]/g, " ").replace(/[‐‑‒–—―]/g, "-").replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'").replace(/\[\^?(?:[0-9-]+|[a-zA-Z?]+)\]/g, "").replace(/[ \t]+/g, " ").trim();
   }
   stripUrlsForPatternMatch(snippet) {
-    return snippet.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/<https?:\/\/[^>]+>/g, "");
+    return snippet;
   }
   findAllCandidates(text, snippet, bodyStart = 0) {
     const cleanSnippet = snippet.trim();
@@ -721,9 +786,12 @@ var SelectionLogic = class {
     if (!patternSnippet) {
       return [];
     }
-    if (patternSnippet.length > 800) {
-      const startAnchor = patternSnippet.substring(0, 150);
-      const endAnchor = patternSnippet.substring(patternSnippet.length - 150);
+    const lineCount = (patternSnippet.match(/\n/g) || []).length;
+    if (patternSnippet.length > 800 || lineCount >= 2) {
+      const startAnchorLen = Math.min(patternSnippet.length / 2, 150);
+      const endAnchorLen = Math.min(patternSnippet.length / 2, 150);
+      const startAnchor = patternSnippet.substring(0, startAnchorLen);
+      const endAnchor = patternSnippet.substring(patternSnippet.length - endAnchorLen);
       const startP = this.createFlexiblePattern(startAnchor);
       const endP = this.createFlexiblePattern(endAnchor);
       let startRegex;
@@ -737,11 +805,11 @@ var SelectionLogic = class {
       }
       const startMatches = [];
       const endMatches = [];
-      let match2;
+      let match;
       try {
-        while ((match2 = startRegex.exec(text)) !== null) {
-          if (match2.index >= bodyStart) {
-            startMatches.push(match2);
+        while ((match = startRegex.exec(text)) !== null) {
+          if (match.index >= bodyStart) {
+            startMatches.push(match);
           }
         }
       } catch (e) {
@@ -749,9 +817,9 @@ var SelectionLogic = class {
         return [];
       }
       try {
-        while ((match2 = endRegex.exec(text)) !== null) {
-          if (match2.index >= bodyStart) {
-            endMatches.push(match2);
+        while ((match = endRegex.exec(text)) !== null) {
+          if (match.index >= bodyStart) {
+            endMatches.push(match);
           }
         }
       } catch (e) {
@@ -783,18 +851,13 @@ var SelectionLogic = class {
       return [];
     }
     const candidates = [];
-    let match;
-    try {
-      while ((match = regex.exec(text)) !== null) {
-        candidates.push({
-          start: match.index,
-          end: match.index + match[0].length,
-          text: match[0]
-        });
-      }
-    } catch (e) {
-      console.warn("Regex execution failed in findAllCandidates (mobile backtracking limit):", e);
-      return [];
+    const results = this.safeRegexExec(regex, text, 3e3);
+    for (const match of results) {
+      candidates.push({
+        start: match.index,
+        end: match.index + match.length,
+        text: match.text
+      });
     }
     return candidates;
   }
@@ -1588,6 +1651,219 @@ var HighlightNavigatorView = class extends import_obsidian4.ItemView {
   }
 };
 
+// src/views/ResearchView.js
+var import_obsidian5 = require("obsidian");
+
+// src/core/VaultScanner.js
+init_export();
+var VaultScanner = class {
+  constructor(app) {
+    this.app = app;
+    this.cache = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Scans the entire vault for highlights asynchronously.
+   * @param {function} onProgress - Callback with signatures (current, total, filename)
+   * @returns {Promise<Array>} Array of { file: TFile, highlights: Array }
+   */
+  async scanVault(onProgress = () => {
+  }) {
+    const files = this.app.vault.getMarkdownFiles();
+    const total = files.length;
+    const results = [];
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < total; i += BATCH_SIZE) {
+      const batch = files.slice(i, i + BATCH_SIZE);
+      const batchPromises = batch.map(async (file) => {
+        const stat = file.stat;
+        const cached = this.cache.get(file.path);
+        if (cached && cached.mtime === stat.mtime) {
+          return { file, highlights: cached.highlights };
+        }
+        const content = await this.app.vault.cachedRead(file);
+        const highlights = getHighlightsFromContent(content);
+        this.cache.set(file.path, {
+          mtime: stat.mtime,
+          highlights
+        });
+        return { file, highlights };
+      });
+      const batchResults = await Promise.all(batchPromises);
+      for (const res of batchResults) {
+        if (res.highlights.length > 0) {
+          results.push(res);
+        }
+      }
+      const current = Math.min(i + BATCH_SIZE, total);
+      const lastFileName = batch[batch.length - 1].basename;
+      onProgress(current, total, lastFileName);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    results.sort((a, b) => a.file.basename.localeCompare(b.file.basename));
+    return results;
+  }
+  /**
+   * Clear the cache to force a full re-scan
+   */
+  clearCache() {
+    this.cache.clear();
+  }
+};
+
+// src/views/ResearchView.js
+var RESEARCH_VIEW = "reader-research-view";
+var ResearchView = class extends import_obsidian5.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.scanner = new VaultScanner(plugin.app);
+    this.scanResults = [];
+    this.searchQuery = "";
+    this.isScanning = false;
+    this.expandedFiles = /* @__PURE__ */ new Set();
+    this.progressEl = null;
+    this.progressTextEl = null;
+  }
+  getViewType() {
+    return RESEARCH_VIEW;
+  }
+  getDisplayText() {
+    return "Global Research View";
+  }
+  getIcon() {
+    return "search";
+  }
+  async onOpen() {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass("research-view-container");
+    const header = container.createDiv({ cls: "research-view-header" });
+    const titleRow = header.createDiv({ cls: "research-view-title-row" });
+    titleRow.createEl("h3", { text: "Research View" });
+    const scanBtn = titleRow.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
+    scanBtn.onclick = () => this.startScan();
+    const searchContainer = header.createDiv({ cls: "research-view-search" });
+    const searchInput = searchContainer.createEl("input", {
+      type: "text",
+      placeholder: "Search all highlights...",
+      cls: "research-search-input"
+    });
+    searchInput.oninput = (e) => {
+      this.searchQuery = e.target.value.toLowerCase();
+      this.renderContent();
+    };
+    this.progressContainer = header.createDiv({ cls: "research-progress-container", attr: { style: "display: none;" } });
+    this.progressTextEl = this.progressContainer.createDiv({ cls: "research-progress-text" });
+    const progressTrack = this.progressContainer.createDiv({ cls: "research-progress-track" });
+    this.progressEl = progressTrack.createDiv({ cls: "research-progress-bar" });
+    this.contentEl = container.createDiv({ cls: "research-view-content" });
+    this.renderContent();
+  }
+  async startScan() {
+    if (this.isScanning)
+      return;
+    this.isScanning = true;
+    this.progressContainer.style.display = "block";
+    this.contentEl.empty();
+    try {
+      this.scanResults = await this.scanner.scanVault((current, total, lastFile) => {
+        const percent = Math.round(current / total * 100);
+        this.progressEl.style.width = `${percent}%`;
+        this.progressTextEl.textContent = `Scanning: ${current}/${total} (${percent}%) - ${lastFile}...`;
+      });
+      if (this.scanResults.length > 0) {
+        this.expandedFiles.add(this.scanResults[0].file.path);
+      }
+    } catch (err) {
+      console.error(err);
+      this.contentEl.createDiv({ text: "Error during scan: " + err.message, cls: "research-error" });
+    } finally {
+      this.isScanning = false;
+      this.progressContainer.style.display = "none";
+      this.renderContent();
+    }
+  }
+  renderContent() {
+    if (this.isScanning)
+      return;
+    this.contentEl.empty();
+    if (this.scanResults.length === 0) {
+      this.contentEl.createDiv({
+        cls: "research-empty",
+        text: "No highlights found. Click 'Scan Vault' to analyze."
+      });
+      return;
+    }
+    const filteredResults = [];
+    let totalHighlights = 0;
+    let totalFiltered = 0;
+    for (const res of this.scanResults) {
+      const matches = res.highlights.filter((h) => {
+        if (!this.searchQuery)
+          return true;
+        return h.text.toLowerCase().includes(this.searchQuery);
+      });
+      totalHighlights += res.highlights.length;
+      totalFiltered += matches.length;
+      if (matches.length > 0) {
+        filteredResults.push({ file: res.file, highlights: matches, totalInFile: res.highlights.length });
+      }
+    }
+    const statsRow = this.contentEl.createDiv({ cls: "research-stats" });
+    const fileCount = filteredResults.length;
+    const totalFileCount = this.scanResults.length;
+    if (this.searchQuery) {
+      statsRow.textContent = `Found ${totalFiltered} highlights in ${fileCount} files (filtered from ${totalHighlights}).`;
+    } else {
+      statsRow.textContent = `Found ${totalHighlights} total highlights across ${totalFileCount} files.`;
+    }
+    for (const group of filteredResults) {
+      const groupEl = this.contentEl.createDiv({ cls: "research-group" });
+      const isExpanded = this.expandedFiles.has(group.file.path) || this.searchQuery.length > 0;
+      const headerEl = groupEl.createDiv({ cls: "research-group-header" });
+      const expandIcon = headerEl.createSpan({ cls: "research-expand-icon" });
+      expandIcon.innerHTML = isExpanded ? "\u25BC" : "\u25B6";
+      const titleEl = headerEl.createSpan({ cls: "research-group-title", text: group.file.basename });
+      const badgeEl = headerEl.createSpan({ cls: "research-group-badge", text: `${group.highlights.length}` });
+      headerEl.onclick = () => {
+        if (this.expandedFiles.has(group.file.path)) {
+          this.expandedFiles.delete(group.file.path);
+        } else {
+          this.expandedFiles.add(group.file.path);
+        }
+        this.renderContent();
+      };
+      if (isExpanded) {
+        const listEl = groupEl.createDiv({ cls: "research-highlight-list" });
+        group.highlights.forEach((h, idx) => {
+          const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
+          if (h.type === "markdown") {
+            const dot = itemEl.createSpan({ cls: "research-color-dot" });
+            if (h.color) {
+              dot.style.backgroundColor = h.color;
+            }
+          }
+          const textEl = itemEl.createSpan({ cls: "research-item-text", text: h.text });
+          itemEl.onclick = (e) => {
+            e.stopPropagation();
+            this.jumpToHighlight(group.file, h.line);
+          };
+        });
+      }
+    }
+  }
+  async jumpToHighlight(file, line) {
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.openFile(file);
+    if (leaf.view instanceof import_obsidian5.MarkdownView) {
+      leaf.setEphemeralState({
+        line,
+        focus: true
+      });
+    }
+  }
+};
+
 // src/utils/dom.js
 function getScroll(view) {
   var _a;
@@ -1677,7 +1953,7 @@ var DEFAULT_SETTINGS = {
   // NEW: Smart paragraph snapping
   enableSmartParagraphSelection: false
 };
-var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
+var ReadingHighlighterPlugin = class extends import_obsidian6.Plugin {
   async onload() {
     await this.loadSettings();
     this.floatingManager = new FloatingManager(this);
@@ -1687,6 +1963,10 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     this.registerView(
       HIGHLIGHT_NAVIGATOR_VIEW,
       (leaf) => new HighlightNavigatorView(leaf, this)
+    );
+    this.registerView(
+      RESEARCH_VIEW,
+      (leaf) => new ResearchView(leaf, this)
     );
     this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
     this.registerCommands();
@@ -1705,13 +1985,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
         }
       })
     );
-    if (import_obsidian5.Platform.isMobile) {
+    if (import_obsidian6.Platform.isMobile) {
       const btn = this.addRibbonIcon("highlighter", "Highlight Selection", () => {
         const view = this.getActiveReadingView();
         if (view)
           this.highlightSelection(view);
         else
-          new import_obsidian5.Notice("Open a note in Reading View first.");
+          new import_obsidian6.Notice("Open a note in Reading View first.");
       });
       this.register(() => btn.remove());
     }
@@ -1804,6 +2084,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       }
     });
     this.addCommand({
+      id: "open-research-view",
+      name: "Open global research view",
+      callback: () => {
+        this.activateResearchView();
+      }
+    });
+    this.addCommand({
       id: "export-highlights",
       name: "Export highlights to new note",
       checkCallback: (checking) => {
@@ -1860,6 +2147,18 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
         }
       });
     }
+  }
+  async activateResearchView() {
+    const { workspace } = this.app;
+    let leaf = null;
+    const leaves = workspace.getLeavesOfType(RESEARCH_VIEW);
+    if (leaves.length > 0) {
+      leaf = leaves[0];
+    } else {
+      leaf = workspace.getLeaf("tab");
+      await leaf.setViewState({ type: RESEARCH_VIEW, active: true });
+    }
+    workspace.revealLeaf(leaf);
   }
   onunload() {
     this.floatingManager.unload();
@@ -1984,7 +2283,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   // Undo last highlight
   async undoLastHighlight() {
     if (!this.lastModification) {
-      new import_obsidian5.Notice("Nothing to undo.");
+      new import_obsidian6.Notice("Nothing to undo.");
       return;
     }
     try {
@@ -1992,10 +2291,10 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
         this.lastModification.file,
         this.lastModification.original
       );
-      new import_obsidian5.Notice("Undone last highlight.");
+      new import_obsidian6.Notice("Undone last highlight.");
       this.lastModification = null;
     } catch (err) {
-      new import_obsidian5.Notice("Failed to undo.");
+      new import_obsidian6.Notice("Failed to undo.");
       console.error(err);
     }
   }
@@ -2004,7 +2303,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     const sel = window.getSelection();
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) {
-      new import_obsidian5.Notice("No text selected.");
+      new import_obsidian6.Notice("No text selected.");
       return;
     }
     const scrollPos = getScroll(view);
@@ -2017,7 +2316,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       request.occurrenceIndex
     );
     if (!result) {
-      new import_obsidian5.Notice("Could not locate selection in file.");
+      new import_obsidian6.Notice("Could not locate selection in file.");
       return;
     }
     const targetFile = result.file;
@@ -2031,10 +2330,10 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     await this.applyMarkdownModification(targetFile, "", result.start, result.end, mode, payload);
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
-    if (this.settings.enableHaptics && import_obsidian5.Platform.isMobile) {
+    if (this.settings.enableHaptics && import_obsidian6.Platform.isMobile) {
       (_a = navigator.vibrate) == null ? void 0 : _a.call(navigator, 10);
     }
-    new import_obsidian5.Notice("Highlighted!");
+    new import_obsidian6.Notice("Highlighted!");
   }
   // Apply color by palette index
   async applyColorByIndex(view, index, selectionSnapshot) {
@@ -2046,7 +2345,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   async tagSelection(view, selectionSnapshot) {
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) {
-      new import_obsidian5.Notice("No text selected.");
+      new import_obsidian6.Notice("No text selected.");
       return;
     }
     const scrollPos = getScroll(view);
@@ -2059,7 +2358,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       request.occurrenceIndex
     );
     if (!result) {
-      new import_obsidian5.Notice("Could not locate selection in file.");
+      new import_obsidian6.Notice("Could not locate selection in file.");
       return;
     }
     const targetFile = result.file;
@@ -2090,7 +2389,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   async annotateSelection(view, selectionSnapshot) {
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) {
-      new import_obsidian5.Notice("No text selected.");
+      new import_obsidian6.Notice("No text selected.");
       return;
     }
     const scrollPos = getScroll(view);
@@ -2102,7 +2401,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       request.occurrenceIndex
     );
     if (!result) {
-      new import_obsidian5.Notice("Could not locate selection in file.");
+      new import_obsidian6.Notice("Could not locate selection in file.");
       return;
     }
     const targetFile = result.file;
@@ -2113,7 +2412,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       await this.applyAnnotation(targetFile, currentRaw, result.start, result.end, comment);
       this.restoreScroll(view, scrollPos);
       (_a = window.getSelection()) == null ? void 0 : _a.removeAllRanges();
-      new import_obsidian5.Notice("Annotation added!");
+      new import_obsidian6.Notice("Annotation added!");
     }).open();
   }
   // Apply annotation as footnote
@@ -2144,7 +2443,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     const sel = window.getSelection();
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) {
-      new import_obsidian5.Notice("Select highlighted text to remove.");
+      new import_obsidian6.Notice("Select highlighted text to remove.");
       return;
     }
     const scrollPos = getScroll(view);
@@ -2157,13 +2456,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       request.occurrenceIndex
     );
     if (!result) {
-      new import_obsidian5.Notice("Could not locate selection in file.");
+      new import_obsidian6.Notice("Could not locate selection in file.");
       return;
     }
     const targetFile = result.file;
     await this.saveUndoState(targetFile);
     await this.applyMarkdownModification(targetFile, "", result.start, result.end, "remove");
-    new import_obsidian5.Notice("Highlighting removed.");
+    new import_obsidian6.Notice("Highlighting removed.");
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
   }
@@ -2174,19 +2473,19 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     raw = raw.replace(/==(.*?)==/g, "$1");
     raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/g, "$1");
     await this.app.vault.modify(view.file, raw);
-    new import_obsidian5.Notice("All highlights removed.");
+    new import_obsidian6.Notice("All highlights removed.");
   }
   // Export highlights to new MD file
   async exportHighlights(view) {
     try {
       const exportPath = await exportHighlightsToMD(this.app, view.file);
-      new import_obsidian5.Notice(`Highlights exported to ${exportPath}`);
+      new import_obsidian6.Notice(`Highlights exported to ${exportPath}`);
       const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
       if (exportFile) {
         await this.app.workspace.getLeaf().openFile(exportFile);
       }
     } catch (err) {
-      new import_obsidian5.Notice("Failed to export highlights.");
+      new import_obsidian6.Notice("Failed to export highlights.");
       console.error(err);
     }
   }
@@ -2195,7 +2494,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     const sel = window.getSelection();
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) {
-      new import_obsidian5.Notice("No text selected.");
+      new import_obsidian6.Notice("No text selected.");
       return;
     }
     const quotedText = request.snippet.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
@@ -2203,10 +2502,10 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     const quote = this.expandQuoteTemplate(view.file, quotedText, frontmatter);
     const copied = await this.writeClipboardText(quote);
     if (!copied) {
-      new import_obsidian5.Notice("Failed to copy quote.");
+      new import_obsidian6.Notice("Failed to copy quote.");
       return;
     }
-    new import_obsidian5.Notice("Copied as quote!");
+    new import_obsidian6.Notice("Copied as quote!");
     sel == null ? void 0 : sel.removeAllRanges();
   }
   async applyColorHighlight(view, color, autoTag = "", selectionSnapshot) {
@@ -2224,7 +2523,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       request.occurrenceIndex
     );
     if (!result) {
-      new import_obsidian5.Notice("Could not locate selection.");
+      new import_obsidian6.Notice("Could not locate selection.");
       return;
     }
     const targetFile = result.file;
@@ -2232,7 +2531,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     await this.applyMarkdownModification(targetFile, result.raw, result.start, result.end, "color", color, autoTag);
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
-    new import_obsidian5.Notice("Highlighted!");
+    new import_obsidian6.Notice("Highlighted!");
   }
   // Reading progress
   saveReadingProgress() {
@@ -2249,9 +2548,9 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     const pos = this.settings.readingPositions[view.file.path];
     if (pos) {
       applyScroll(view, { y: pos });
-      new import_obsidian5.Notice("Resumed reading position.");
+      new import_obsidian6.Notice("Resumed reading position.");
     } else {
-      new import_obsidian5.Notice("No saved position for this file.");
+      new import_obsidian6.Notice("No saved position for this file.");
     }
   }
   // Activate navigator view
@@ -2350,7 +2649,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       /^-\s\[[ xX]\]\s+/,
       /^[-*+]\s+/,
       /^\d{1,3}[.)]\s+/,
-      /^\[\^[^\]]+\]:\s*/
+      /^\[\^[^\]]+\]:\s*/,
+      /^\[![^\]]+\]\s*/
     ];
     let matched = true;
     while (matched && remainder) {
@@ -2516,7 +2816,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     });
   }
 };
-var ReadingHighlighterSettingTab = class extends import_obsidian5.PluginSettingTab {
+var ReadingHighlighterSettingTab = class extends import_obsidian6.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -2525,23 +2825,23 @@ var ReadingHighlighterSettingTab = class extends import_obsidian5.PluginSettingT
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Reader Highlighter Tags Settings" });
-    new import_obsidian5.Setting(containerEl).setName("Toolbar Position").setDesc("Choose where the floating toolbar should appear.").addDropdown((dropdown) => dropdown.addOption("text", "Next to text").addOption("top", "Fixed at Top Center").addOption("bottom", "Fixed at Bottom Center").addOption("left", "Fixed Left Side").addOption("right", "Fixed Right Side (Default)").setValue(this.plugin.settings.toolbarPosition).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Toolbar Position").setDesc("Choose where the floating toolbar should appear.").addDropdown((dropdown) => dropdown.addOption("text", "Next to text").addOption("top", "Fixed at Top Center").addOption("bottom", "Fixed at Bottom Center").addOption("left", "Fixed Left Side").addOption("right", "Fixed Right Side (Default)").setValue(this.plugin.settings.toolbarPosition).onChange(async (value) => {
       this.plugin.settings.toolbarPosition = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Highlighting" });
-    new import_obsidian5.Setting(containerEl).setName("Enable Color Highlighting").setDesc("Use HTML <mark> tags with specific colors instead of == syntax.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Enable Color Highlighting").setDesc("Use HTML <mark> tags with specific colors instead of == syntax.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
       this.plugin.settings.enableColorHighlighting = value;
       await this.plugin.saveSettings();
       this.display();
     }));
     if (this.plugin.settings.enableColorHighlighting) {
-      new import_obsidian5.Setting(containerEl).setName("Highlight Color").setDesc("Hex code for the default highlight color.").addColorPicker((color) => color.setValue(this.plugin.settings.highlightColor || "#FFEE58").onChange(async (value) => {
+      new import_obsidian6.Setting(containerEl).setName("Highlight Color").setDesc("Hex code for the default highlight color.").addColorPicker((color) => color.setValue(this.plugin.settings.highlightColor || "#FFEE58").onChange(async (value) => {
         this.plugin.settings.highlightColor = value;
         await this.plugin.saveSettings();
       }));
     }
-    new import_obsidian5.Setting(containerEl).setName("Enable Color Palette").setDesc("Show a palette of 5 colors in the toolbar for quick selection.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Enable Color Palette").setDesc("Show a palette of 5 colors in the toolbar for quick selection.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
       this.plugin.settings.enableColorPalette = value;
       await this.plugin.saveSettings();
       this.display();
@@ -2549,7 +2849,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian5.PluginSettingT
     if (this.plugin.settings.enableColorPalette) {
       containerEl.createEl("h4", { text: "Color Palette" });
       this.plugin.settings.colorPalette.forEach((item, index) => {
-        new import_obsidian5.Setting(containerEl).setName(`Color ${index + 1}: ${item.name}`).addColorPicker((color) => color.setValue(item.color).onChange(async (value) => {
+        new import_obsidian6.Setting(containerEl).setName(`Color ${index + 1}: ${item.name}`).addColorPicker((color) => color.setValue(item.color).onChange(async (value) => {
           this.plugin.settings.colorPalette[index].color = value;
           await this.plugin.saveSettings();
         })).addText((text) => text.setPlaceholder("Auto-tag (optional)").setValue(item.tag).onChange(async (value) => {
@@ -2559,76 +2859,78 @@ var ReadingHighlighterSettingTab = class extends import_obsidian5.PluginSettingT
       });
     }
     containerEl.createEl("h3", { text: "Tags" });
-    new import_obsidian5.Setting(containerEl).setName("Default Tag Prefix").setDesc("Automatically add this tag to every highlight (e.g., 'book').").addText((text) => text.setPlaceholder("book").setValue(this.plugin.settings.defaultTagPrefix).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Default Tag Prefix").setDesc("Automatically add this tag to every highlight (e.g., 'book').").addText((text) => text.setPlaceholder("book").setValue(this.plugin.settings.defaultTagPrefix).onChange(async (value) => {
       this.plugin.settings.defaultTagPrefix = value.replace(/\s+/g, "_").replace(/^#/, "");
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Smart Tag Suggestions").setDesc("Suggest tags based on recent usage, folder, and frontmatter.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSmartTagSuggestions).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Smart Tag Suggestions").setDesc("Suggest tags based on recent usage, folder, and frontmatter.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSmartTagSuggestions).onChange(async (value) => {
       this.plugin.settings.enableSmartTagSuggestions = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Enable Smart Paragraph Selection").setDesc("Snap selections inside a paragraph, list item, heading, or blockquote to the entire block.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSmartParagraphSelection).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Enable Smart Paragraph Selection").setDesc("Snap selections inside a paragraph, list item, heading, or blockquote to the entire block.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableSmartParagraphSelection).onChange(async (value) => {
       this.plugin.settings.enableSmartParagraphSelection = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Quote Template" });
-    new import_obsidian5.Setting(containerEl).setName("Quote Format").setDesc("Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}, {{time}}, {{domain}}, {{author}}").addTextArea((text) => text.setValue(this.plugin.settings.quoteTemplate).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Quote Format").setDesc("Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}, {{time}}, {{domain}}, {{author}}").addTextArea((text) => text.setValue(this.plugin.settings.quoteTemplate).onChange(async (value) => {
       this.plugin.settings.quoteTemplate = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Annotations" });
-    new import_obsidian5.Setting(containerEl).setName("Enable Annotations").setDesc("Add comments to selections as footnotes.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAnnotations).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Enable Annotations").setDesc("Add comments to selections as footnotes.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableAnnotations).onChange(async (value) => {
       this.plugin.settings.enableAnnotations = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Show Annotation Button").setDesc("Show the annotation button in the toolbar.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showAnnotationButton).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Show Annotation Button").setDesc("Show the annotation button in the toolbar.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showAnnotationButton).onChange(async (value) => {
       this.plugin.settings.showAnnotationButton = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Reading Progress" });
-    new import_obsidian5.Setting(containerEl).setName("Track Reading Progress").setDesc("Remember scroll position when leaving a file.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableReadingProgress).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Track Reading Progress").setDesc("Remember scroll position when leaving a file.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableReadingProgress).onChange(async (value) => {
       this.plugin.settings.enableReadingProgress = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Clear Reading Positions").setDesc(`Currently tracking ${Object.keys(this.plugin.settings.readingPositions).length} file(s).`).addButton((button) => button.setButtonText("Clear All").onClick(async () => {
+    new import_obsidian6.Setting(containerEl).setName("Clear Reading Positions").setDesc(`Currently tracking ${Object.keys(this.plugin.settings.readingPositions).length} file(s).`).addButton((button) => button.setButtonText("Clear All").onClick(async () => {
       this.plugin.settings.readingPositions = {};
       await this.plugin.saveSettings();
-      new import_obsidian5.Notice("Reading positions cleared.");
+      new import_obsidian6.Notice("Reading positions cleared.");
       this.display();
     }));
     containerEl.createEl("h3", { text: "Toolbar Buttons" });
-    new import_obsidian5.Setting(containerEl).setName("Show Tag Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Show Tag Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
       this.plugin.settings.showTagButton = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Show Quote Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showQuoteButton).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Show Quote Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showQuoteButton).onChange(async (value) => {
       this.plugin.settings.showQuoteButton = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Show Remove Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showRemoveButton).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Show Remove Button").addToggle((toggle) => toggle.setValue(this.plugin.settings.showRemoveButton).onChange(async (value) => {
       this.plugin.settings.showRemoveButton = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Mobile & UX" });
-    new import_obsidian5.Setting(containerEl).setName("Haptic Feedback").setDesc("Vibrate slightly on success (Mobile only).").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHaptics).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Haptic Feedback").setDesc("Vibrate slightly on success (Mobile only).").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHaptics).onChange(async (value) => {
       this.plugin.settings.enableHaptics = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Show Button Tooltips").setDesc("Show tooltips when hovering over toolbar buttons.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTooltips).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Show Button Tooltips").setDesc("Show tooltips when hovering over toolbar buttons.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTooltips).onChange(async (value) => {
       this.plugin.settings.showTooltips = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "Frontmatter Integration" });
-    new import_obsidian5.Setting(containerEl).setName("Auto-tag highlight in Frontmatter").setDesc("Automatically inject a specific tag into the note's frontmatter whenever you highlight text.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableFrontmatterTag).onChange(async (value) => {
+    let tagSetting;
+    new import_obsidian6.Setting(containerEl).setName("Auto-tag highlight in Frontmatter").setDesc("Automatically inject a specific tag into the note's frontmatter whenever you highlight text.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableFrontmatterTag).onChange(async (value) => {
       this.plugin.settings.enableFrontmatterTag = value;
       await this.plugin.saveSettings();
-      this.display();
+      if (tagSetting) {
+        tagSetting.settingEl.style.display = value ? "" : "none";
+      }
     }));
-    if (this.plugin.settings.enableFrontmatterTag) {
-      new import_obsidian5.Setting(containerEl).setName("Frontmatter highlight tag").setDesc("The tag to add (e.g. 'resaltados'). Do not include the # symbol.").addText((text) => text.setPlaceholder("resaltados").setValue(this.plugin.settings.frontmatterTag).onChange(async (value) => {
-        this.plugin.settings.frontmatterTag = value.replace(/^#/, "");
-        await this.plugin.saveSettings();
-      }));
-    }
+    tagSetting = new import_obsidian6.Setting(containerEl).setName("Frontmatter highlight tag").setDesc("The tag to add (e.g. 'resaltados'). Do not include the # symbol.").addText((text) => text.setPlaceholder("resaltados").setValue(this.plugin.settings.frontmatterTag).onChange(async (value) => {
+      this.plugin.settings.frontmatterTag = value.replace(/^#/, "");
+      await this.plugin.saveSettings();
+    }));
+    tagSetting.settingEl.style.display = this.plugin.settings.enableFrontmatterTag ? "" : "none";
   }
 };

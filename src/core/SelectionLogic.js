@@ -13,10 +13,10 @@ const BLOCK_LEVEL_TAGS_FOR_SPLIT = new Set([
     "TH",
 ]);
 
+const INLINE_DECORATION_PATTERN = "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^";
 const GAP_PATTERN = "[\\s\\u00a0\\u1680\\u2000-\\u200b\\u202f\\u205f\\u3000\\u21a9\\u21b5\\ufe0e\\ufe0f]";
-const INLINE_DECORATION_PATTERN = "(?:<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`)";
-const OPTIONAL_MARKDOWN_LINE_PREFIX = "[ \\t]{0,3}(?:(?:>\\s*)*(?:#{1,6}[ \\t]+|-\\s\\[[ xX]\\][ \\t]+|[-*+][ \\t]+|\\d{1,3}[.)][ \\t]+|\\[\\^[^\\]]+\\]:[ \\t]*))?";
-const MARKDOWN_PREFIX_ONLY_RE = /^[ \t]*(?:(?:>\s*)+|#{1,6}[ \t]*|-\s\[[ xX]\][ \t]*|[-*+][ \t]*|\d{1,3}[.)][ \t]*|\[\^[^\]]+\]:[ \t]*)+$/;
+const OPTIONAL_MARKDOWN_LINE_PREFIX = `[ \\t]{0,3}(?:(?:>\\s*)*)(?:#{1,6}[ \\t]+|-\\s\\[[ xX]\\][ \\t]+|[-*+][ \\t]+|\\d{1,3}[.)][ \\t]+|\\[\\^[^\\]]+\\]:[ \\t]*|>\\[![^\\]]+\\][ \\t]*)?(?:(?:${INLINE_DECORATION_PATTERN})){0,3}[ \\t]*`;
+const MARKDOWN_PREFIX_ONLY_RE = /^[ \t]*(?:(?:>\s*)+|#{1,6}[ \t]*|-\s\[[ xX]\][ \t]*|[-*+][ \t]*|\d{1,3}[.)][ \t]*|\[\^[^\]]+\]:[ \t]*|>\s*\[![^\]]+\][ \t]*)+$/;
 const INLINE_DECORATION_RE = /<mark[^>]*>|<\/mark>|==|\*\*|~~|\*|_|`/g;
 
 export var SelectionLogic = class {
@@ -251,9 +251,82 @@ export var SelectionLogic = class {
       file,
       pOffset: lastOffset + fmOffset
     });
-    const result = { text: virtualText, segments };
+    const result = this.applyStructuralFilter({ text: virtualText, segments });
     opContext.cache.set(file.path, result);
     return result;
+  }
+
+  // Structural Filtering Engine (Noise Shield)
+  // Computationally strips invisible markdown syntax while keeping offsets perfectly mapped
+  applyStructuralFilter({ text, segments }) {
+    const patterns = [
+      // Footnotes: [^123]
+      /\[\^[^\]]+\]/g,
+      // Task checkmarks: - [x] or - [ ] 
+      /-\s\[[ xX]\]/g,
+      // Callout prefixes: > [!WARNING]
+      />\s*\[![^\]]+\]/g,
+      // Plugin-injected highlighting
+      /==|<mark[^>]*>|<\/mark>/g,
+      // Table alignment rows
+      /(?:^|\n)[ \t]*\|?[ \t:|-]+\|[ \t:|-]*(?=\n|$)/g,
+      // Link URL portion: ](https://...)
+      /\]\([^)]+\)/g,
+      // Markdown Images: ![caption](url)
+      /!\[[^\]]*\]\([^)]+\)/g,
+      // Global HTML Tags (Reading view strips these)
+      /<[^>]+>/g
+    ];
+
+    let currentText = text;
+    let currentSegments = [...segments];
+
+    for (const regex of patterns) {
+      let match;
+      regex.lastIndex = 0;
+      const matches = [];
+      while ((match = regex.exec(currentText)) !== null) {
+        matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
+      }
+      
+      // Process backwards
+      for (let i = matches.length - 1; i >= 0; i--) {
+        const { start, end, length } = matches[i];
+        
+        currentText = currentText.substring(0, start) + currentText.substring(end);
+        
+        const newSegments = [];
+        for (const seg of currentSegments) {
+          if (seg.vEnd <= start) {
+            newSegments.push(seg);
+          } else if (seg.vStart >= end) {
+            newSegments.push({
+              ...seg,
+              vStart: seg.vStart - length,
+              vEnd: seg.vEnd - length
+            });
+          } else {
+            if (seg.vStart < start) {
+              newSegments.push({
+                ...seg,
+                vEnd: start
+              });
+            }
+            if (seg.vEnd > end) {
+              newSegments.push({
+                ...seg,
+                vStart: start,
+                vEnd: seg.vEnd - length,
+                pOffset: seg.pOffset + (end - seg.vStart)
+              });
+            }
+          }
+        }
+        currentSegments = newSegments;
+      }
+    }
+    
+    return { text: currentText, segments: currentSegments };
   }
 
   mapVirtualToPhysical(vStart, vEnd, segments) {
@@ -307,7 +380,7 @@ export var SelectionLogic = class {
     }
 
     const contentPatterns = lines.map((line) => this.createFlexibleLinePattern(line));
-    const lineBridge = `(?:[ \\t]*(?:${INLINE_DECORATION_PATTERN}){0,3}[ \\t]*\\r?\\n(?:[ \\t>]*\\r?\\n){0,3})`;
+    const lineBridge = `(?:[ \\t]*(?:(?:${INLINE_DECORATION_PATTERN})){0,3}[ \\t]*\\r?\\n(?:[ \\t>]*\\r?\\n){0,3})`;
     const joined = contentPatterns.map((pattern, index) => {
       const linePattern = `${OPTIONAL_MARKDOWN_LINE_PREFIX}${pattern}`;
       return index === 0 ? linePattern : `${lineBridge}${linePattern}`;
@@ -330,13 +403,15 @@ export var SelectionLogic = class {
       }
 
       if (pendingGap && parts.length > 0) {
-        parts.push(`(?:${GAP_PATTERN}|[-\u2010-\u2015]|"|'|[“”‘’«»]|[\\*_~=]|\\[\\^[^\\]]+\\]){1,5}`);
+        // Reduced gap pattern natively matching raw gaps, because Noise Shield stripped the markdown!
+        parts.push(`(?:${GAP_PATTERN}|[-\u2010-\u2015]|"|'|[“”‘’«»]|\\\\|\\||>|#|\\*|_|~|=|\\$|\\^|\\{|\\}|\\(|\\]|\\[|\\)|\x60){1,15}`);
         pendingGap = false;
       }
 
       parts.push(this.getFlexibleCharPattern(char));
       if (i < codePoints.length - 1) {
-        parts.push(`(?:${GAP_PATTERN}|[-\u2010-\u2015]|"|'|[“”‘’«»]|[\\*_~=]|\\[\\^[^\\]]+\\]){0,3}`);
+        // Tight bound between adjacent characters
+        parts.push(`(?:${GAP_PATTERN}|[-\u2010-\u2015]|"|'|[“”‘’«»]|\\\\|\\||>|#|\\*|_|~|=|\\$|\\^|\\{|\\}|\\(|\\]|\\[|\\)|\x60){0,5}`);
       }
     }
 
@@ -374,14 +449,15 @@ export var SelectionLogic = class {
       .replace(/[“”«»]/g, "\"")
       .replace(/[‘’]/g, "'")
       .replace(/\[\^?(?:[0-9-]+|[a-zA-Z?]+)\]/g, "")
-      .replace(/\s+/g, " ")
+      // Don't arbitrarily replace newlines with spaces here or we lose paragraph split alignment
+      // Instead, explicitly collapse multiple blank spaces
+      .replace(/[ \t]+/g, " ")
       .trim();
   }
 
   stripUrlsForPatternMatch(snippet) {
-    return snippet
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/<https?:\/\/[^>]+>/g, "");
+    // Moved to the virtual structural filter
+    return snippet;
   }
 
   findAllCandidates(text, snippet, bodyStart = 0) {
@@ -395,9 +471,12 @@ export var SelectionLogic = class {
       return [];
     }
 
-    if (patternSnippet.length > 800) {
-      const startAnchor = patternSnippet.substring(0, 150);
-      const endAnchor = patternSnippet.substring(patternSnippet.length - 150);
+    const lineCount = (patternSnippet.match(/\n/g) || []).length;
+    if (patternSnippet.length > 800 || lineCount >= 2) {
+      const startAnchorLen = Math.min(patternSnippet.length / 2, 150);
+      const endAnchorLen = Math.min(patternSnippet.length / 2, 150);
+      const startAnchor = patternSnippet.substring(0, startAnchorLen);
+      const endAnchor = patternSnippet.substring(patternSnippet.length - endAnchorLen);
       const startP = this.createFlexiblePattern(startAnchor);
       const endP = this.createFlexiblePattern(endAnchor);
       let startRegex;
@@ -460,18 +539,13 @@ export var SelectionLogic = class {
     }
 
     const candidates = [];
-    let match;
-    try {
-      while ((match = regex.exec(text)) !== null) {
+    const results = this.safeRegexExec(regex, text, 3000);
+    for (const match of results) {
         candidates.push({
-          start: match.index,
-          end: match.index + match[0].length,
-          text: match[0]
+            start: match.index,
+            end: match.index + match.length,
+            text: match.text
         });
-      }
-    } catch (e) {
-      console.warn("Regex execution failed in findAllCandidates (mobile backtracking limit):", e);
-      return [];
     }
 
     return candidates;

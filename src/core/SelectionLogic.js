@@ -231,7 +231,7 @@ export class SelectionLogic {
             .replace(/[\u21a9\u21b5\ufe0e\ufe0f]+/g, ' ') 
             .replace(/[\u00a0\s]+/g, ' ')
             .replace(/[\u2013\u2014\u201c\u201d\u2018\u2019\u00ab\u00bb]+/g, ' ')
-            .replace(/\[(?:[0-9-]+|[a-zA-Z?]+)\]/g, '') // Footnotes: Remove entirely
+            .replace(/\[\^?(?:[0-9-]+|[a-zA-Z?]+)\]/g, '') // Footnotes: Remove entirely
             .replace(/\s+/g, ' ')
             .trim();
     }
@@ -386,7 +386,7 @@ export class SelectionLogic {
                 const visibleEnd = matchStart + fullMatch.length - 2;
                 extractVisibleText(visibleStart, visibleEnd);
             } else if (match[3] || match[4] || match[5] || match[6]) {
-                const closingBracket = fullMatch.indexOf(match[3] || match[5] ? '][' : ']( ');
+                const closingBracket = fullMatch.indexOf(match[3] || match[5] ? '][' : '](');
                 const textStart = matchStart + (match[3] || match[4] ? 2 : 1);
                 const textEnd = matchStart + (closingBracket !== -1 ? closingBracket : fullMatch.indexOf(']'));
                 extractVisibleText(textStart, textEnd);

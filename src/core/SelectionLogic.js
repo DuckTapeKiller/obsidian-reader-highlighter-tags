@@ -49,6 +49,12 @@ export class SelectionLogic {
             candidates = candidates.map(c => ({ ...c, start: c.start + firstSegmentBodyStart, end: c.end + firstSegmentBodyStart }));
         }
 
+        if (candidates.length === 0) {
+            // 3. Anchor fallback: match safe (non-math) words around rendered math
+            candidates = this.findCandidatesAnchored(bodyContent, snippet, 0);
+            candidates = candidates.map(c => ({ ...c, start: c.start + firstSegmentBodyStart, end: c.end + firstSegmentBodyStart }));
+        }
+
         if (candidates.length > 0) {
             const result = this.resolveCandidates(candidates, fullRaw, context, occurrenceIndex);
             if (result) {
@@ -685,6 +691,62 @@ export class SelectionLogic {
         }
 
         return candidates;
+    }
+
+
+    findCandidatesAnchored(text, snippet, bodyStart = 0) {
+        // Fallback for selections containing rendered math/special chars (e.g. θ
+        // rendered from $\theta$) that can't match raw LaTeX source directly.
+        // Anchors on the first/last "safe" (non-math) words of the snippet.
+        const clean = snippet.trim();
+        if (clean.length < 20) return [];
+
+        // "Safe" = ASCII printable or Latin-Extended (covers Spanish/French/etc.)
+        const isSafe = (ch) => {
+            const cp = ch.codePointAt(0);
+            return (cp >= 0x20 && cp <= 0x7E) || (cp >= 0xC0 && cp <= 0x24F) || (cp >= 0x1E00 && cp <= 0x1EFF);
+        };
+
+        const safeWords = clean.split(/\s+/).filter(w => w.length > 2 && [...w].every(isSafe));
+        if (safeWords.length < 4) return [];
+
+        const half = Math.max(2, Math.min(5, Math.floor(safeWords.length / 3)));
+        const startAnchor = safeWords.slice(0, half).join(' ');
+        const endAnchor = safeWords.slice(-half).join(' ');
+        if (startAnchor === endAnchor) return [];
+
+        try {
+            const startRegex = new RegExp(this.createFlexiblePattern(startAnchor), 'g');
+            const endRegex = new RegExp(this.createFlexiblePattern(endAnchor), 'g');
+
+            const startMatches = [];
+            const endMatches = [];
+            let m;
+
+            while ((m = startRegex.exec(text)) !== null) {
+                if (m.index >= bodyStart) startMatches.push(m);
+            }
+            while ((m = endRegex.exec(text)) !== null) {
+                if (m.index >= bodyStart) endMatches.push(m);
+            }
+
+            for (const startM of startMatches) {
+                const bestEnd = endMatches.find(e =>
+                    e.index > startM.index &&
+                    (e.index - startM.index) < clean.length * 4
+                );
+                if (bestEnd) {
+                    return [{
+                        start: startM.index,
+                        end: bestEnd.index + bestEnd[0].length,
+                        text: text.substring(startM.index, bestEnd.index + bestEnd[0].length)
+                    }];
+                }
+            }
+        } catch (e) {
+            console.error('Anchor match failed:', e);
+        }
+        return [];
     }
 
     calculateSimilarity(source, target) {

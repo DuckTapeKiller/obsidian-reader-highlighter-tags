@@ -1,6 +1,6 @@
 {
     "name": "reader-highlighter-tags",
-    "version": "1.0.6",
+    "version": "2.0.0",
     "description": "Highlight text in Reading View",
     "main": "main.js",
     "scripts": {
@@ -15,6 +15,7 @@
     "author": "DuckTapeKiller",
     "license": "MIT",
     "devDependencies": {
+        "@esbuild/darwin-x64": "^0.28.0",
         "@eslint/js": "^9.39.2",
         "@types/node": "^16.11.6",
         "builtin-modules": "^5.0.0",

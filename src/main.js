@@ -1,4 +1,4 @@
-import { Plugin, Notice, Platform, PluginSettingTab, Setting, ItemView, WorkspaceLeaf } from "obsidian";
+import { Plugin, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import { FloatingManager } from "./ui/FloatingManager";
 import { SelectionLogic } from "./core/SelectionLogic";
 import { TagSuggestModal } from "./modals/TagSuggestModal";
@@ -6,6 +6,24 @@ import { AnnotationModal } from "./modals/AnnotationModal";
 import { HighlightNavigatorView, HIGHLIGHT_NAVIGATOR_VIEW } from "./views/HighlightNavigator";
 import { getScroll, applyScroll } from "./utils/dom";
 import { exportHighlightsToMD } from "./utils/export";
+
+const SMART_SELECTION_TAGS = new Set([
+    "P",
+    "LI",
+    "BLOCKQUOTE",
+    "PRE",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "TD",
+    "TH",
+]);
+
+const FRONTMATTER_NEEDS_QUOTES_RE = new RegExp("[:\\s{}\\[\\],&*#?|<>=!%@\\\\-]");
+const FRONTMATTER_RESERVED_RE = /^(true|false|null|yes|no|on|off)$/i;
 
 const DEFAULT_SETTINGS = {
     toolbarPosition: "right",
@@ -59,6 +77,9 @@ const DEFAULT_SETTINGS = {
     // NEW: Frontmatter Auto-Tag
     enableFrontmatterTag: false,
     frontmatterTag: "resaltados",
+
+    // NEW: Smart paragraph snapping
+    enableSmartParagraphSelection: false,
 };
 
 export default class ReadingHighlighterPlugin extends Plugin {
@@ -99,7 +120,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         // Track scroll for reading progress
         this.registerEvent(
-            this.app.workspace.on("active-leaf-change", (leaf) => {
+            this.app.workspace.on("active-leaf-change", (_leaf) => {
                 if (this.settings.enableReadingProgress) {
                     this.saveReadingProgress();
                 }
@@ -283,29 +304,94 @@ export default class ReadingHighlighterPlugin extends Plugin {
         return (view && view.getMode() === "preview") ? view : null;
     }
 
-    getSelectionContext() {
-        const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return null;
+    getSelectionContext(selectionSnapshot) {
+        const view = this.getActiveReadingView();
+        const range = this.getSelectionRange(selectionSnapshot);
+        if (!view || !range) return null;
 
-        const range = sel.getRangeAt(0);
-        let container = range.commonAncestorContainer;
+        const blocks = this.getAllowedBlocksInRange(range, view.contentEl);
+        const fallbackBlock = this.getClosestAllowedBlock(range.commonAncestorContainer, view.contentEl);
+        const contextElement = blocks[0] || fallbackBlock || null;
+        const rawSnippet = selectionSnapshot?.text || window.getSelection()?.toString() || "";
 
-        while (container && container.nodeType !== 1) {
-            container = container.parentElement;
-        }
-
-        const viewContainer = this.getActiveReadingView()?.containerEl;
-
-        while (container && container !== viewContainer) {
-            const tag = container.tagName.toLowerCase();
-            if (['p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'blockquote', 'pre'].includes(tag)) {
-                return container;
+        let snippet = rawSnippet;
+        if (this.settings.enableSmartParagraphSelection && blocks.length === 1) {
+            const blockText = this.getElementText(blocks[0]);
+            if (blockText) {
+                snippet = blockText;
             }
-            container = container.parentElement;
         }
 
-        if (container) return container;
-        return null;
+        return {
+            element: contextElement,
+            blocks,
+            snippet,
+            text: contextElement ? this.getElementText(contextElement) : null,
+        };
+    }
+
+    getSelectionRange(selectionSnapshot) {
+        if (selectionSnapshot?.range) {
+            return selectionSnapshot.range.cloneRange();
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return null;
+        }
+
+        return selection.getRangeAt(0).cloneRange();
+    }
+
+    getAllowedBlocksInRange(range, root) {
+        if (!root) return [];
+
+        const selector = Array.from(SMART_SELECTION_TAGS).map((tag) => tag.toLowerCase()).join(", ");
+        const blocks = Array.from(root.querySelectorAll(selector)).filter((element) => {
+            const text = this.getElementText(element);
+            if (!text) return false;
+            try {
+                return range.intersectsNode(element);
+            } catch (_error) {
+                return false;
+            }
+        });
+
+        return blocks.filter((element) => !blocks.some((other) => other !== element && other.contains(element)));
+    }
+
+    getClosestAllowedBlock(node, root) {
+        let current = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+
+        while (current && current !== root) {
+            if (SMART_SELECTION_TAGS.has(current.tagName) && this.getElementText(current)) {
+                return current;
+            }
+            current = current.parentElement;
+        }
+
+        return current && SMART_SELECTION_TAGS.has(current.tagName) ? current : null;
+    }
+
+    getElementText(element) {
+        return (element?.innerText || element?.textContent || "").replace(/\s+/g, " ").trim();
+    }
+
+    buildSelectionRequest(view, selectionSnapshot) {
+        const sel = window.getSelection();
+        const selectionContext = this.getSelectionContext(selectionSnapshot);
+        const snippet = selectionContext?.snippet || selectionSnapshot?.text || sel?.toString() || "";
+        if (!snippet.trim()) {
+            return null;
+        }
+
+        const contextElement = selectionContext?.element || null;
+        return {
+            snippet,
+            contextElement,
+            contextText: contextElement ? this.getElementText(contextElement) : null,
+            occurrenceIndex: this.getSelectionOccurrence(view, contextElement),
+        };
     }
 
     getSelectionOccurrence(view, contextElement) {
@@ -363,8 +449,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     async highlightSelection(view, selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = selectionSnapshot?.text || sel?.toString() || "";
-        if (!snippet.trim()) {
+        const request = this.buildSelectionRequest(view, selectionSnapshot);
+        if (!request) {
             new Notice("No text selected.");
             return;
         }
@@ -374,11 +460,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
         // Save for undo
         await this.saveUndoState(view.file);
 
-        const contextEl = this.getSelectionContext();
-        const contextText = contextEl ? contextEl.innerText : null;
-        const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
-
-        const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
+        const result = await this.logic.locateSelection(
+            view.file,
+            view,
+            request.snippet,
+            request.contextText,
+            request.occurrenceIndex
+        );
 
         if (!result) {
             new Notice("Could not locate selection in file.");
@@ -418,9 +506,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     async tagSelection(view, selectionSnapshot) {
-        const sel = window.getSelection();
-        const snippet = selectionSnapshot?.text || sel?.toString() || "";
-        if (!snippet.trim()) {
+        const request = this.buildSelectionRequest(view, selectionSnapshot);
+        if (!request) {
             new Notice("No text selected.");
             return;
         }
@@ -430,11 +517,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
         // Save for undo
         await this.saveUndoState(view.file);
 
-        const contextEl = this.getSelectionContext();
-        const contextText = contextEl ? contextEl.innerText : null;
-        const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
-
-        const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
+        const result = await this.logic.locateSelection(
+            view.file,
+            view,
+            request.snippet,
+            request.contextText,
+            request.occurrenceIndex
+        );
 
         if (!result) {
             new Notice("Could not locate selection in file.");
@@ -476,20 +565,21 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     // Annotate selection with footnote
     async annotateSelection(view, selectionSnapshot) {
-        const sel = window.getSelection();
-        const snippet = selectionSnapshot?.text || sel?.toString() || "";
-        if (!snippet.trim()) {
+        const request = this.buildSelectionRequest(view, selectionSnapshot);
+        if (!request) {
             new Notice("No text selected.");
             return;
         }
 
         const scrollPos = getScroll(view);
 
-        const contextEl = this.getSelectionContext();
-        const contextText = contextEl ? contextEl.innerText : null;
-        const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
-
-        const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
+        const result = await this.logic.locateSelection(
+            view.file,
+            view,
+            request.snippet,
+            request.contextText,
+            request.occurrenceIndex
+        );
 
         if (!result) {
             new Notice("Could not locate selection in file.");
@@ -543,8 +633,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     async removeHighlightSelection(view, selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = selectionSnapshot?.text || sel?.toString() || "";
-        if (!snippet.trim()) {
+        const request = this.buildSelectionRequest(view, selectionSnapshot);
+        if (!request) {
             new Notice("Select highlighted text to remove.");
             return;
         }
@@ -554,11 +644,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
         // Save for undo
         await this.saveUndoState(view.file);
 
-        const contextEl = this.getSelectionContext();
-        const contextText = contextEl ? contextEl.innerText : null;
-        const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
-
-        const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
+        const result = await this.logic.locateSelection(
+            view.file,
+            view,
+            request.snippet,
+            request.contextText,
+            request.occurrenceIndex
+        );
 
         if (!result) {
             new Notice("Could not locate selection in file.");
@@ -611,22 +703,22 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     async copyAsQuote(view, selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = selectionSnapshot?.text || sel?.toString() || "";
-        if (!snippet.trim()) {
+        const request = this.buildSelectionRequest(view, selectionSnapshot);
+        if (!request) {
             new Notice("No text selected.");
             return;
         }
 
-        // Apply template
-        const quotedText = snippet.split("\n").map(l => `> ${l}`).join("\n");
+        const quotedText = request.snippet.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
+        const frontmatter = this.app.metadataCache.getFileCache(view.file)?.frontmatter || {};
+        const quote = this.expandQuoteTemplate(view.file, quotedText, frontmatter);
 
-        let quote = this.settings.quoteTemplate
-            .replace("{{text}}", quotedText)
-            .replace("{{file}}", view.file.basename)
-            .replace("{{path}}", view.file.path)
-            .replace("{{date}}", window.moment ? window.moment().format("YYYY-MM-DD") : new Date().toISOString().split("T")[0]);
+        const copied = await this.writeClipboardText(quote);
+        if (!copied) {
+            new Notice("Failed to copy quote.");
+            return;
+        }
 
-        await navigator.clipboard.writeText(quote);
         new Notice("Copied as quote!");
 
         sel?.removeAllRanges();
@@ -634,26 +726,31 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     async applyColorHighlight(view, color, autoTag = "", selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = selectionSnapshot?.text || sel?.toString() || "";
-        if (!snippet.trim()) return;
+        const request = this.buildSelectionRequest(view, selectionSnapshot);
+        if (!request) return;
 
         const scrollPos = getScroll(view);
 
         // Save for undo
         await this.saveUndoState(view.file);
 
-        const contextEl = this.getSelectionContext();
-        const contextText = contextEl ? contextEl.innerText : null;
-        const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
-
-        const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
+        const result = await this.logic.locateSelection(
+            view.file,
+            view,
+            request.snippet,
+            request.contextText,
+            request.occurrenceIndex
+        );
         if (!result) {
             new Notice("Could not locate selection.");
             return;
         }
 
+        const targetFile = result.file;
+        await this.saveUndoState(targetFile);
+
         // Pass "color" mode and the specific color hex
-        await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "color", color, autoTag);
+        await this.applyMarkdownModification(targetFile, result.raw, result.start, result.end, "color", color, autoTag);
         this.restoreScroll(view, scrollPos);
         sel?.removeAllRanges();
 
@@ -699,6 +796,153 @@ export default class ReadingHighlighterPlugin extends Plugin {
         this.app.workspace.revealLeaf(leaf);
     }
 
+    expandQuoteTemplate(file, quotedText, frontmatter = {}) {
+        const sourceUrl = String(frontmatter.url || frontmatter.source || frontmatter.link || "").replace(/#:~:text=[^&]+(&|$)/, "");
+        const timestamp = this.formatTimestamp(new Date());
+        const variables = {
+            text: quotedText,
+            file: file.basename,
+            path: file.path,
+            date: timestamp.split("T")[0],
+            time: timestamp,
+            domain: this.extractDomain(sourceUrl),
+            author: this.normalizeFrontmatterValue(frontmatter.author || frontmatter.authors || frontmatter.creator || ""),
+        };
+
+        return this.settings.quoteTemplate.replace(/{{(text|file|path|date|time|domain|author)}}/g, (_, key) => variables[key] || "");
+    }
+
+    async writeClipboardText(text) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (_error) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.opacity = "0";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            let copied = false;
+            try {
+                copied = document.execCommand("copy");
+            } catch (_fallbackError) {
+                copied = false;
+            }
+
+            textArea.remove();
+            return copied;
+        }
+    }
+
+    formatTimestamp(date) {
+        const pad = (value) => String(Math.trunc(Math.abs(value))).padStart(2, "0");
+        const offsetMinutes = -date.getTimezoneOffset();
+        const sign = offsetMinutes >= 0 ? "+" : "-";
+        const offsetHours = pad(offsetMinutes / 60);
+        const offsetRemainder = pad(offsetMinutes % 60);
+
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${sign}${offsetHours}:${offsetRemainder}`;
+    }
+
+    extractDomain(url) {
+        if (!url) return "";
+
+        try {
+            const parsed = new URL(url);
+            const hostname = parsed.hostname;
+
+            if (hostname === "localhost" || hostname === "127.0.0.1" || /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
+                return hostname;
+            }
+
+            const hostParts = hostname.split(".");
+            if (hostParts.length > 2) {
+                const lastTwo = hostParts.slice(-2).join(".");
+                if (/^(co|com|org|net|edu|gov|mil)\.[a-z]{2}$/i.test(lastTwo)) {
+                    return hostParts.slice(-3).join(".");
+                }
+            }
+
+            return hostParts.slice(-2).join(".");
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    normalizeFrontmatterValue(value) {
+        if (Array.isArray(value)) {
+            return value.map((item) => String(item).trim()).filter(Boolean).join(", ");
+        }
+
+        return String(value || "").trim();
+    }
+
+    splitMarkdownLine(line) {
+        const indentMatch = line.match(/^\s*/);
+        const indent = indentMatch ? indentMatch[0] : "";
+        let remainder = line.substring(indent.length);
+        let prefix = "";
+        const prefixPatterns = [
+            /^>\s*/,
+            /^#{1,6}\s+/,
+            /^-\s\[[ xX]\]\s+/,
+            /^[-*+]\s+/,
+            /^\d{1,3}[.)]\s+/,
+            /^\[\^[^\]]+\]:\s*/,
+        ];
+
+        let matched = true;
+        while (matched && remainder) {
+            matched = false;
+            for (const pattern of prefixPatterns) {
+                const match = remainder.match(pattern);
+                if (match) {
+                    prefix += match[0];
+                    remainder = remainder.substring(match[0].length);
+                    matched = true;
+                    break;
+                }
+            }
+        }
+
+        return { indent, prefix, content: remainder };
+    }
+
+    getLineStart(raw, offset) {
+        const lineBreak = raw.lastIndexOf("\n", Math.max(0, offset - 1));
+        return lineBreak === -1 ? 0 : lineBreak + 1;
+    }
+
+    getLineEnd(raw, offset) {
+        const lineBreak = raw.indexOf("\n", offset);
+        return lineBreak === -1 ? raw.length : lineBreak;
+    }
+
+    needsYamlQuotes(value) {
+        const trimmedValue = String(value || "").trim();
+        return FRONTMATTER_NEEDS_QUOTES_RE.test(trimmedValue) || /^\d/.test(trimmedValue) || FRONTMATTER_RESERVED_RE.test(trimmedValue);
+    }
+
+    normalizeTagForComparison(tag) {
+        return String(tag || "")
+            .trim()
+            .replace(/^['"]|['"]$/g, "")
+            .replace(/^#/, "")
+            .replace(/\s+/g, "_");
+    }
+
+    formatFrontmatterTag(tag) {
+        const normalized = this.normalizeTagForComparison(tag);
+        if (!normalized) {
+            return "";
+        }
+
+        return this.needsYamlQuotes(normalized) ? `"${normalized.replace(/"/g, '\\"')}"` : normalized;
+    }
+
     async applyMarkdownModification(file, raw, start, end, mode, payload = "", autoTag = "") {
         if (!raw) {
             raw = await this.app.vault.read(file);
@@ -742,9 +986,15 @@ export default class ReadingHighlighterPlugin extends Plugin {
             }
         }
 
+        const initiallySelectedText = raw.substring(expandedStart, expandedEnd);
+        if (/\r?\n/.test(initiallySelectedText)) {
+            expandedStart = this.getLineStart(raw, expandedStart);
+            expandedEnd = this.getLineEnd(raw, expandedEnd);
+        }
+
         const selectedText = raw.substring(expandedStart, expandedEnd);
-        // Split by paragraph while preserving Windows/Mac/Linux line endings
-        const paragraphs = selectedText.split(/\r?\n\s*\r?\n/);
+        const newline = raw.includes("\r\n") ? "\r\n" : "\n";
+        const lines = selectedText.split(/\r?\n/);
 
         // Pre-calculate tag prefix
         let fullTag = "";
@@ -773,72 +1023,50 @@ export default class ReadingHighlighterPlugin extends Plugin {
             fullTag = fullTag ? `${fullTag} #${cleanAutoTag}` : `#${cleanAutoTag}`;
         }
 
-        const processedParagraphs = paragraphs.map(paragraph => {
-            if (!paragraph.trim()) return paragraph;
+        const processedLines = lines.map((line) => {
+            let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
 
-            const lines = paragraph.split(/\r?\n/);
+            if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
+                cleanLine = cleanLine.split("==").join("");
+            } else if (mode === "bold") {
+                cleanLine = cleanLine.split("**").join("");
+            } else if (mode === "italic") {
+                cleanLine = cleanLine.split("*").join("");
+            }
 
-            const processedLines = lines.map(line => {
-                let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
+            if (mode === "remove") {
+                return cleanLine;
+            }
 
-                if (mode === "highlight" || mode === "color" || mode === "tag") {
-                    cleanLine = cleanLine.split('==').join('');
-                } else if (mode === "bold") {
-                    cleanLine = cleanLine.split('**').join('');
-                } else if (mode === "italic") {
-                    cleanLine = cleanLine.split('*').join('');
-                } else if (mode === "remove") {
-                    cleanLine = cleanLine.split('==').join('');
+            const { indent, prefix, content } = this.splitMarkdownLine(cleanLine);
+            if (!content.trim()) {
+                return line;
+            }
+
+            const trimmedContent = content.trim();
+            const tagStr = fullTag ? `${fullTag} ` : "";
+            let wrappedContent = trimmedContent;
+
+            if (mode === "highlight" || mode === "tag") {
+                if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
+                    wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${trimmedContent}</mark>`;
+                } else {
+                    wrappedContent = `==${trimmedContent}==`;
                 }
+            } else if (mode === "color") {
+                wrappedContent = `<mark style="background: ${payload}; color: black;">${trimmedContent}</mark>`;
+            }
 
-                if (mode === "remove") {
-                    return cleanLine;
-                }
-
-                const matchIndent = cleanLine.match(/^(\s*)/);
-                const indent = matchIndent ? matchIndent[0] : "";
-                const contentAfterIndent = cleanLine.substring(indent.length);
-
-                const prefixRegex = /^((?:#{1,6}\s+)|(?:[-*+]\s+)|(?:\d+\.\s+)|(?:>\s+)|(?:-\s\[[ x]\]\s+))/;
-                const matchPrefix = contentAfterIndent.match(prefixRegex);
-
-                let prefix = "";
-                let content = contentAfterIndent;
-
-                if (matchPrefix) {
-                    prefix = matchPrefix[0];
-                    content = contentAfterIndent.substring(prefix.length);
-                }
-
-                content = content.trim();
-                const tagStr = fullTag ? `${fullTag} ` : "";
-                let wrappedContent = content;
-
-                if (mode === "highlight" || mode === "tag") {
-                    if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-                        wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${content}</mark>`;
-                    } else {
-                        wrappedContent = `==${content}==`;
-                    }
-                } else if (mode === "color") {
-                    wrappedContent = `<mark style="background: ${payload}; color: black;">${content}</mark>`;
-                }
-
-                return `${indent}${prefix}${tagStr}${wrappedContent}`;
-            });
-
-            return processedLines.join("\n");
+            return `${indent}${prefix}${tagStr}${wrappedContent}`;
         });
 
-        // Use appropriate newline for joining paragraphs based on the source
-        const newline = raw.includes("\r\n") ? "\r\n" : "\n";
-        const replaceBlock = processedParagraphs.join(newline + newline);
+        const replaceBlock = processedLines.join(newline);
         const newContent = raw.substring(0, expandedStart) + replaceBlock + raw.substring(expandedEnd);
         await this.app.vault.modify(file, newContent);
 
         // --- Frontmatter Auto-Tag Injection ---
         if (mode !== "remove" && this.settings.enableFrontmatterTag && this.settings.frontmatterTag) {
-            const targetTag = this.settings.frontmatterTag.trim().replace(/\s+/g, '_').replace(/^#/, '');
+            const targetTag = this.formatFrontmatterTag(this.settings.frontmatterTag);
             if (targetTag) {
                 try {
                     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
@@ -850,7 +1078,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
                         // Deduplicate if already an array
                         if (Array.isArray(frontmatter.tags)) {
-                            if (!frontmatter.tags.includes(targetTag)) {
+                            const existingTags = frontmatter.tags.map((tag) => this.normalizeTagForComparison(tag));
+                            if (!existingTags.includes(this.normalizeTagForComparison(targetTag))) {
                                 frontmatter.tags.push(targetTag);
                             }
                         }
@@ -861,7 +1090,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                                 ? frontmatter.tags.split(',').map(t => t.trim())
                                 : frontmatter.tags.split(/\s+/).map(t => t.trim());
                             
-                            const cleanTags = existingTags.filter(t => t.replace(/^#/, '') !== targetTag && t !== "");
+                            const cleanTags = existingTags.filter((tag) => this.normalizeTagForComparison(tag) !== this.normalizeTagForComparison(targetTag) && tag !== "");
                             
                             if (cleanTags.length === existingTags.length) {
                                 // Tag not found, add it
@@ -993,12 +1222,22 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        new Setting(containerEl)
+            .setName("Enable Smart Paragraph Selection")
+            .setDesc("Snap selections inside a paragraph, list item, heading, or blockquote to the entire block.")
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableSmartParagraphSelection)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableSmartParagraphSelection = value;
+                    await this.plugin.saveSettings();
+                }));
+
         // === Quote Template ===
         containerEl.createEl("h3", { text: "Quote Template" });
 
         new Setting(containerEl)
             .setName("Quote Format")
-            .setDesc("Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}")
+            .setDesc("Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}, {{time}}, {{domain}}, {{author}}")
             .addTextArea(text => text
                 .setValue(this.plugin.settings.quoteTemplate)
                 .onChange(async (value) => {

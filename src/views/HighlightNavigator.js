@@ -162,23 +162,32 @@ export class HighlightNavigatorView extends ItemView {
         stats.createSpan({ text: `${items.length} ${title.toLowerCase()}` });
 
         const list = container.createDiv({ cls: "highlight-navigator-list" });
+        const fragment = document.createDocumentFragment();
 
         items.forEach((item, index) => {
-            const el = list.createDiv({ cls: "highlight-navigator-item" });
+            const el = document.createElement("div");
+            el.addClass("highlight-navigator-item");
 
             if (type === "highlights") {
                 // Color indicator
                 if (item.color) {
-                    const colorDot = el.createSpan({ cls: "highlight-color-dot" });
+                    const colorDot = document.createElement("span");
+                    colorDot.addClass("highlight-color-dot");
                     colorDot.style.backgroundColor = item.color;
+                    el.appendChild(colorDot);
                 } else {
-                    el.createSpan({ cls: "highlight-color-dot highlight-default" });
+                    const colorDot = document.createElement("span");
+                    colorDot.addClass("highlight-color-dot", "highlight-default");
+                    el.appendChild(colorDot);
                 }
             } else {
                 // Footnote ID indicator
-                const idSpan = el.createSpan({ cls: "footnote-id", text: `[${item.id}] ` });
+                const idSpan = document.createElement("span");
+                idSpan.addClass("footnote-id");
+                idSpan.textContent = `[${item.id}] `;
                 idSpan.style.marginRight = "5px";
                 idSpan.style.color = "var(--text-muted)";
+                el.appendChild(idSpan);
             }
 
             // Text preview
@@ -186,11 +195,17 @@ export class HighlightNavigatorView extends ItemView {
                 ? item.text.substring(0, 80) + "..."
                 : item.text;
 
-            el.createSpan({ cls: "highlight-text", text: textPreview });
+            const textSpan = document.createElement("span");
+            textSpan.addClass("highlight-text");
+            textSpan.textContent = textPreview;
+            el.appendChild(textSpan);
 
             if (type === "highlights") {
                 // Number badge
-                el.createSpan({ cls: "highlight-number", text: `${index + 1}` });
+                const numberBadge = document.createElement("span");
+                numberBadge.addClass("highlight-number");
+                numberBadge.textContent = `${index + 1}`;
+                el.appendChild(numberBadge);
             }
 
             // Click to jump to line
@@ -199,7 +214,11 @@ export class HighlightNavigatorView extends ItemView {
                 e.stopPropagation();
                 this.jumpToLine(item.line);
             };
+
+            fragment.appendChild(el);
         });
+
+        list.appendChild(fragment);
     }
 
     async jumpToLine(line) {

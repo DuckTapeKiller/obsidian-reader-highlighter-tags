@@ -550,7 +550,7 @@ var SelectionLogic = class {
     return { raw, start: candidates[0].start, end: candidates[0].end };
   }
   createFlexiblePattern(snippet) {
-    const gapPattern = "[\\s\\u21a9\\u21b5\\ufe0e\\ufe0f\\ufe0f\\u00a0\\u2013\\u2014\\u201c\\u201d\\u2018\\u2019\\u00ab\\u00bb]";
+    const gapPattern = "[\\s\\u21a9\\u21b5\\ufe0e\\ufe0f\\d\\.\\[\\](){}\\^:>\\*\\+\\#\\u00a0_~=\\-\\|\\u2013\\u2014\\u201c\\u201d\\u2018\\u2019\\u00ab\\u00bb]";
     let parts = [];
     for (let i = 0; i < snippet.length; i++) {
       const char = snippet[i];
@@ -561,7 +561,7 @@ var SelectionLogic = class {
       } else {
         parts.push(this.escapeRegex(char));
         if (i < snippet.length - 1) {
-          parts.push(`(?:${gapPattern}|[\\*_~=]|\\[\\^[^\\]]+\\])*?`);
+          parts.push(`(?:${gapPattern}|\\[\\^[^\\]]+\\])*?`);
         }
       }
     }
@@ -570,14 +570,9 @@ var SelectionLogic = class {
     return `(?:${leadingMarkdownOnly})*?${pattern}`;
   }
   stripBrowserJunk(text) {
-    if (!text) return text;
-    return text.normalize("NFC")
-      .replace(/[\u21a9\u21b5\ufe0e\ufe0f]+/g, " ")
-      .replace(/[\u00a0\s]+/g, " ")
-      .replace(/[\u2013\u2014\u201c\u201d\u2018\u2019\u00ab\u00bb]+/g, " ")
-      .replace(/\[\^?(?:[0-9-]+|[a-zA-Z?]+)\]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
+    if (!text)
+      return text;
+    return text.normalize("NFC").replace(/[\u21a9\u21b5\ufe0e\ufe0f]+/g, " ").replace(/[\u00a0\s]+/g, " ").replace(/[\u2013\u2014\u201c\u201d\u2018\u2019\u00ab\u00bb]+/g, " ").replace(/\[(?:[0-9-]+|[a-zA-Z?]+)\]/g, " ").replace(/\s+/g, " ").trim();
   }
   findAllCandidates(text, snippet, bodyStart = 0) {
     const cleanSnippet = snippet.trim();
@@ -671,28 +666,52 @@ var SelectionLogic = class {
       }
     };
     const tokenRegex = new RegExp([
+      // Group 1: Fenced code block ```...``` (must come before inline code)
+      // Uses [\s\S]*? to match across newlines. The fence can have an optional language tag.
       /(`{3}[^\n]*\n[\s\S]*?`{3})/.source,
+      // Group 2: Obsidian embed ![[...]]
       /(!\[\[(?:[^\]]+)\]\])/.source,
+      // Group 3: Image with reference ![alt][ref]
       /(!\[(?:[^\]]*)\]\[(?:[^\]]*)\])/.source,
+      // Group 4: Image with URL ![alt](url) or ![alt](url "title")
       /(!\[(?:[^\]]*)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
+      // Group 5: Reference-style link [text][ref] (ensure it's not a footnote [^id])
       /(\[(?!\^)(?:[^\]]+)\]\[(?:[^\]]*)\])/.source,
+      // Group 6: Markdown link [text](url) or [text](url "title") (ensure it's not a footnote [^id])
       /(\[(?!\^)(?:[^\]]+)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
+      // Group 7: Wiki link [[...]]
       /(\[\[(?:[^\]]+)\]\])/.source,
+      // Group 8: Footnote reference [^id] (optionally including colon/space for definitions)
       /(\[\^[^\]]+\]:?[ \t]?)/.source,
+      // Group 9: Block math $$...$$
       /(\$\$[^$]+\$\$)/.source,
+      // Group 10: Inline math $...$  (non-greedy, no spaces around)
       /(\$(?:[^$\s]|[^$\s][^$]*[^$\s])\$)/.source,
+      // Group 11: Obsidian comment %%...%%
       /(%%[^%]*%%)/.source,
+      // Group 12: Inline code `...`
       /(`[^`]+`)/.source,
+      // Group 13: Autolink <https://...> or <email@...>
       /(<(?:https?:\/\/[^>]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>)/.source,
+      // Group 14: HTML tag <tag> or </tag>
       /(<\/?[a-zA-Z][^>]*>)/.source,
+      // Group 15: Escaped character \X
       /(\\[*_\[\](){}#>+\-.!`~=|\\])/.source,
+      // Group 16: Triple formatting ***
       /(\*\*\*)/.source,
+      // Group 17: Double formatting ** ~~ ==
       /(\*\*|~~|==)/.source,
+      // Group 18: Single formatting * _
       /(\*|_)/.source,
+      // Group 19: Callout marker (header or continuation line)
       /(^[ \t]*>[ \t]?(?:\[![^\]]+\][ \t]?)?)/.source,
+      // Group 20: Block ID ^block-id
       /([ \t]\^[a-zA-Z0-9-]+(?=\s|$))/.source,
+      // Group 21: Table Separator Row |---|
       /(\|[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|)/.source,
+      // Group 22: Table Bar |
       /(\|)/.source,
+      // Group 23: Smart Punctuation & Dashes
       /([\u2013\u2014\u201c\u201d\u2018\u2019\u00ab\u00bb])/.source
     ].join("|"), "gm");
     let lastIndex = 0;
@@ -715,33 +734,84 @@ var SelectionLogic = class {
       } else if (match[2]) {
         const inner = fullMatch.substring(3, fullMatch.length - 2);
         const pipeIndex = inner.indexOf("|");
-        const visibleStart = matchStart + 3 + (pipeIndex !== -1 ? pipeIndex + 1 : 0);
-        const visibleEnd = matchStart + fullMatch.length - 2;
-        extractVisibleText(visibleStart, visibleEnd);
-      } else if (match[3] || match[4] || match[5] || match[6]) {
-        const closingBracket = fullMatch.indexOf(match[3] || match[5] ? "][" : "](");
-        const textStart = matchStart + (match[3] || match[4] ? 2 : 1);
-        const textEnd = matchStart + (closingBracket !== -1 ? closingBracket : fullMatch.indexOf("]"));
-        extractVisibleText(textStart, textEnd);
+        if (pipeIndex !== -1) {
+          const visibleStart = matchStart + 3 + pipeIndex + 1;
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
+        } else {
+          const visibleStart = matchStart + 3;
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
+        }
+      } else if (match[3]) {
+        const closingBracket = fullMatch.indexOf("][");
+        if (closingBracket !== -1) {
+          const altStart = matchStart + 2;
+          const altEnd = matchStart + closingBracket;
+          extractVisibleText(altStart, altEnd);
+        }
+      } else if (match[4]) {
+        const closingBracket = fullMatch.indexOf("](");
+        if (closingBracket !== -1) {
+          const altStart = matchStart + 2;
+          const altEnd = matchStart + closingBracket;
+          extractVisibleText(altStart, altEnd);
+        }
+      } else if (match[5]) {
+        const closingBracket = fullMatch.indexOf("][");
+        if (closingBracket !== -1) {
+          const textStart = matchStart + 1;
+          const textEnd = matchStart + closingBracket;
+          extractVisibleText(textStart, textEnd);
+        }
+      } else if (match[6]) {
+        const closingBracket = fullMatch.indexOf("](");
+        if (closingBracket !== -1) {
+          const textStart = matchStart + 1;
+          const textEnd = matchStart + closingBracket;
+          extractVisibleText(textStart, textEnd);
+        }
       } else if (match[7]) {
         const inner = fullMatch.substring(2, fullMatch.length - 2);
         const pipeIndex = inner.indexOf("|");
-        const visibleStart = matchStart + 2 + (pipeIndex !== -1 ? pipeIndex + 1 : 0);
-        const visibleEnd = matchStart + fullMatch.length - 2;
-        extractVisibleText(visibleStart, visibleEnd);
+        if (pipeIndex !== -1) {
+          const visibleStart = matchStart + 2 + pipeIndex + 1;
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
+        } else {
+          const visibleStart = matchStart + 2;
+          const visibleEnd = matchStart + fullMatch.length - 2;
+          extractVisibleText(visibleStart, visibleEnd);
+        }
       } else if (match[8]) {
-      } else if (match[9] || match[10]) {
-        const mStart = matchStart + (match[9] ? 2 : 1);
-        const mEnd = matchStart + fullMatch.length - (match[9] ? 2 : 1);
-        addRawText(mStart, mEnd);
-      } else if (match[12] || match[13]) {
-        const cStart = matchStart + 1;
-        const cEnd = matchStart + fullMatch.length - 1;
-        addRawText(cStart, cEnd);
+      } else if (match[9]) {
+        const mathStart = matchStart + 2;
+        const mathEnd = matchStart + fullMatch.length - 2;
+        addRawText(mathStart, mathEnd);
+      } else if (match[10]) {
+        const mathStart = matchStart + 1;
+        const mathEnd = matchStart + fullMatch.length - 1;
+        addRawText(mathStart, mathEnd);
+      } else if (match[11]) {
+      } else if (match[12]) {
+        const codeStart = matchStart + 1;
+        const codeEnd = matchStart + fullMatch.length - 1;
+        addRawText(codeStart, codeEnd);
+      } else if (match[13]) {
+        const urlStart = matchStart + 1;
+        const urlEnd = matchStart + fullMatch.length - 1;
+        addRawText(urlStart, urlEnd);
+      } else if (match[14]) {
       } else if (match[15]) {
         const charPos = matchStart + 1;
         map.push(charPos);
         strippedRaw += text[charPos];
+      } else if (match[16] || match[17] || match[18]) {
+      } else if (match[19]) {
+      } else if (match[20]) {
+      } else if (match[21]) {
+      } else if (match[22]) {
+      } else if (match[23]) {
       }
       lastIndex = tokenRegex.lastIndex;
     }
@@ -757,7 +827,12 @@ var SelectionLogic = class {
       const strippedStart = strippedMatch.index;
       const strippedEnd = strippedMatch.index + strippedMatch[0].length;
       const rawStart = map[strippedStart];
-      const rawEnd = strippedEnd < map.length ? map[strippedEnd] : map[strippedEnd - 1] + 1;
+      let rawEnd;
+      if (strippedEnd < map.length) {
+        rawEnd = map[strippedEnd];
+      } else {
+        rawEnd = map[strippedEnd - 1] + 1;
+      }
       candidates.push({
         start: rawStart,
         end: rawEnd,
@@ -769,15 +844,19 @@ var SelectionLogic = class {
   calculateSimilarity(source, target) {
     if (source === target)
       return 1e3;
-    const sSet = new Set(source.split(" "));
-    const tSet = new Set(target.split(" "));
+    const sourceTokens = source.split(" ");
+    const targetTokens = target.split(" ");
+    const sSet = new Set(sourceTokens);
+    const tSet = new Set(targetTokens);
     let intersection = 0;
-    for (const t of tSet)
+    for (const t of tSet) {
       if (sSet.has(t))
         intersection++;
-    const union = new Set([...sSet, ...tSet]).size;
+    }
+    const union = (/* @__PURE__ */ new Set([...sourceTokens, ...targetTokens])).size;
     const jaccard = union === 0 ? 0 : intersection / union;
-    const lenMultiplier = 1 / (1 + Math.abs(source.length - target.length) * 0.1);
+    const lenDiff = Math.abs(source.length - target.length);
+    const lenMultiplier = 1 / (1 + lenDiff * 0.1);
     return jaccard * 0.7 + lenMultiplier * 0.3;
   }
 };
@@ -1053,7 +1132,7 @@ var HighlightNavigatorView = class extends import_obsidian4.ItemView {
       })
     );
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", (file) => {
+      this.app.vault.on("modify", (file) => {
         if (this.currentFile && file.path === this.currentFile.path) {
           this.refresh(true);
         }
@@ -1513,14 +1592,10 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   async highlightSelection(view, selectionSnapshot) {
     var _a;
     const sel = window.getSelection();
-    let snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
-    
-    // FIX: Trim selection to handle trailing whitespace issues
-    snippet = snippet.trim();
-
-    if (!snippet) {
-        new import_obsidian5.Notice("No text selected.");
-        return;
+    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
+    if (!snippet.trim()) {
+      new import_obsidian5.Notice("No text selected.");
+      return;
     }
     const scrollPos = getScroll(view);
     await this.saveUndoState(view.file);
@@ -1529,25 +1604,25 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     const occurrenceIndex = this.getSelectionOccurrence(view, contextEl);
     const result = await this.logic.locateSelection(view.file, view, snippet, contextText, occurrenceIndex);
     if (!result) {
-        new import_obsidian5.Notice("Could not locate selection in file.");
-        return;
+      new import_obsidian5.Notice("Could not locate selection in file.");
+      return;
     }
     const targetFile = result.file;
     await this.saveUndoState(targetFile);
     let mode = "highlight";
     let payload = "";
     if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-        mode = "color";
-        payload = this.settings.highlightColor;
+      mode = "color";
+      payload = this.settings.highlightColor;
     }
     await this.applyMarkdownModification(targetFile, "", result.start, result.end, mode, payload);
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
     if (this.settings.enableHaptics && import_obsidian5.Platform.isMobile) {
-        (_a = navigator.vibrate) == null ? void 0 : _a.call(navigator, 10);
+      (_a = navigator.vibrate) == null ? void 0 : _a.call(navigator, 10);
     }
     new import_obsidian5.Notice("Highlighted!");
-}
+  }
   // Apply color by palette index
   async applyColorByIndex(view, index, selectionSnapshot) {
     if (index < 0 || index >= this.settings.colorPalette.length)
@@ -1763,87 +1838,105 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
   async applyMarkdownModification(file, raw, start, end, mode, payload = "", autoTag = "") {
-    if (!raw) raw = await this.app.vault.read(file);
-
+    if (!raw) {
+      raw = await this.app.vault.read(file);
+    }
     let expandedStart = start;
     let expandedEnd = end;
     let bodyStart = 0;
-
     if (raw.startsWith("---")) {
       const secondDash = raw.indexOf("---", 3);
-      if (secondDash !== -1) bodyStart = secondDash + 3;
+      if (secondDash !== -1) {
+        bodyStart = secondDash + 3;
+      }
     }
-
     let expanded = true;
     while (expanded) {
       expanded = false;
       const preceding = raw.substring(0, expandedStart);
       const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[\^[^\]]+\]:?\s?|\[)$/);
       if (matchBack && expandedStart > bodyStart) {
-        expandedStart -= matchBack[0].length;
-        expanded = true;
+        const newStart = expandedStart - matchBack[0].length;
+        if (newStart >= bodyStart) {
+          expandedStart = newStart;
+          expanded = true;
+        }
       }
       const following = raw.substring(expandedEnd);
-      const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\[\[|\]\([^)]+\)|\[\^[^\]]+\])/);
+      const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\])/);
       if (matchForward) {
         expandedEnd += matchForward[0].length;
         expanded = true;
       }
     }
-
     const selectedText = raw.substring(expandedStart, expandedEnd);
     const paragraphs = selectedText.split(/\r?\n\s*\r?\n/);
-    const newline = raw.includes("\r\n") ? "\r\n" : "\n";
-    
-    const sanitizeTag = (t) => t.trim().replace(/^#/, "").replace(/\s+/g, "_");
     let fullTag = "";
+    const sanitizeTag = (t) => t.trim().replace(/^#/, "").replace(/\s+/g, "_");
     if (mode === "tag" && payload) {
       const prefix = this.settings.defaultTagPrefix ? sanitizeTag(this.settings.defaultTagPrefix) : "";
-      const cleanPayload = payload.split(/\s+/).map(sanitizeTag).filter(t => t).map(t => `#${t}`).join(" ");
-      fullTag = prefix ? `#${prefix} ${cleanPayload}` : cleanPayload;
-    } else if (this.settings.defaultTagPrefix && (mode === "highlight" || mode === "color")) {
-      fullTag = `#${sanitizeTag(this.settings.defaultTagPrefix)}`;
+      const cleanPayload = payload.split(/\s+/).map(sanitizeTag).filter((t) => t).map((t) => `#${t}`).join(" ");
+      if (prefix) {
+        fullTag = `#${sanitizeTag(prefix)} ${cleanPayload}`;
+      } else {
+        fullTag = cleanPayload;
+      }
+    } else if ((mode === "highlight" || mode === "color") && this.settings.defaultTagPrefix) {
+      const autoTagSetting = sanitizeTag(this.settings.defaultTagPrefix);
+      if (autoTagSetting) {
+        fullTag = `#${autoTagSetting}`;
+      }
     }
-    if (autoTag) fullTag = fullTag ? `${fullTag} #${sanitizeTag(autoTag)}` : `#${sanitizeTag(autoTag)}`;
-
+    if (autoTag) {
+      const cleanAutoTag = sanitizeTag(autoTag);
+      fullTag = fullTag ? `${fullTag} #${cleanAutoTag}` : `#${cleanAutoTag}`;
+    }
     const processedParagraphs = paragraphs.map((paragraph) => {
-      if (!paragraph.trim()) return paragraph;
-      
+      if (!paragraph.trim())
+        return paragraph;
       const lines = paragraph.split(/\r?\n/);
       const processedLines = lines.map((line) => {
         let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
-        if (["highlight", "color", "tag", "remove"].includes(mode)) {
-          cleanLine = cleanLine.replace(/==/g, "");
+        if (mode === "highlight" || mode === "color" || mode === "tag") {
+          cleanLine = cleanLine.split("==").join("");
+        } else if (mode === "bold") {
+          cleanLine = cleanLine.split("**").join("");
+        } else if (mode === "italic") {
+          cleanLine = cleanLine.split("*").join("");
+        } else if (mode === "remove") {
+          cleanLine = cleanLine.split("==").join("");
         }
-
-        if (mode === "remove") return cleanLine;
-
+        if (mode === "remove") {
+          return cleanLine;
+        }
         const matchIndent = cleanLine.match(/^(\s*)/);
         const indent = matchIndent ? matchIndent[0] : "";
-        const rest = cleanLine.substring(indent.length);
-        const prefixMatch = rest.match(/^((?:#{1,6}\s+)|(?:[-*+]\s+)|(?:\d+\.\s+)|(?:>\s+)|(?:-\s\[[ x]\]\s+))/);
-        const prefix = prefixMatch ? prefixMatch[0] : "";
-        let content = rest.substring(prefix.length).trim();
-
-        if (!content || content.length === 0) return cleanLine;
-
-        const tagStr = fullTag ? `${fullTag} ` : "";
-        let wrapped;
-        if (mode === "highlight" || mode === "tag") {
-          wrapped = (this.settings.enableColorHighlighting && this.settings.highlightColor) 
-            ? `<mark style="background: ${this.settings.highlightColor}; color: black;">${content}</mark>`
-            : `==${content}==`;
-        } else if (mode === "color") {
-          wrapped = `<mark style="background: ${payload}; color: black;">${content}</mark>`;
-        } else {
-          wrapped = content;
+        const contentAfterIndent = cleanLine.substring(indent.length);
+        const prefixRegex = /^((?:#{1,6}\s+)|(?:[-*+]\s+)|(?:\d+\.\s+)|(?:>\s+)|(?:-\s\[[ x]\]\s+))/;
+        const matchPrefix = contentAfterIndent.match(prefixRegex);
+        let prefix = "";
+        let content = contentAfterIndent;
+        if (matchPrefix) {
+          prefix = matchPrefix[0];
+          content = contentAfterIndent.substring(prefix.length);
         }
-
-        return `${indent}${prefix}${tagStr}${wrapped}`;
+        content = content.trim();
+        const tagStr = fullTag ? `${fullTag} ` : "";
+        let wrappedContent = content;
+        if (mode === "highlight" || mode === "tag") {
+          if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
+            wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${content}</mark>`;
+          } else {
+            wrappedContent = `==${content}==`;
+          }
+        } else if (mode === "color") {
+          wrappedContent = `<mark style="background: ${payload}; color: black;">${content}</mark>`;
+        }
+        return `${indent}${prefix}${tagStr}${wrappedContent}`;
       });
-      return processedLines.join(newline);
+      return processedLines.join("\n");
     });
-
+    const newline = raw.includes("\r\n") ? "\r\n" : "\n";
     const replaceBlock = processedParagraphs.join(newline + newline);
     const newContent = raw.substring(0, expandedStart) + replaceBlock + raw.substring(expandedEnd);
     await this.app.vault.modify(file, newContent);

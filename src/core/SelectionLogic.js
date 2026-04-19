@@ -279,9 +279,6 @@ export var SelectionLogic = class {
       .replace(/[‐‑‒–—―]/g, "-")
       .replace(/[“”«»]/g, "\"")
       .replace(/[‘’]/g, "'")
-      // FIX: Only strip markers if they are definition prefixes (e.g. [^1]:) 
-      // or if the user ONLY highlighted the footnote marker itself.
-      // This preserves mid-paragraph markers so the matcher can find the text.
       .replace(/(^\s*\[\^[^\]]+\]:?|^\s*\[\^[^\]]+\]\s*$)/gm, "")
       .replace(/\s+/g, " ")
       .trim();
@@ -643,13 +640,11 @@ export var SelectionLogic = class {
     let remainder = line.substring(indent.length);
     let prefix = "";
     
-    // Check specifically for footnote definitions first
     const footnoteDefMatch = remainder.match(/^\[\^[^\]]+\]:\s*/);
     if (footnoteDefMatch) {
       prefix = footnoteDefMatch[0];
       remainder = remainder.substring(footnoteDefMatch[0].length);
     } else {
-      // Otherwise check standard markdown prefixes
       const prefixPatterns = [
         /^>\s*/,
         /^#{1,6}\s+/,

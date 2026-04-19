@@ -613,8 +613,8 @@ var SelectionLogic = class {
     try {
       regex = new RegExp(pattern, "g");
     } catch (e) {
-      console.error("INVALID REGEX PATTERN:", pattern);
-      throw e;
+      console.error("INVALID REGEX PATTERN:", pattern, e);
+      return [];
     }
     const candidates = [];
     let match;
@@ -1592,8 +1592,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   async highlightSelection(view, selectionSnapshot) {
     var _a;
     const sel = window.getSelection();
-    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
-    if (!snippet.trim()) {
+    const snippet = ((selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "").trim();
+    if (!snippet) {
       new import_obsidian5.Notice("No text selected.");
       return;
     }
@@ -1632,8 +1632,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   }
   async tagSelection(view, selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
-    if (!snippet.trim()) {
+    const snippet = ((selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "").trim();
+    if (!snippet) {
       new import_obsidian5.Notice("No text selected.");
       return;
     }
@@ -1674,8 +1674,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   // Annotate selection with footnote
   async annotateSelection(view, selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
-    if (!snippet.trim()) {
+    const snippet = ((selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "").trim();
+    if (!snippet) {
       new import_obsidian5.Notice("No text selected.");
       return;
     }
@@ -1725,8 +1725,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   }
   async removeHighlightSelection(view, selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
-    if (!snippet.trim()) {
+    const snippet = ((selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "").trim();
+    if (!snippet) {
       new import_obsidian5.Notice("Select highlighted text to remove.");
       return;
     }
@@ -1772,8 +1772,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   }
   async copyAsQuote(view, selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
-    if (!snippet.trim()) {
+    const snippet = ((selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "").trim();
+    if (!snippet) {
       new import_obsidian5.Notice("No text selected.");
       return;
     }
@@ -1785,8 +1785,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
   }
   async applyColorHighlight(view, color, autoTag = "", selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
-    if (!snippet.trim())
+    const snippet = ((selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "").trim();
+    if (!snippet)
       return;
     const scrollPos = getScroll(view);
     await this.saveUndoState(view.file);
@@ -1912,7 +1912,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
         const matchIndent = cleanLine.match(/^(\s*)/);
         const indent = matchIndent ? matchIndent[0] : "";
         const contentAfterIndent = cleanLine.substring(indent.length);
-        const prefixRegex = /^((?:#{1,6}\s+)|(?:[-*+]\s+)|(?:\d+\.\s+)|(?:>\s+)|(?:-\s\[[ x]\]\s+))/;
+        const prefixRegex = /^((?:\[\^[^\]]+\]:\s*)|(?:#{1,6}\s+)|(?:[-*+]\s+)|(?:\d+\.\s+)|(?:>\s+)|(?:-\s\[[ x]\]\s+))/;
         const matchPrefix = contentAfterIndent.match(prefixRegex);
         let prefix = "";
         let content = contentAfterIndent;

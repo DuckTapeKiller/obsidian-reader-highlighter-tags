@@ -414,6 +414,11 @@ var SelectionLogic = class {
       candidates = this.findCandidatesStripped(bodyContent, snippet, 0);
       candidates = candidates.map((c) => ({ ...c, start: c.start + firstSegmentBodyStart, end: c.end + firstSegmentBodyStart }));
     }
+    if (candidates.length === 0) {
+      // Third fallback: anchor on plain-language words around rendered math
+      candidates = this.findCandidatesAnchored(bodyContent, snippet, 0);
+      candidates = candidates.map((c) => ({ ...c, start: c.start + firstSegmentBodyStart, end: c.end + firstSegmentBodyStart }));
+    }
     if (candidates.length > 0) {
       const result = this.resolveCandidates(candidates, fullRaw, context, occurrenceIndex);
       if (result) {
@@ -840,6 +845,54 @@ var SelectionLogic = class {
       });
     }
     return candidates;
+  }
+  findCandidatesAnchored(text, snippet, bodyStart = 0) {
+    // Fallback for selections that contain rendered math/special chars (e.g. θ
+    // rendered from $\theta$) which can never match raw LaTeX source directly.
+    // Strategy: extract only the "safe" (non-math) words from the snippet start
+    // and end, find them in the raw text, and use those positions as the range.
+    const clean = snippet.trim();
+    if (clean.length < 20) return [];
+    // "Safe" = ASCII printable or Latin-Extended (covers Spanish/French/etc.)
+    // Excludes Greek, math operators, dingbats, etc.
+    const isSafe = (ch) => {
+      const cp = ch.codePointAt(0);
+      return (cp >= 0x20 && cp <= 0x7E) || (cp >= 0xC0 && cp <= 0x24F) || (cp >= 0x1E00 && cp <= 0x1EFF);
+    };
+    const safeWords = clean.split(/\s+/).filter((w) => w.length > 2 && [...w].every(isSafe));
+    if (safeWords.length < 4) return [];
+    const half = Math.max(2, Math.min(5, Math.floor(safeWords.length / 3)));
+    const startAnchor = safeWords.slice(0, half).join(" ");
+    const endAnchor = safeWords.slice(-half).join(" ");
+    if (startAnchor === endAnchor) return [];
+    try {
+      const startRegex = new RegExp(this.createFlexiblePattern(startAnchor), "g");
+      const endRegex = new RegExp(this.createFlexiblePattern(endAnchor), "g");
+      const startMatches = [];
+      const endMatches = [];
+      let m;
+      while ((m = startRegex.exec(text)) !== null) {
+        if (m.index >= bodyStart) startMatches.push(m);
+      }
+      while ((m = endRegex.exec(text)) !== null) {
+        if (m.index >= bodyStart) endMatches.push(m);
+      }
+      for (const startM of startMatches) {
+        const bestEnd = endMatches.find(
+          (e) => e.index > startM.index && e.index - startM.index < clean.length * 4
+        );
+        if (bestEnd) {
+          return [{
+            start: startM.index,
+            end: bestEnd.index + bestEnd[0].length,
+            text: text.substring(startM.index, bestEnd.index + bestEnd[0].length)
+          }];
+        }
+      }
+    } catch (e) {
+      console.error("Anchor match failed:", e);
+    }
+    return [];
   }
   calculateSimilarity(source, target) {
     if (source === target)
@@ -1869,6 +1922,11 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
         expanded = true;
       }
     }
+    // Trim trailing newlines – they can appear when findCandidatesStripped
+    // skips a [^N] token and maps rawEnd to the \n that follows it.
+    while (expandedEnd > expandedStart && (raw[expandedEnd - 1] === "\n" || raw[expandedEnd - 1] === "\r")) {
+      expandedEnd--;
+    }
     const selectedText = raw.substring(expandedStart, expandedEnd);
     const paragraphs = selectedText.split(/\r?\n\s*\r?\n/);
     let fullTag = "";
@@ -1921,6 +1979,11 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
           content = contentAfterIndent.substring(prefix.length);
         }
         content = content.trim();
+        // An empty content line (e.g. a trailing \n absorbed into selectedText)
+        // must never become "====" – return just the structural parts.
+        if (!content) {
+          return `${indent}${prefix}`;
+        }
         const tagStr = fullTag ? `${fullTag} ` : "";
         let wrappedContent = content;
         if (mode === "highlight" || mode === "tag") {

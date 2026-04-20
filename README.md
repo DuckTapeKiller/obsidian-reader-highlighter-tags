@@ -6,10 +6,8 @@ A powerful Obsidian plugin that brings a **Medium-like highlighting experience**
 
 Designed for power users who read long-form content in Obsidian, this plugin allows you to highlight, tag, annotate, and organize your notes without ever switching to Edit mode. It is "smart" about your content—understanding lists, indentation, and identical text occurrences to ensure your markdown remains clean and valid.
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/dff37003-3d0d-4b25-9348-c9141bfe0029" controls="controls"></video>
-</div>
-
+### Video Tutorial
+![Tutorial Video](videos/tutorial.mp4)
 ---
 
 ## Core Features

@@ -74,10 +74,15 @@ export class HighlightNavigatorView extends ItemView {
         // Content area
         this.contentEl = container.createDiv({ cls: "highlight-navigator-content" });
 
-        // Footer with Export
+        // Footer with Export + Scan Vault
         const footer = container.createDiv({ cls: "highlight-navigator-footer" });
-        const exportBtn = footer.createEl("button", { text: "Export to MD", cls: "mod-cta" });
+        const footerBtnGroup = footer.createDiv({ cls: "highlight-navigator-footer-buttons" });
+
+        const exportBtn = footerBtnGroup.createEl("button", { text: "Export MD", cls: "mod-cta" });
         exportBtn.onclick = () => this.exportHighlights();
+
+        const scanBtn = footerBtnGroup.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
+        scanBtn.onclick = () => this.plugin.activateResearchView();
 
         // Register for file changes
         this.registerEvent(

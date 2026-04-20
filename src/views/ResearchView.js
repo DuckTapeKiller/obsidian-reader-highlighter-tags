@@ -66,8 +66,8 @@ export class ResearchView extends ItemView {
         // Content Area
         this.contentEl = container.createDiv({ cls: "research-view-content" });
 
-        // Initial render
-        this.renderContent();
+        // Auto-scan on open so all highlights display by default
+        this.startScan();
     }
 
     async startScan() {
@@ -111,78 +111,100 @@ export class ResearchView extends ItemView {
             return;
         }
 
-        // Apply global search filter
-        const filteredResults = [];
-        let totalHighlights = 0;
-        let totalFiltered = 0;
-
+        // Collect all highlights with file reference
+        let allHighlights = [];
         for (const res of this.scanResults) {
-            const matches = res.highlights.filter(h => {
-                if (!this.searchQuery) return true;
-                return h.text.toLowerCase().includes(this.searchQuery);
-            });
-            
-            totalHighlights += res.highlights.length;
-            totalFiltered += matches.length;
-
-            if (matches.length > 0) {
-                filteredResults.push({ file: res.file, highlights: matches, totalInFile: res.highlights.length });
+            for (const h of res.highlights) {
+                allHighlights.push({ ...h, file: res.file });
             }
+        }
+
+        const totalHighlights = allHighlights.length;
+
+        // Apply search filter
+        if (this.searchQuery) {
+            allHighlights = allHighlights.filter(h =>
+                h.text.toLowerCase().includes(this.searchQuery)
+            );
         }
 
         // Stats summary
         const statsRow = this.contentEl.createDiv({ cls: "research-stats" });
-        const fileCount = filteredResults.length;
-        const totalFileCount = this.scanResults.length;
-        
+
         if (this.searchQuery) {
-            statsRow.textContent = `Found ${totalFiltered} highlights in ${fileCount} files (filtered from ${totalHighlights}).`;
-        } else {
-            statsRow.textContent = `Found ${totalHighlights} total highlights across ${totalFileCount} files.`;
-        }
-
-        // Render groups
-        for (const group of filteredResults) {
-            const groupEl = this.contentEl.createDiv({ cls: "research-group" });
-            const isExpanded = this.expandedFiles.has(group.file.path) || this.searchQuery.length > 0;
-
-            const headerEl = groupEl.createDiv({ cls: "research-group-header" });
-            
-            const expandIcon = headerEl.createSpan({ cls: "research-expand-icon" });
-            expandIcon.innerHTML = isExpanded ? "▼" : "▶";
-            
-            const titleEl = headerEl.createSpan({ cls: "research-group-title", text: group.file.basename });
-            const badgeEl = headerEl.createSpan({ cls: "research-group-badge", text: `${group.highlights.length}` });
-
-            headerEl.onclick = () => {
-                if (this.expandedFiles.has(group.file.path)) {
-                    this.expandedFiles.delete(group.file.path);
-                } else {
-                    this.expandedFiles.add(group.file.path);
+            // Group filtered results by file for the detailed view
+            const fileMap = new Map();
+            for (const h of allHighlights) {
+                if (!fileMap.has(h.file.path)) {
+                    fileMap.set(h.file.path, { file: h.file, highlights: [] });
                 }
-                this.renderContent(); // Lazy re-render is fine for this
-            };
+                fileMap.get(h.file.path).highlights.push(h);
+            }
+            const filteredGroups = [...fileMap.values()];
+            const fileCount = filteredGroups.length;
 
-            if (isExpanded) {
+            statsRow.textContent = `Found ${allHighlights.length} highlights in ${fileCount} files (filtered from ${totalHighlights}).`;
+
+            // Render grouped/expanded view when searching
+            for (const group of filteredGroups) {
+                const groupEl = this.contentEl.createDiv({ cls: "research-group" });
+
+                const headerEl = groupEl.createDiv({ cls: "research-group-header" });
+                
+                const expandIcon = headerEl.createSpan({ cls: "research-expand-icon" });
+                expandIcon.innerHTML = "▼";
+                
+                headerEl.createSpan({ cls: "research-group-title", text: group.file.basename });
+                headerEl.createSpan({ cls: "research-group-badge", text: `${group.highlights.length}` });
+
                 const listEl = groupEl.createDiv({ cls: "research-highlight-list" });
                 
-                group.highlights.forEach((h, idx) => {
+                group.highlights.forEach((h) => {
                     const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
                     
-                    if (h.type === "markdown") {
+                    if (h.color) {
                         const dot = itemEl.createSpan({ cls: "research-color-dot" });
-                        if (h.color) {
-                            dot.style.backgroundColor = h.color;
-                        }
+                        dot.style.backgroundColor = h.color;
                     }
 
-                    const textEl = itemEl.createSpan({ cls: "research-item-text", text: h.text });
+                    itemEl.createSpan({ cls: "research-item-text", text: h.text });
                     
                     itemEl.onclick = (e) => {
                         e.stopPropagation();
                         this.jumpToHighlight(group.file, h.line);
                     };
                 });
+            }
+        } else {
+            // Default: simplified flat list of all highlights
+            const totalFileCount = this.scanResults.length;
+            statsRow.textContent = `${totalHighlights} highlights across ${totalFileCount} files.`;
+
+            const listEl = this.contentEl.createDiv({ cls: "research-highlight-list research-flat-list" });
+
+            for (const h of allHighlights) {
+                const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
+
+                // Color dot
+                if (h.color) {
+                    const dot = itemEl.createSpan({ cls: "research-color-dot" });
+                    dot.style.backgroundColor = h.color;
+                }
+
+                // Highlight text (truncated for readability)
+                const displayText = h.text.length > 120
+                    ? h.text.substring(0, 120) + "..."
+                    : h.text;
+                itemEl.createSpan({ cls: "research-item-text", text: displayText });
+
+                // Source file badge
+                itemEl.createSpan({ cls: "research-source-badge", text: h.file.basename });
+
+                // Click to jump
+                itemEl.onclick = (e) => {
+                    e.stopPropagation();
+                    this.jumpToHighlight(h.file, h.line);
+                };
             }
         }
     }

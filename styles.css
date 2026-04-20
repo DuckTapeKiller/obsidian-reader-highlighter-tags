@@ -463,9 +463,17 @@
     border-top: 1px solid var(--background-modifier-border);
 }
 
-.highlight-navigator-footer button {
+.highlight-navigator-footer-buttons {
+    display: flex;
+    gap: 8px;
     width: 100%;
+}
+
+.highlight-navigator-footer-buttons button {
+    flex: 1;
     border-radius: var(--button-radius);
+    font-size: 0.85em;
+    min-width: 0;
 }
 
 /* === Highlight Flash Effect === */
@@ -882,4 +890,35 @@
     font-size: 0.9em;
     line-height: 1.5;
     color: var(--text-normal);
+    flex: 1;
+}
+
+.research-flat-list {
+    border-top: none;
+    background: transparent;
+}
+
+.research-flat-list .research-highlight-item {
+    padding: 12px 14px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    margin-bottom: 8px;
+    background: var(--background-secondary);
+    align-items: center;
+}
+
+.research-flat-list .research-highlight-item:last-child {
+    border-bottom: 1px solid var(--background-modifier-border);
+    margin-bottom: 0;
+}
+
+.research-source-badge {
+    background: var(--background-primary-alt);
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75em;
+    margin-left: 10px;
+    white-space: nowrap;
+    border: 1px solid var(--background-modifier-border);
 }

@@ -6,8 +6,11 @@ A powerful Obsidian plugin that brings a **Medium-like highlighting experience**
 
 Designed for power users who read long-form content in Obsidian, this plugin allows you to highlight, tag, annotate, and organize your notes without ever switching to Edit mode. It is "smart" about your content—understanding lists, indentation, and identical text occurrences to ensure your markdown remains clean and valid.
 
+
+dude the probglem is that when i paste this
+
 ### Video Tutorial
-![Tutorial Video](videos/tutorial.mp4)
+<video src="videos/tutorial.mp4" width="100%" controls></video>
 ---
 
 ## Core Features

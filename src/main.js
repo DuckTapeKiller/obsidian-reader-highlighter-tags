@@ -36,21 +36,24 @@ const DEFAULT_SETTINGS = {
     showRemoveButton: true,
     showQuoteButton: true,
 
-    // NEW: Color Palette (optional, disabled by default = use == highlight)
+    // NEW: Semantic Color Taxonomy (15 static colors)
     enableColorPalette: false,
-    colorPalette: [
-        { name: "Yellow", color: "#FFEE58", tag: "" },
-        { name: "Blue", color: "#64B5F6", tag: "" },
-        { name: "Green", color: "#81C784", tag: "" },
-        { name: "Red", color: "#EF5350", tag: "" },
-        { name: "Purple", color: "#BA68C8", tag: "" },
-    ],
-
-    // NEW: Highlight Styles (presets with color + tag)
-    highlightStyles: [
-        { name: "Important", color: "#FFEE58", tag: "important" },
-        { name: "Question", color: "#64B5F6", tag: "question" },
-        { name: "Definition", color: "#81C784", tag: "definition" },
+    semanticColors: [
+        { color: "#FFCDD2", meaning: "Important" }, // Red
+        { color: "#F8BBD0", meaning: "" }, // Pink
+        { color: "#E1BEE7", meaning: "" }, // Purple
+        { color: "#D1C4E9", meaning: "" }, // Deep Purple
+        { color: "#C5CAE9", meaning: "" }, // Indigo
+        { color: "#BBDEFB", meaning: "Vocabulary" }, // Blue
+        { color: "#B3E5FC", meaning: "" }, // Light Blue
+        { color: "#B2EBF2", meaning: "" }, // Cyan
+        { color: "#B2DFDB", meaning: "" }, // Teal
+        { color: "#C8E6C9", meaning: "Key Concept" }, // Green
+        { color: "#DCEDC8", meaning: "" }, // Light Green
+        { color: "#F0F4C0", meaning: "" }, // Lime
+        { color: "#FFF9C4", meaning: "General" }, // Yellow
+        { color: "#FFECB3", meaning: "" }, // Amber
+        { color: "#FFE0B2", meaning: "" }, // Orange
     ],
 
     // NEW: Quote Template
@@ -287,8 +290,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             },
         });
 
-        // Color palette shortcuts (1-5)
-        for (let i = 0; i < 5; i++) {
+        // Color palette shortcuts (1-9)
+        for (let i = 0; i < 9; i++) {
             this.addCommand({
                 id: `apply-color-${i + 1}`,
                 name: `Apply highlight color ${i + 1}`,
@@ -538,10 +541,71 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     // Apply color by palette index
     async applyColorByIndex(view, index, selectionSnapshot) {
-        if (index < 0 || index >= this.settings.colorPalette.length) return;
+        if (index < 0 || index >= this.settings.semanticColors.length) return;
 
-        const palette = this.settings.colorPalette[index];
-        await this.applyColorHighlight(view, palette.color, palette.tag, selectionSnapshot);
+        const palette = this.settings.semanticColors[index];
+        await this.applyColorHighlight(view, palette.color, "", selectionSnapshot);
+    }
+
+    // PDF Companion Note Storage
+    async savePdfHighlight(view, selectionSnapshot, mode, payload) {
+        if (!view.file) return;
+
+        const snippet = selectionSnapshot?.text || window.getSelection()?.toString() || "";
+        if (!snippet.trim()) {
+            const { Notice } = require('obsidian');
+            new Notice("No text selected.");
+            return;
+        }
+
+        const pdfName = view.file.basename;
+        const companionFile = `${view.file.parent.path}/${pdfName} - Highlights.md`;
+        
+        const fileExists = this.app.vault.getAbstractFileByPath(companionFile);
+        
+        let highlightOutput = snippet.trim();
+        if (mode === "color") {
+            const index = typeof payload === "number" ? payload : parseInt(payload);
+            const palette = this.settings.semanticColors[index];
+            if (palette) {
+                highlightOutput = `<mark style="background: ${palette.color}">${highlightOutput}</mark>`;
+            }
+        } else if (mode === "action") {
+            if (payload === "highlightSelection") {
+                highlightOutput = `==${highlightOutput}==`;
+            } else if (payload === "copyAsQuote") {
+                this.copyAsQuote(view, selectionSnapshot);
+                return;
+            } else {
+                return; // other actions ignored currently for PDFs
+            }
+        }
+
+        const blockId = "^" + Math.random().toString(36).substring(2, 8);
+        const appendString = `> ${highlightOutput}\n> — [[${view.file.path}|${pdfName}]] ${blockId}\n\n`;
+
+        try {
+            const { Notice } = require("obsidian");
+            if (fileExists) {
+                const fileContent = await this.app.vault.read(fileExists);
+                await this.app.vault.modify(fileExists, fileContent + "\n" + appendString);
+            } else {
+                const fileContent = `# Highlights from [[${view.file.path}|${pdfName}]]\n\n${appendString}`;
+                await this.app.vault.create(companionFile, fileContent);
+            }
+            new Notice("Saved to " + pdfName + " - Highlights");
+            
+            // Clear selection
+            window.getSelection()?.removeAllRanges();
+            const { Platform } = require("obsidian");
+            if (this.settings.enableHaptics && Platform.isMobile) {
+                navigator.vibrate?.(10);
+            }
+        } catch (e) {
+            console.error("Failed to save PDF highlight", e);
+            const { Notice } = require("obsidian");
+            new Notice("Failed to save PDF highlight");
+        }
     }
 
     async tagSelection(view, selectionSnapshot) {
@@ -1217,24 +1281,28 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 }));
 
         if (this.plugin.settings.enableColorPalette) {
-            containerEl.createEl("h4", { text: "Color Palette" });
+            containerEl.createEl("h4", { text: "Semantic Color Meanings" });
 
-            this.plugin.settings.colorPalette.forEach((item, index) => {
-                new Setting(containerEl)
-                    .setName(`Color ${index + 1}: ${item.name}`)
-                    .addColorPicker(color => color
-                        .setValue(item.color)
-                        .onChange(async (value) => {
-                            this.plugin.settings.colorPalette[index].color = value;
-                            await this.plugin.saveSettings();
-                        }))
-                    .addText(text => text
-                        .setPlaceholder("Auto-tag (optional)")
-                        .setValue(item.tag)
-                        .onChange(async (value) => {
-                            this.plugin.settings.colorPalette[index].tag = value;
-                            await this.plugin.saveSettings();
-                        }));
+            this.plugin.settings.semanticColors.forEach((item, index) => {
+                const setting = new Setting(containerEl)
+                    .setName(`Color ${index + 1}`);
+
+                // Visual color block
+                const colorPreview = document.createElement("div");
+                colorPreview.style.width = "24px";
+                colorPreview.style.height = "24px";
+                colorPreview.style.borderRadius = "4px";
+                colorPreview.style.backgroundColor = item.color;
+                colorPreview.style.marginRight = "10px";
+                setting.controlEl.appendChild(colorPreview);
+
+                setting.addText(text => text
+                    .setPlaceholder("Meaning (e.g. Disagree)")
+                    .setValue(item.meaning)
+                    .onChange(async (value) => {
+                        this.plugin.settings.semanticColors[index].meaning = value;
+                        await this.plugin.saveSettings();
+                    }));
             });
         }
 

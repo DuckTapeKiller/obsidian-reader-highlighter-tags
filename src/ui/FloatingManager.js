@@ -65,16 +65,16 @@ export class FloatingManager {
         this.highlightBtn = this.createButton("highlighter", "Highlight selection");
         this.containerEl.appendChild(this.highlightBtn);
 
-        // Color palette (only if enabled)
+        // Semantic Color palette (only if enabled)
         if (this.plugin.settings.enableColorPalette) {
             this.paletteContainer = document.createElement("div");
             this.paletteContainer.addClass("reading-highlighter-palette");
 
-            this.plugin.settings.colorPalette.forEach((item, index) => {
+            this.plugin.settings.semanticColors.forEach((item, index) => {
                 const colorBtn = document.createElement("button");
                 colorBtn.addClass("reading-highlighter-color-btn");
                 colorBtn.style.backgroundColor = item.color;
-                colorBtn.setAttribute("aria-label", item.name);
+                colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
                 colorBtn.setAttribute("data-color-index", index.toString());
                 this.colorButtons.push(colorBtn);
                 this.paletteContainer.appendChild(colorBtn);
@@ -133,12 +133,26 @@ export class FloatingManager {
 
             const handler = (evt) => {
                 preventFocus(evt);
-                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                if (view && view.getMode() === "preview") {
-                    // On Android, pass the cached selection snapshot
-                    // because the native selection may be cleared by this point
+                const { View } = require('obsidian');
+                let view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                let isPdf = false;
+                
+                if (!view || view.getMode() !== "preview") {
+                    view = this.app.workspace.getActiveViewOfType(View);
+                    if (view && view.getViewType() === "pdf") {
+                        isPdf = true;
+                    } else {
+                        this.hide();
+                        return;
+                    }
+                }
+
+                if (isPdf) {
+                    this.plugin.savePdfHighlight(view, this._selectionSnapshot, "action", actionName);
+                } else {
                     this.plugin[actionName](view, this._selectionSnapshot);
                 }
+                
                 this.hide();
             };
 
@@ -157,10 +171,26 @@ export class FloatingManager {
         this.colorButtons.forEach((btn, index) => {
             const handler = (evt) => {
                 preventFocus(evt);
-                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                if (view && view.getMode() === "preview") {
+                const { View } = require('obsidian');
+                let view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                let isPdf = false;
+                
+                if (!view || view.getMode() !== "preview") {
+                    view = this.app.workspace.getActiveViewOfType(View);
+                    if (view && view.getViewType() === "pdf") {
+                        isPdf = true;
+                    } else {
+                        this.hide();
+                        return;
+                    }
+                }
+
+                if (isPdf) {
+                    this.plugin.savePdfHighlight(view, this._selectionSnapshot, "color", index);
+                } else {
                     this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
                 }
+                
                 this.hide();
             };
 
@@ -225,10 +255,14 @@ export class FloatingManager {
 
     /** Internal: actually process the current selection state. */
     _doHandleSelection() {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const { View } = require('obsidian');
+        let view = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (!view || view.getMode() !== "preview") {
-            this.hide();
-            return;
+            view = this.app.workspace.getActiveViewOfType(View);
+            if (!view || view.getViewType() !== "pdf") {
+                this.hide();
+                return;
+            }
         }
 
         const sel = window.getSelection();
@@ -269,7 +303,7 @@ export class FloatingManager {
 
         if (pos === "text") {
             const containerHeight = 50;
-            const containerWidth = this.plugin.settings.enableColorPalette ? 280 : 180;
+            const containerWidth = this.plugin.settings.enableColorPalette ? 320 : 180;
 
             if (Platform.isAndroidApp) {
                 // ── Android: place toolbar BELOW the selection ──

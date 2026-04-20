@@ -81,6 +81,9 @@ export class HighlightNavigatorView extends ItemView {
         const exportBtn = footerBtnGroup.createEl("button", { text: "Export MD", cls: "mod-cta" });
         exportBtn.onclick = () => this.exportHighlights();
 
+        const canvasBtn = footerBtnGroup.createEl("button", { text: "Canvas", cls: "mod-cta" });
+        canvasBtn.onclick = () => this.exportCurrentFileToCanvas();
+
         const scanBtn = footerBtnGroup.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
         scanBtn.onclick = () => this.plugin.activateResearchView();
 
@@ -274,7 +277,38 @@ export class HighlightNavigatorView extends ItemView {
             // Open the exported file
             const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
             if (exportFile) {
-                await this.app.workspace.getLeaf().openFile(exportFile);
+                await this.app.workspace.getLeaf('tab').openFile(exportFile);
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    async exportCurrentFileToCanvas() {
+        if (!this.currentFile) return;
+
+        try {
+            const { exportHighlightsToCanvas } = await import("../utils/canvas");
+            
+            // Map current highlights to the format expected by canvas util
+            const highlights = this.highlights.map(h => ({
+                ...h,
+                file: this.currentFile
+            }));
+
+            if (highlights.length === 0) {
+                const { Notice } = require("obsidian");
+                new Notice("No highlights to export.");
+                return;
+            }
+
+            const { Notice } = require("obsidian");
+            new Notice("Generating Canvas...");
+            const exportPath = await exportHighlightsToCanvas(this.app, highlights);
+            
+            const file = this.app.vault.getAbstractFileByPath(exportPath);
+            if (file) {
+                await this.app.workspace.getLeaf('tab').openFile(file);
             }
         } catch (err) {
             console.error(err);

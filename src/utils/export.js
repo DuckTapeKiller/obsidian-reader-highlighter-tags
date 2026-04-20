@@ -3,40 +3,53 @@
  * Finds all ==text== and <mark>text</mark> elements and creates a summary.
  */
 export async function exportHighlightsToMD(app, file) {
-    const raw = await app.vault.read(file);
+    let raw = await app.vault.read(file);
+    let changed = false;
 
+    const lines = raw.split("\n");
     const highlights = [];
 
-    // Pattern for ==text== (markdown highlights)
-    const markdownPattern = /==(.*?)==/gs;
+    const markdownPattern = /==(.*?)==/g;
+    const htmlPattern = /<mark[^>]*>(.*?)<\/mark>/g;
 
-    // Pattern for <mark>text</mark> (HTML highlights)
-    const htmlPattern = /<mark[^>]*>(.*?)<\/mark>/gs;
+    lines.forEach((line, lineIdx) => {
+        let hasHighlight = false;
 
-    // Extract markdown highlights
-    let match;
-    while ((match = markdownPattern.exec(raw)) !== null) {
-        highlights.push({
-            text: match[1].trim(),
-            type: "markdown",
-            position: match.index
-        });
-    }
+        let match;
+        // reset regex state if not creating new ones per line
+        const mdRegex = new RegExp(markdownPattern);
+        while ((match = mdRegex.exec(line)) !== null) {
+            hasHighlight = true;
+        }
+        
+        const htmlRegex = new RegExp(htmlPattern);
+        while ((match = htmlRegex.exec(line)) !== null) {
+            hasHighlight = true;
+        }
 
-    // Extract HTML highlights
-    while ((match = htmlPattern.exec(raw)) !== null) {
-        highlights.push({
-            text: match[1].trim(),
-            type: "html",
-            position: match.index
-        });
-    }
+        if (hasHighlight) {
+            let blockMatch = lines[lineIdx].match(/\s(\^[a-zA-Z0-9-]+)$/);
+            let blockId = "";
+            if (blockMatch) {
+                blockId = blockMatch[1];
+            } else {
+                blockId = "^" + Math.random().toString(36).substring(2, 8);
+                lines[lineIdx] = lines[lineIdx] + " " + blockId;
+                changed = true;
+            }
 
-    // Sort by position in document
-    highlights.sort((a, b) => a.position - b.position);
+            highlights.push({
+                text: `![[${file.basename}#${blockId}]]`
+            });
+        }
+    });
 
     if (highlights.length === 0) {
         throw new Error("No highlights found in this file.");
+    }
+
+    if (changed) {
+        await app.vault.modify(file, lines.join("\n"));
     }
 
     // Get current date

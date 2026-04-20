@@ -1,6 +1,6 @@
 {
     "name": "reader-highlighter-tags",
-    "version": "2.0.2",
+    "version": "2.0.3",
     "description": "Highlight text in Reading View",
     "main": "main.js",
     "scripts": {

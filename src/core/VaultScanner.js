@@ -28,20 +28,23 @@ export class VaultScanner {
                 // Check cache
                 const cached = this.cache.get(file.path);
                 if (cached && cached.mtime === stat.mtime) {
-                    return { file, highlights: cached.highlights };
+                    return { file, highlights: cached.highlights, frontmatter: cached.frontmatter };
                 }
 
                 // Read and parse
                 const content = await this.app.vault.cachedRead(file);
                 const highlights = getHighlightsFromContent(content);
+                const metadata = this.app.metadataCache.getFileCache(file);
+                const frontmatter = metadata?.frontmatter || {};
                 
                 // Update cache
                 this.cache.set(file.path, {
                     mtime: stat.mtime,
-                    highlights: highlights
+                    highlights: highlights,
+                    frontmatter: frontmatter
                 });
 
-                return { file, highlights };
+                return { file, highlights, frontmatter };
             });
 
             const batchResults = await Promise.all(batchPromises);

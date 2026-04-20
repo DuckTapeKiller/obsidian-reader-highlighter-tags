@@ -99,15 +99,18 @@
 /* === Color Palette === */
 .reading-highlighter-palette {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 6px;
     padding: 0;
     border: none;
     margin-left: 0;
+    max-width: 170px;
 }
 
 .reading-highlighter-color-btn {
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
     border-radius: var(--button-radius);
     border: 2px solid rgba(255, 255, 255, 0.4);
     cursor: pointer;
@@ -753,6 +756,72 @@
     border-radius: var(--input-radius);
     padding: 8px 12px;
     background: var(--background-primary);
+}
+
+.research-view-property-filter {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+}
+
+.research-property-select {
+    flex: 1;
+    max-width: 150px;
+    border-radius: var(--input-radius);
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    cursor: pointer;
+}
+
+.research-property-input {
+    flex: 2;
+    border-radius: var(--input-radius);
+    padding: 8px 12px;
+    background: var(--background-primary);
+}
+
+.research-view-color-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 4px;
+}
+
+.research-color-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 16px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--text-normal);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.research-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.research-color-chip:hover {
+    background: var(--background-modifier-hover);
+}
+
+.research-color-chip.is-active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+.research-color-chip.is-active .research-color-dot {
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
 .research-progress-container {

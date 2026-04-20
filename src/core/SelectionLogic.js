@@ -13,7 +13,7 @@ const BLOCK_LEVEL_TAGS_FOR_SPLIT = new Set([
     "TH",
 ]);
 
-const INLINE_DECORATION_PATTERN = "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^";
+const INLINE_DECORATION_PATTERN = "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^|\\d|<sub>|<sup>|<\\/sub>|<\\/sup>";
 const GAP_PATTERN = "[\\s\\u00a0\\u1680\\u2000-\\u200b\\u202f\\u205f\\u3000\\u21a9\\u21b5\\ufe0e\\ufe0f]";
 const OPTIONAL_MARKDOWN_LINE_PREFIX = `[ \\t]{0,3}(?:(?:>\\s*)*)(?:#{1,6}[ \\t]+|-\\s\\[[ xX]\\][ \\t]+|[-*+][ \\t]+|\\d{1,3}[.)][ \\t]+|\\[\\^[^\\]]+\\]:[ \\t]*|>\\[![^\\]]+\\][ \\t]*)?(?:(?:${INLINE_DECORATION_PATTERN})){0,3}[ \\t]*`;
 const MARKDOWN_PREFIX_ONLY_RE = /^[ \t]*(?:(?:>\s*)+|#{1,6}[ \t]*|-\s\[[ xX]\][ \t]*|[-*+][ \t]*|\d{1,3}[.)][ \t]*|\[\^[^\]]+\]:[ \t]*|>\s*\[![^\]]+\][ \t]*)+$/;
@@ -285,10 +285,25 @@ export var SelectionLogic = class {
       let match;
       regex.lastIndex = 0;
       const matches = [];
-      while ((match = regex.exec(currentText)) !== null) {
-        matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
+
+      // Special handling for footnotes
+      if (regex.source === "\\[\\^[^\\]]+\\]") {
+        while ((match = regex.exec(currentText)) !== null) {
+          const content = match[0].substring(2, match[0].length - 1);
+          // ONLY strip citations (numbers, separators, syms, NO letters)
+          // These are usually rendered as superscripts [1] or [6-1]
+          if (!/[a-zA-Z]/.test(content)) {
+            matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
+          }
+          // Named or inline content footnotes (containing letters) are left intact
+          // as they are likely literal visible text in the browser.
+        }
+      } else {
+        while ((match = regex.exec(currentText)) !== null) {
+          matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
+        }
       }
-      
+
       // Process backwards
       for (let i = matches.length - 1; i >= 0; i--) {
         const { start, end, length } = matches[i];
@@ -419,7 +434,9 @@ export var SelectionLogic = class {
       return "";
     }
 
-    return parts.join("");
+    const pattern = parts.join("");
+    // Add optional trailing decoration
+    return `${pattern}(?:(?:${INLINE_DECORATION_PATTERN})){0,3}`;
   }
 
   getFlexibleCharPattern(char) {
@@ -440,6 +457,8 @@ export var SelectionLogic = class {
       return text;
     }
 
+    // Only strip citation-like markers [1] [^1] [6-1] [1,2]
+    // These should not contain letters or we risk stripping actual visible words/inline footnotes.
     return text.normalize("NFC")
       .replace(/#:~:text=[^&\s]+(?:&|$)?/g, "")
       .replace(/[\u200b-\u200d\ufeff]/g, "")
@@ -448,9 +467,7 @@ export var SelectionLogic = class {
       .replace(/[‐‑‒–—―]/g, "-")
       .replace(/[“”«»]/g, "\"")
       .replace(/[‘’]/g, "'")
-      .replace(/\[\^?(?:[0-9-]+|[a-zA-Z?]+)\]/g, "")
-      // Don't arbitrarily replace newlines with spaces here or we lose paragraph split alignment
-      // Instead, explicitly collapse multiple blank spaces
+      .replace(/\[\^?[0-9,.:; \-|#§]+\]/g, "")
       .replace(/[ \t]+/g, " ")
       .trim();
   }

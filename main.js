@@ -547,7 +547,7 @@ var BLOCK_LEVEL_TAGS_FOR_SPLIT = /* @__PURE__ */ new Set([
   "TD",
   "TH"
 ]);
-var INLINE_DECORATION_PATTERN = "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^";
+var INLINE_DECORATION_PATTERN = "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^|\\d|<sub>|<sup>|<\\/sub>|<\\/sup>";
 var GAP_PATTERN = "[\\s\\u00a0\\u1680\\u2000-\\u200b\\u202f\\u205f\\u3000\\u21a9\\u21b5\\ufe0e\\ufe0f]";
 var OPTIONAL_MARKDOWN_LINE_PREFIX = `[ \\t]{0,3}(?:(?:>\\s*)*)(?:#{1,6}[ \\t]+|-\\s\\[[ xX]\\][ \\t]+|[-*+][ \\t]+|\\d{1,3}[.)][ \\t]+|\\[\\^[^\\]]+\\]:[ \\t]*|>\\[![^\\]]+\\][ \\t]*)?(?:(?:${INLINE_DECORATION_PATTERN})){0,3}[ \\t]*`;
 var MARKDOWN_PREFIX_ONLY_RE = /^[ \t]*(?:(?:>\s*)+|#{1,6}[ \t]*|-\s\[[ xX]\][ \t]*|[-*+][ \t]*|\d{1,3}[.)][ \t]*|\[\^[^\]]+\]:[ \t]*|>\s*\[![^\]]+\][ \t]*)+$/;
@@ -789,8 +789,17 @@ var SelectionLogic = class {
       let match;
       regex.lastIndex = 0;
       const matches = [];
-      while ((match = regex.exec(currentText)) !== null) {
-        matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
+      if (regex.source === "\\[\\^[^\\]]+\\]") {
+        while ((match = regex.exec(currentText)) !== null) {
+          const content = match[0].substring(2, match[0].length - 1);
+          if (!/[a-zA-Z]/.test(content)) {
+            matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
+          }
+        }
+      } else {
+        while ((match = regex.exec(currentText)) !== null) {
+          matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
+        }
       }
       for (let i = matches.length - 1; i >= 0; i--) {
         const { start, end, length } = matches[i];
@@ -900,7 +909,8 @@ var SelectionLogic = class {
     if (parts.length === 0) {
       return "";
     }
-    return parts.join("");
+    const pattern = parts.join("");
+    return `${pattern}(?:(?:${INLINE_DECORATION_PATTERN})){0,3}`;
   }
   getFlexibleCharPattern(char) {
     if (char === "-") {
@@ -918,7 +928,7 @@ var SelectionLogic = class {
     if (!text) {
       return text;
     }
-    return text.normalize("NFC").replace(/#:~:text=[^&\s]+(?:&|$)?/g, "").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/(?:\u21a9|\u21b5|\ufe0e|\ufe0f)+/g, " ").replace(/[\u00a0\u202f]/g, " ").replace(/[‐‑‒–—―]/g, "-").replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'").replace(/\[\^?(?:[0-9-]+|[a-zA-Z?]+)\]/g, "").replace(/[ \t]+/g, " ").trim();
+    return text.normalize("NFC").replace(/#:~:text=[^&\s]+(?:&|$)?/g, "").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/(?:\u21a9|\u21b5|\ufe0e|\ufe0f)+/g, " ").replace(/[\u00a0\u202f]/g, " ").replace(/[‐‑‒–—―]/g, "-").replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'").replace(/\[\^?[0-9,.:; \-|#§]+\]/g, "").replace(/[ \t]+/g, " ").trim();
   }
   stripUrlsForPatternMatch(snippet) {
     return snippet;

@@ -26,10 +26,11 @@ describe("stripBrowserJunk", () => {
     expect(logic.stripBrowserJunk("\u2018world\u2019")).toBe("'world'");
   });
 
-  it("removes footnote references", () => {
+  it("removes footnote citations but preserves named content", () => {
     expect(logic.stripBrowserJunk("end.[^8] Next")).toBe("end. Next");
     expect(logic.stripBrowserJunk("text[1] more")).toBe("text more");
-    expect(logic.stripBrowserJunk("text[^note] more")).toBe("text more");
+    // Named footnotes are now preserved for literal matching
+    expect(logic.stripBrowserJunk("text[^note] more")).toBe("text[^note] more");
   });
 
   it("normalizes dashes", () => {
@@ -150,6 +151,7 @@ describe("createFlexiblePattern", () => {
     const snippet = "Encina, 1961: 578";
     const pattern = logic.createFlexiblePattern(snippet);
     const regex = new RegExp(pattern, "gmu");
+    // Prefix regex handles the [^61]: part
     expect(regex.test(source)).toBe(true);
   });
 });
@@ -332,3 +334,69 @@ Este bloque es un callout de Obsidian. Internamente, Obsidian genera un div con 
     expect(regex.test(virtual)).toBe(true);
   });
 });
+
+// ====================================================================
+// Scholarly Resilience (Footnotes, Asian Scripts, Subscripts)
+// ====================================================================
+describe("Scholarly Resilience", () => {
+  it("Example 1: Banzai (Asian script + named footnote)", () => {
+    const source = "The origin of the term is a classical Chinese phrase in the 7th-century *Book of Northern Qi*, which states: 丈夫玉碎恥甎全 ('A true man would [^rather] be the shattered jewel, ashamed to be the intact tile').[^6]";
+    const snippet = "The origin of the term is a classical Chinese phrase in the 7th-century Book of Northern Qi, which states: 丈夫玉碎恥甎全 ('A true man would rather be the shattered jewel, ashamed to be the intact tile').[7]";
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
+  });
+
+  it("Example 3: Aihara (Italicized footnote)", () => {
+    const source = "- Hideki Aihara (2017). 一九四五 占守島の真実：少年戦車兵が見た最後の戦場 [^*1945: The Truth about Shumushu Island: The Last Battlefield Seen by a Young Tank Soldier*] (in Japanese). PHP Institute.";
+    const snippet = "Hideki Aihara (2017). 一九四五 占守島の真実：少年戦車兵が見た最後の戦場 [^1945: The Truth about Shumushu Island: The Last Battlefield Seen by a Young Tank Soldier] (in Japanese). PHP Institute.";
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
+  });
+
+  it("Example 4: Anunnaki (Subscripts & citations)", () => {
+    const source = "written as \"*d*a-nun-na\", \"*d*a-nun-na-ke<sub>4</sub>-ne\", or \"*d*a-nun-na\", possibly meaning \"princely offspring\",[^1] \"royal offspring\" or literally \"offspring/progeny/seed of princes\".[^*citation needed*]";
+    const snippet = "written as \"da-nun-na\", \"da-nun-na-ke4-ne\", or \"da-nun-na\", possibly meaning \"princely offspring\",[1] \"royal offspring\" or literally \"offspring/progeny/seed of princes\".[^citation needed]";
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
+  });
+
+  it("Example 5: Akkadian (Inline supplement drink[^s])", () => {
+    const source = "comments that she \"drink[^s] water with the Anunnaki\".[^43]";
+    const snippet = "comments that she \"drink[^s] water with the Anunnaki\".[43]";
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
+  });
+
+  it("Lambert Regression: Complex citation numbers [6-1]", () => {
+    const source = "Wilfred G. Lambert y Alan Millard[^6] publicaron... Lambert y Millard. [^5] Otro fragmento";
+    const snippet = "Wilfred G. Lambert y Alan Millard[7] publicaron... Lambert y Millard. [6-1] Otro fragmento";
+    
+    const virtual = logic.applyStructuralFilter({ text: source, segments: [] }).text;
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const pattern = logic.createFlexiblePattern(cleanSnippet);
+    const regex = new RegExp(pattern, "gmu");
+    
+    expect(regex.test(virtual)).toBe(true);
+  });
+});
+

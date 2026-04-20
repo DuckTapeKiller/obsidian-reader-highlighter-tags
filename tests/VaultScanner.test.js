@@ -10,6 +10,9 @@ describe("VaultScanner", () => {
             vault: {
                 getMarkdownFiles: vi.fn(),
                 cachedRead: vi.fn(),
+            },
+            metadataCache: {
+                getFileCache: vi.fn().mockReturnValue({ frontmatter: {} })
             }
         };
         scanner = new VaultScanner(mockApp);

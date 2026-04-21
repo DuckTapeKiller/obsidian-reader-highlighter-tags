@@ -13,16 +13,18 @@ const BLOCK_LEVEL_TAGS_FOR_SPLIT = new Set([
     "TH",
 ]);
 
-const INLINE_DECORATION_PATTERN = "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^|\\d|<sub>|<sup>|<\\/sub>|<\\/sup>";
+const INLINE_DECORATION_PATTERN = "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^|\\\\|\\{|\\}|\\||\\d|<sub>|<sup>|<\\/sub>|<\\/sup>";
 const GAP_PATTERN = "[\\s\\u00a0\\u1680\\u2000-\\u200b\\u202f\\u205f\\u3000\\u21a9\\u21b5\\ufe0e\\ufe0f]";
 const OPTIONAL_MARKDOWN_LINE_PREFIX = `[ \\t]{0,3}(?:(?:>\\s*)*)(?:#{1,6}[ \\t]+|-\\s\\[[ xX]\\][ \\t]+|[-*+][ \\t]+|\\d{1,3}[.)][ \\t]+|\\[\\^[^\\]]+\\]:[ \\t]*|>\\[![^\\]]+\\][ \\t]*)?(?:(?:${INLINE_DECORATION_PATTERN})){0,3}[ \\t]*`;
 const MARKDOWN_PREFIX_ONLY_RE = /^[ \t]*(?:(?:>\s*)+|#{1,6}[ \t]*|-\s\[[ xX]\][ \t]*|[-*+][ \t]*|\d{1,3}[.)][ \t]*|\[\^[^\]]+\]:[ \t]*|>\s*\[![^\]]+\][ \t]*)+$/;
-const INLINE_DECORATION_RE = /<mark[^>]*>|<\/mark>|==|\*\*|~~|\*|_|`/g;
+const INLINE_DECORATION_RE = /<mark[^>]*>|<\/mark>|==|\*\*|~~|\*|_|`|\\\$|\\\^|\\\\|\\\{|\\\}|\\\|/g;
 
 export var SelectionLogic = class {
-  constructor(app) {
+  constructor(app, getRules = () => []) {
     this.app = app;
     this.blockLevelTagsForSplit = BLOCK_LEVEL_TAGS_FOR_SPLIT;
+    this.getRules = getRules;
+    this.lastFailureReport = null;
   }
 
   // Timeout-safe regex execution to prevent catastrophic backtracking
@@ -49,9 +51,27 @@ export var SelectionLogic = class {
   }
 
   async locateSelection(processedFile, view, selectionSnippet, context = null, occurrenceIndex = 0) {
-    const snippet = this.stripBrowserJunk(selectionSnippet);
+    this.lastFailureReport = null; // Note 2: Reset at top of call
+
+    let snippet = this.stripBrowserJunk(selectionSnippet);
     if (!snippet) {
       return null;
+    }
+
+    // Apply Learned Rules (Adaptation Layer)
+    const rules = this.getRules();
+    if (rules && rules.length > 0) {
+        for (const rule of rules) {
+            if (rule.stripPattern) {
+                try {
+                    const regex = new RegExp(this.escapeRegex(rule.stripPattern), "g");
+                    snippet = snippet.replace(regex, "");
+                } catch (e) {
+                    console.warn("[Highlighter] Failed to apply learned rule:", rule, e);
+                }
+            }
+        }
+        snippet = snippet.trim();
     }
 
     const activeFile = view.file;
@@ -85,6 +105,11 @@ export var SelectionLogic = class {
     }
 
     if (candidates.length === 0) {
+      candidates = this.findHybridCandidates(bodyContent, snippet, 0);
+      diagnostics.strategies.hybridMatch = { tried: true, found: candidates.length };
+    }
+
+    if (candidates.length === 0) {
       candidates = this.findAllCandidates(bodyContent, snippet, 0);
       diagnostics.strategies.flexiblePattern = { tried: true, found: candidates.length };
     }
@@ -99,13 +124,23 @@ export var SelectionLogic = class {
       diagnostics.strategies.fuzzyMatch = { tried: true, found: candidates.length };
     }
 
+    // Note 1: findProximityCandidates is last resort (Position 6)
     if (candidates.length === 0) {
-      // R1: Diagnostic Mode — detailed failure logging
+        candidates = this.findProximityCandidates(bodyContent, snippet, 0);
+        diagnostics.strategies.proximityMatch = { tried: true, found: candidates.length };
+    }
+
+    if (candidates.length === 0) {
+      // Classification & failure recording (Bug 1: return null)
+      this.lastFailureReport = this.classifyFailure(selectionSnippet, snippet, bodyContent, diagnostics);
       this.logSelectionDiagnostics(selectionSnippet, snippet, bodyContent, selectionBlocks, diagnostics);
       return null;
     }
 
     candidates = this.offsetCandidates(candidates, firstSegmentBodyStart);
+
+    // Apply Structural Snapping to all final candidates to protect footnotes/prefixes
+    candidates = candidates.map(cand => this.snapToStructuralBoundaries(fullRaw, cand));
 
     const result = this.resolveCandidates(candidates, fullRaw, context, occurrenceIndex);
     if (!result) {
@@ -904,6 +939,107 @@ export var SelectionLogic = class {
     return this.dedupeCandidates(candidates);
   }
 
+  /**
+   * Hybrid Mapping Engine: Find candidates by word-only normalization
+   * This is extremely resilient to inline scholarly markers.
+   */
+  findHybridCandidates(text, snippet, bodyStart = 0) {
+    const needle = this.normalizeForFuzzySearch(snippet);
+    if (!needle) return [];
+
+    const { normalized, map } = this.buildHybridMap(text);
+    const candidates = [];
+    let fromIndex = 0;
+
+    // Direct search in normalized space
+    while (fromIndex < normalized.length) {
+      const matchIdx = normalized.indexOf(needle, fromIndex);
+      if (matchIdx === -1) break;
+
+      const rawStart = map[matchIdx];
+      const rawEnd = map[matchIdx + needle.length - 1] + 1;
+
+      if (rawStart >= bodyStart) {
+        candidates.push({
+          start: rawStart,
+          end: rawEnd,
+          text: text.substring(rawStart, rawEnd)
+        });
+      }
+      fromIndex = matchIdx + 1;
+    }
+
+    return this.dedupeCandidates(candidates);
+  }
+
+  /**
+   * Builds a map of "Content Only" (alphanumeric) characters to original offsets.
+   * Strips all formatting and punctuation but preserves word positions.
+   * Case-insensitive for maximum resilience.
+   */
+  buildHybridMap(text) {
+    let normalized = "";
+    const map = [];
+    let offset = 0;
+
+    // Character by character mapping
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      
+      // Lookahead/Backbehind for [x] or [X] task markers to skip them
+      // as they are not visible in browser selection snippets.
+      if ((char === "x" || char === "X" || char === " ") && text[i-1] === "[" && text[i+1] === "]") {
+        offset++;
+        continue;
+      }
+
+      if (/[\p{L}\p{N}]/u.test(char)) {
+        normalized += char.toLocaleLowerCase();
+        map.push(offset);
+      }
+      offset += char.length;
+    }
+
+    return { normalized, map };
+  }
+
+  /**
+   * Structural Guardrail: "Snaps" highlight boundaries to avoid breaking 
+   * footnotes, list markers, and callout headers.
+   */
+  snapToStructuralBoundaries(fullRaw, candidate) {
+    const prefixPatterns = [
+      /^\[\^[^\]]+\]:\s*/,     // Footnote entry
+      /^>\s*\[![^\]]+\]\s*/,   // Callout header
+      /^#{1,6}\s+/,             // Headings
+      /^-\s\[[ xX]\]\s+/,      // Task list
+      /^[-*+]\s+/,             // Unordered list
+      /^\d{1,3}[.)]\s+/        // Ordered list
+    ];
+
+    // Find the start of the line containing the match
+    const lineStart = fullRaw.lastIndexOf("\n", candidate.start) + 1;
+    const lineContent = fullRaw.substring(lineStart, candidate.end);
+
+    for (const pattern of prefixPatterns) {
+      const match = lineContent.match(pattern);
+      if (match) {
+        const prefixEndInRaw = lineStart + match[0].length;
+        // If our highlight selection spans into the prefix, push it forward
+        if (candidate.start < prefixEndInRaw) {
+          return {
+            ...candidate,
+            start: prefixEndInRaw,
+            text: fullRaw.substring(prefixEndInRaw, candidate.end)
+          };
+        }
+      }
+    }
+
+    return candidate;
+  }
+
+
   buildFuzzyMap(text) {
     let normalized = "";
     const map = [];
@@ -961,5 +1097,118 @@ export var SelectionLogic = class {
     const jaccard = union === 0 ? 0 : intersection / union;
     const lenMultiplier = 1 / (1 + Math.abs(source.length - target.length) * 0.1);
     return jaccard * 0.7 + lenMultiplier * 0.3;
+  }
+
+  /**
+   * Word-Proximity Matching Strategy (Defined)
+   * Finds the densest cluster of words from the snippet within the document.
+   */
+  findProximityCandidates(text, snippet, bodyStart = 0) {
+    const words = snippet.split(/\s+/).filter(w => w.length > 2).map(w => w.toLocaleLowerCase());
+    if (words.length < 3) return []; // Too few words for reliable proximity
+
+    const lowerText = text.toLocaleLowerCase();
+    const hits = [];
+    for (const word of words) {
+        let idx = lowerText.indexOf(word, bodyStart);
+        while (idx !== -1) {
+            hits.push({ word, offset: idx });
+            idx = lowerText.indexOf(word, idx + 1);
+        }
+    }
+    if (hits.length === 0) return [];
+    hits.sort((a, b) => a.offset - b.offset);
+
+    const candidates = [];
+    const windowSize = snippet.length * 2.5; 
+
+    for (let i = 0; i < hits.length; i++) {
+        const startHit = hits[i];
+        const cluster = [startHit];
+        let j = i + 1;
+        while (j < hits.length && hits[j].offset - startHit.offset < windowSize) {
+            cluster.push(hits[j]);
+            j++;
+        }
+
+        const uniqueWords = new Set(cluster.map(h => h.word)).size;
+        const coverage = uniqueWords / words.length;
+
+        if (coverage >= 0.8) {
+            const clusterStart = cluster[0].offset;
+            const lastHit = cluster[cluster.length - 1];
+            const clusterEnd = lastHit.offset + lastHit.word.length;
+
+            candidates.push({
+                start: clusterStart,
+                end: clusterEnd,
+                text: text.substring(clusterStart, clusterEnd),
+                score: coverage
+            });
+        }
+    }
+
+    return candidates
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+        .map(c => ({ start: c.start, end: c.end, text: c.text }));
+  }
+
+  classifyFailure(rawSnippet, cleanedSnippet, bodyContent, diagnostics) {
+    const report = {
+        type: "UNKNOWN",
+        reason: "The engine could not locate this text in the Markdown source.",
+        hint: "This usually happens when the browser's view of the text differs significantly from the raw file.",
+        rawSnippet,
+        cleanedSnippet,
+        diagnostics,
+        bestGuessContext: ""
+    };
+
+    const firstWord = cleanedSnippet.split(/\s+/)[0].toLocaleLowerCase();
+    if (firstWord && !bodyContent.toLocaleLowerCase().includes(firstWord)) {
+        report.type = "PHANTOM";
+        report.reason = "Text not found in the current file.";
+        report.hint = "This text appears to come from an embedded note. Open the source note directly and highlight it there.";
+        return report;
+    }
+
+    // Attempt to extract 'Best Guess' context from diagnostics (Strategy 5 or 6)
+    const proximity = diagnostics.strategies.proximityMatch;
+    const fuzzy = diagnostics.strategies.fuzzyMatch;
+    let candidates = (proximity && proximity.found > 0) ? proximity.results : (fuzzy && fuzzy.found > 0 ? fuzzy.results : []);
+
+    // Guaranteed Fallback: If no candidates, conduct a Brute Force word search
+    if (candidates.length === 0) {
+        const words = cleanedSnippet.split(/\s+/).filter(w => w.length > 3).sort((a,b) => b.length - a.length);
+        if (words.length > 0) {
+            const bestWord = words[0].toLocaleLowerCase();
+            const idx = bodyContent.toLocaleLowerCase().indexOf(bestWord);
+            if (idx !== -1) {
+                candidates = [{ start: idx, end: idx + bestWord.length }];
+            }
+        }
+    }
+
+    if (candidates.length > 0) {
+        const best = candidates[0];
+        // Expand the match to the surrounding paragraph for context
+        let start = best.start;
+        let end = best.end;
+        
+        while (start > 0 && bodyContent[start - 1] !== "\n") start--;
+        while (end < bodyContent.length && bodyContent[end] !== "\n") end++;
+        
+        report.bestGuessContext = bodyContent.substring(start, end).trim();
+    } else {
+        // Absolute last resort: return the raw snippet (at least it's not empty)
+        report.bestGuessContext = rawSnippet;
+    }
+
+    report.type = "DECORATION_MISMATCH";
+    report.reason = "Structural mismatch detected.";
+    report.hint = "The selection contains markers or formatting the engine couldn't map automatically.";
+    
+    return report;
   }
 };

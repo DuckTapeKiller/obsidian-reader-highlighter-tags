@@ -7,6 +7,7 @@ import { HighlightNavigatorView, HIGHLIGHT_NAVIGATOR_VIEW } from "./views/Highli
 import { ResearchView, RESEARCH_VIEW } from "./views/ResearchView";
 import { getScroll, applyScroll } from "./utils/dom";
 import { exportHighlightsToMD } from "./utils/export";
+import { FailureRecoveryModal } from "./ui/FailureRecoveryModal";
 
 const SMART_SELECTION_TAGS = new Set([
     "P",
@@ -84,6 +85,9 @@ const DEFAULT_SETTINGS = {
 
     // NEW: Smart paragraph snapping
     enableSmartParagraphSelection: false,
+
+    // NEW: Self-Learning Normalization Rules
+    learnedNormRules: [],
 };
 
 export default class ReadingHighlighterPlugin extends Plugin {
@@ -91,7 +95,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         await this.loadSettings();
 
         this.floatingManager = new FloatingManager(this);
-        this.logic = new SelectionLogic(this.app);
+        this.logic = new SelectionLogic(this.app, () => this.settings.learnedNormRules);
 
         // Undo state (in memory only)
         this.lastModification = null;
@@ -511,7 +515,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         );
 
         if (!result) {
-            new Notice("Could not locate selection in file.");
+            this.handleSelectionFailure(view, request, "highlightSelection");
             return;
         }
 
@@ -629,7 +633,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         );
 
         if (!result) {
-            new Notice("Could not locate selection in file.");
+            this.handleSelectionFailure(view, request, "tagSelection");
             return;
         }
 
@@ -685,7 +689,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         );
 
         if (!result) {
-            new Notice("Could not locate selection in file.");
+            this.handleSelectionFailure(view, request, "annotateSelection");
             return;
         }
 
@@ -756,7 +760,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         );
 
         if (!result) {
-            new Notice("Could not locate selection in file.");
+            this.handleSelectionFailure(view, request, "removeHighlightSelection");
             return;
         }
 
@@ -845,7 +849,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             request.occurrenceIndex
         );
         if (!result) {
-            new Notice("Could not locate selection.");
+            this.handleSelectionFailure(view, request, "applyColorHighlight", color);
             return;
         }
 
@@ -1047,6 +1051,19 @@ export default class ReadingHighlighterPlugin extends Plugin {
         return this.needsYamlQuotes(normalized) ? `"${normalized.replace(/"/g, '\\"')}"` : normalized;
     }
 
+    isTableAlignmentRow(line) {
+        return /^\s*\|(\s*:?-+:?\s*\|)+\s*$/.test(line);
+    }
+
+    isTableDataRow(line) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("|"))
+            return false;
+        if (this.isTableAlignmentRow(line))
+            return false;
+        return (trimmed.match(/\|/g) || []).length >= 2;
+    }
+
     async applyMarkdownModification(file, raw, start, end, mode, payload = "", autoTag = "") {
         if (!raw) {
             raw = await this.app.vault.read(file);
@@ -1129,6 +1146,43 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         const processedLines = lines.map((line) => {
             let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
+
+            if (this.isTableAlignmentRow(line)) {
+                return line;
+            }
+
+            if (this.isTableDataRow(line)) {
+                cleanLine = cleanLine.split("==").join("");
+                if (mode === "remove") return cleanLine;
+
+                const parts = cleanLine.split("|");
+                const wrappedParts = parts.map((cell, idx) => {
+                    // Outer parts of a row split (if pipes are at edges)
+                    if (idx === 0 || idx === parts.length - 1) return cell;
+
+                    const trimmedCell = cell.trim();
+                    if (!trimmedCell) return cell;
+
+                    const leadWS = cell.match(/^(\s*)/)[1];
+                    const trailWS = cell.match(/(\s*)$/)[1];
+
+                    let wrapped;
+                    if (mode === "highlight" || mode === "tag") {
+                        if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
+                            wrapped = `<mark style="background: ${this.settings.highlightColor}; color: black;">${trimmedCell}</mark>`;
+                        } else {
+                            wrapped = `==${trimmedCell}==`;
+                        }
+                    } else if (mode === "color") {
+                        wrapped = `<mark style="background: ${payload}; color: black;">${trimmedCell}</mark>`;
+                    } else {
+                        wrapped = trimmedCell;
+                    }
+
+                    return `${leadWS}${wrapped}${trailWS}`;
+                });
+                return wrappedParts.join("|");
+            }
 
             if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
                 cleanLine = cleanLine.split("==").join("");
@@ -1213,6 +1267,46 @@ export default class ReadingHighlighterPlugin extends Plugin {
         requestAnimationFrame(() => {
             applyScroll(view, pos);
         });
+    }
+
+    /**
+     * Recovery Layer: Triggered when locateSelection fails.
+     * Shows a modal to the user to manually correct the text and "learn" the rule.
+     */
+    handleSelectionFailure(view, request, actionType, payload = null) {
+        const report = this.logic.lastFailureReport;
+        if (!report) {
+            new Notice("Selection failed, but no diagnostic report was generated.");
+            return;
+        }
+
+        new FailureRecoveryModal(this.app, report, async (correctedText, learnedRule) => {
+            // 1. Save the learned rule if provided
+            if (learnedRule && learnedRule.stripPattern) {
+                const existing = this.settings.learnedNormRules.find(r => r.stripPattern === learnedRule.stripPattern);
+                if (!existing) {
+                    this.settings.learnedNormRules.push(learnedRule);
+                    await this.saveSettings();
+                    new Notice("Normalization rule learned for future selections!");
+                }
+            }
+
+            // 2. Automate Retry
+            // We substitute the snippet in the original snapshot
+            const mockSnapshot = { text: correctedText, range: null };
+            
+            if (actionType === "applyColorHighlight") {
+                await this.applyColorHighlight(view, payload, "", mockSnapshot);
+            } else if (actionType === "highlightSelection") {
+                await this.highlightSelection(view, mockSnapshot);
+            } else if (actionType === "tagSelection") {
+                await this.tagSelection(view, mockSnapshot);
+            } else if (actionType === "annotateSelection") {
+                await this.annotateSelection(view, mockSnapshot);
+            } else if (actionType === "removeHighlightSelection") {
+                await this.removeHighlightSelection(view, mockSnapshot);
+            }
+        }).open();
     }
 }
 
@@ -1486,5 +1580,42 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
 
         // Set initial visibility without calling this.display()
         tagSetting.settingEl.style.display = this.plugin.settings.enableFrontmatterTag ? "" : "none";
+
+        // === Learned Normalization Rules ===
+        containerEl.createEl("h3", { text: "Learned Normalization Rules" });
+        containerEl.createEl("p", { 
+            text: "The plugin automatically learns to ignore certain characters that cause highlighting failures (like footnotes or special citations). You can manage them here.",
+            cls: "setting-item-description"
+        });
+
+        if (this.plugin.settings.learnedNormRules.length === 0) {
+            containerEl.createEl("p", { text: "No rules learned yet.", cls: "setting-item-description" });
+        } else {
+            this.plugin.settings.learnedNormRules.forEach((rule, index) => {
+                const s = new Setting(containerEl)
+                    .setName(`Rule ${index + 1}`)
+                    .setDesc(`Ignore: "${rule.stripPattern}"`)
+                    .addButton(btn => btn
+                        .setButtonText("Delete")
+                        .setWarning()
+                        .onClick(async () => {
+                            this.plugin.settings.learnedNormRules.splice(index, 1);
+                            await this.plugin.saveSettings();
+                            this.display();
+                            new Notice("Rule deleted.");
+                        }));
+            });
+
+            new Setting(containerEl)
+                .addButton(btn => btn
+                    .setButtonText("Clear All Rules")
+                    .setWarning()
+                    .onClick(async () => {
+                        this.plugin.settings.learnedNormRules = [];
+                        await this.plugin.saveSettings();
+                        this.display();
+                        new Notice("All rules cleared.");
+                    }));
+        }
     }
 }

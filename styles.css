@@ -1053,3 +1053,88 @@
     border: 1px solid var(--background-modifier-border);
     flex-shrink: 0;
 }
+
+/* --- Failure Recovery Modal --- */
+.recovery-desc { 
+    margin-bottom: 20px; 
+    color: var(--text-muted); 
+    font-size: 0.95em;
+}
+
+.recovery-info-box { 
+    background: var(--background-secondary); 
+    padding: 12px; 
+    border-radius: var(--radius-m); 
+    margin-bottom: 20px; 
+    border: 1px solid var(--background-modifier-border); 
+}
+
+.recovery-snippet-preview { 
+    font-family: var(--font-monospace); 
+    font-size: 0.85em; 
+    margin-top: 8px; 
+    color: var(--text-accent);
+    padding: 6px;
+    background: var(--background-primary);
+    border-radius: 4px;
+    word-break: break-all;
+}
+
+.recovery-rule-preview { 
+    margin-top: 15px; 
+    padding: 10px;
+    border-radius: var(--radius-s);
+    font-weight: 500; 
+    min-height: 24px;
+    background: var(--background-secondary-alt);
+    font-size: 0.9em;
+}
+
+.recovery-instruction { 
+    margin-top: 20px; 
+    margin-bottom: 8px; 
+    font-weight: bold; 
+    color: var(--text-normal);
+}
+
+.recovery-error-msg {
+    color: var(--text-error);
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.recovery-hint-msg {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Wide Correction Input */
+.recovery-input-setting {
+    display: block !important;
+}
+
+.recovery-input-setting .setting-item-info {
+    display: none; /* Hide internal labels to save space */
+}
+
+.recovery-input-setting .setting-item-control {
+    width: 100%;
+}
+
+.recovery-input-setting textarea {
+    width: 100%;
+    min-height: 180px;
+    font-family: var(--font-monospace);
+    font-size: 0.9em;
+    padding: 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-primary);
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.recovery-input-setting textarea:focus {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}

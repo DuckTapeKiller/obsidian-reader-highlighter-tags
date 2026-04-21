@@ -400,3 +400,54 @@ describe("Scholarly Resilience", () => {
   });
 });
 
+// ====================================================================
+// Structural Integrity & Guardrails (Prefix Protection)
+// ====================================================================
+describe("Structural Integrity & Guardrails", () => {
+  it("protects footnote entry prefixes", () => {
+    const source = "[^5]: Katharine Conley; Pierre Taminiaux (2006). Surrealism and Its Others.";
+    // User selects the whole line in browser, which might include "5: "
+    const snippet = "5: Katharine Conley; Pierre Taminiaux (2006). Surrealism and Its Others.";
+    
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    // Hybrid engine is designed to work on RAW text with structural noise
+    const result = logic.findHybridCandidates(source, cleanSnippet, 0);
+    expect(result.length).toBeGreaterThan(0);
+
+    const snapped = logic.snapToStructuralBoundaries(source, result[0]);
+    // The highlight must start AFTER the ": "
+    const actualText = source.substring(snapped.start, snapped.end);
+    expect(actualText).not.toContain("[^5]:");
+    expect(actualText.startsWith("Katharine")).toBe(true);
+  });
+
+  it("protects callout header prefixes", () => {
+    const source = "> [!INFO] This is the title\nThis is content.";
+    const snippet = "INFO This is the title This is content.";
+    
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const result = logic.findHybridCandidates(source, cleanSnippet, 0);
+    expect(result.length).toBeGreaterThan(0);
+
+    const snapped = logic.snapToStructuralBoundaries(source, result[0]);
+    const actualText = source.substring(snapped.start, snapped.end);
+    expect(actualText).not.toContain("> [!INFO]");
+    expect(actualText).toContain("This is the title\nThis is content");
+  });
+
+  it("protects list markers", () => {
+    const source = "- [ ] Task one\n- [x] Task two";
+    const snippet = "Task one Task two";
+    
+    const cleanSnippet = logic.stripBrowserJunk(snippet);
+    const result = logic.findHybridCandidates(source, cleanSnippet, 0);
+    expect(result.length).toBeGreaterThan(0);
+
+    const snapped = logic.snapToStructuralBoundaries(source, result[0]);
+    const actualText = source.substring(snapped.start, snapped.end);
+    expect(actualText).not.toContain("- [ ]");
+    expect(actualText).toContain("Task one");
+  });
+});
+
+

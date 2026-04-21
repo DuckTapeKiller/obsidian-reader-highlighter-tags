@@ -269,6 +269,16 @@ export class FloatingManager {
         const snippet = sel?.toString() ?? "";
 
         if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
+            // Guard: Never show toolbar inside code blocks
+            let node = sel.anchorNode;
+            while (node && node !== document.body) {
+                if (node.nodeName === "PRE" || node.nodeName === "CODE") {
+                    this.hide();
+                    return;
+                }
+                node = node.parentNode;
+            }
+
             const range = sel.getRangeAt(0);
             const rect = range.getBoundingClientRect();
 

@@ -245,6 +245,7 @@ var FloatingManager = class {
     this.removeBtn = null;
     this.quoteBtn = null;
     this.annotateBtn = null;
+    this.extractAllBtn = null;
     this.colorButtons = [];
     this.paletteContainer = null;
     this._handlers = [];
@@ -313,10 +314,13 @@ var FloatingManager = class {
       this.containerEl.appendChild(this.annotateBtn);
     }
     if (this.plugin.settings.showRemoveButton) {
-      this.removeBtn = this.createButton("eraser", "Remove highlight");
+      this.removeBtn = this.createButton("trash-2", "Remove highlights");
       this.removeBtn.addClass("reading-highlighter-remove-btn");
       this.containerEl.appendChild(this.removeBtn);
     }
+    this.extractAllBtn = this.createButton("file-text", "Extract All PDF Text");
+    this.extractAllBtn.addClass("pdf-only-btn");
+    this.containerEl.appendChild(this.extractAllBtn);
     document.body.appendChild(this.containerEl);
   }
   createButton(iconName, label) {
@@ -365,6 +369,19 @@ var FloatingManager = class {
     attachAction(this.quoteBtn, "copyAsQuote");
     attachAction(this.annotateBtn, "annotateSelection");
     attachAction(this.removeBtn, "removeHighlightSelection");
+    if (this.extractAllBtn) {
+      const handler = (evt) => {
+        preventFocus(evt);
+        const { View } = require("obsidian");
+        const view = this.app.workspace.getActiveViewOfType(View);
+        if (view && view.getViewType() === "pdf") {
+          this.plugin.extractAllPdfText(view);
+        }
+        this.hide();
+      };
+      this.extractAllBtn.addEventListener("mousedown", handler);
+      this.extractAllBtn.addEventListener("touchstart", handler, { passive: false });
+    }
     this.colorButtons.forEach((btn, index) => {
       const handler = (evt) => {
         preventFocus(evt);
@@ -441,13 +458,16 @@ var FloatingManager = class {
     var _a;
     const { View } = require("obsidian");
     let view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    let isPdf = false;
     if (!view || view.getMode() !== "preview") {
       view = this.app.workspace.getActiveViewOfType(View);
       if (!view || view.getViewType() !== "pdf") {
         this.hide();
         return;
       }
+      isPdf = true;
     }
+    this.containerEl.toggleClass("is-pdf-view", isPdf);
     const sel = window.getSelection();
     const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
     if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
@@ -2722,7 +2742,6 @@ var ReadingHighlighterPlugin = class extends import_obsidian7.Plugin {
     this.addCommand({
       id: "tag-selection",
       name: "Tag selection (Reading View)",
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "t" }],
       checkCallback: (checking) => {
         const view = this.getActiveReadingView();
         if (!view)
@@ -2731,6 +2750,20 @@ var ReadingHighlighterPlugin = class extends import_obsidian7.Plugin {
           return true;
         this.tagSelection(view);
         return true;
+      }
+    });
+    this.addCommand({
+      id: "extract-all-pdf-text",
+      name: "Extract All Text from Current PDF",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(require("obsidian").View);
+        if (view && view.getViewType() === "pdf") {
+          if (!checking) {
+            this.extractAllPdfText(view);
+          }
+          return true;
+        }
+        return false;
       }
     });
     this.addCommand({
@@ -3051,12 +3084,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian7.Plugin {
     var _a, _b, _c;
     if (!view.file)
       return;
-    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || ((_a = window.getSelection()) == null ? void 0 : _a.toString()) || "";
+    let snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || ((_a = window.getSelection()) == null ? void 0 : _a.toString()) || "";
     if (!snippet.trim()) {
       const { Notice: Notice3 } = require("obsidian");
       new Notice3("No text selected.");
       return;
     }
+    snippet = this.sanitizePdfText(snippet);
     const pdfName = view.file.basename;
     const companionFile = `${view.file.parent.path}/${pdfName} - Highlights.md`;
     const fileExists = this.app.vault.getAbstractFileByPath(companionFile);
@@ -3069,16 +3103,17 @@ var ReadingHighlighterPlugin = class extends import_obsidian7.Plugin {
       }
     } else if (mode === "action") {
       if (payload === "highlightSelection") {
-        highlightOutput = `==${highlightOutput}==`;
+        highlightOutput = snippet.trim();
       } else if (payload === "copyAsQuote") {
-        this.copyAsQuote(view, selectionSnapshot);
+        this.copyAsQuote(view, { ...selectionSnapshot, text: snippet });
         return;
       } else {
         return;
       }
     }
     const blockId = "^" + Math.random().toString(36).substring(2, 8);
-    const appendString = `> ${highlightOutput}
+    const blockquotedText = highlightOutput.split("\n").map((line) => `> ${line}`).join("\n");
+    const appendString = `${blockquotedText}
 > \u2014 [[${view.file.path}|${pdfName}]] ${blockId}
 
 `;
@@ -3103,6 +3138,60 @@ ${appendString}`;
       console.error("Failed to save PDF highlight", e);
       const { Notice: Notice3 } = require("obsidian");
       new Notice3("Failed to save PDF highlight");
+    }
+  }
+  sanitizePdfText(text) {
+    if (!text)
+      return text;
+    let sanitized = text.replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ");
+    sanitized = sanitized.replace(/(\w)-\n(\w)/g, "$1$2");
+    sanitized = sanitized.replace(/\n\n+/g, "[[PAR_BREAK]]");
+    sanitized = sanitized.replace(/\n(?=[ \t]*[-*+] |[ \t]*\d+[.)] )/g, "[[LIST_BREAK]]");
+    sanitized = sanitized.replace(/(?<![.!?/:;])\n/g, " ");
+    sanitized = sanitized.replace(/\[\[PAR_BREAK\]\]/g, "\n\n");
+    sanitized = sanitized.replace(/\[\[LIST_BREAK\]\]/g, "\n");
+    return sanitized.replace(/[ \t]+/g, " ").trim();
+  }
+  async extractAllPdfText(view) {
+    if (!view || view.getViewType() !== "pdf" || !view.file) {
+      new Notice3("Please open a PDF file first.");
+      return;
+    }
+    const { Notice: Notice3, loadPdfJs } = require("obsidian");
+    const notice = new Notice3("Extracting all PDF text...", 0);
+    try {
+      const pdfjs = await loadPdfJs();
+      const buffer = await this.app.vault.readBinary(view.file);
+      const loadingTask = pdfjs.getDocument({ data: buffer });
+      const pdf = await loadingTask.promise;
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item) => item.str);
+        let lastY = -1;
+        let pageText = "";
+        for (const item of content.items) {
+          if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
+            pageText += "\n";
+          } else if (lastY !== -1) {
+            pageText += " ";
+          }
+          pageText += item.str;
+          lastY = item.transform[5];
+        }
+        fullText += pageText + "\n\n";
+        if (i % 10 === 0)
+          notice.setMessage(`Extracting text... Page ${i}/${pdf.numPages}`);
+      }
+      const dummySnapshot = { text: fullText };
+      await this.savePdfHighlight(view, dummySnapshot, "action", "highlightSelection");
+      notice.hide();
+      new Notice3(`Successfully extracted ${pdf.numPages} pages.`);
+    } catch (e) {
+      console.error("Full PDF extraction failed", e);
+      notice.hide();
+      new Notice3("Failed to extract PDF text.");
     }
   }
   async tagSelection(view, selectionSnapshot) {

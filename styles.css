@@ -1138,3 +1138,13 @@
     border-color: var(--interactive-accent);
     box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 }
+
+/* PDF-specific visibility */
+.reading-highlighter-float-container button.pdf-only-btn {
+    display: none !important;
+}
+
+.reading-highlighter-float-container.is-pdf-view button.pdf-only-btn {
+    display: flex !important;
+    color: var(--interactive-accent);
+}

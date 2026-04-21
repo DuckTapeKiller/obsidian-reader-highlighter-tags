@@ -10,6 +10,7 @@ export class FloatingManager {
         this.removeBtn = null;
         this.quoteBtn = null;
         this.annotateBtn = null;
+        this.extractAllBtn = null;
         this.colorButtons = [];
         this.paletteContainer = null;
         this._handlers = [];
@@ -103,10 +104,15 @@ export class FloatingManager {
 
         // Remove button
         if (this.plugin.settings.showRemoveButton) {
-            this.removeBtn = this.createButton("eraser", "Remove highlight");
+            this.removeBtn = this.createButton("trash-2", "Remove highlights");
             this.removeBtn.addClass("reading-highlighter-remove-btn");
             this.containerEl.appendChild(this.removeBtn);
         }
+
+        // PDF Extract All Button (Special)
+        this.extractAllBtn = this.createButton("file-text", "Extract All PDF Text");
+        this.extractAllBtn.addClass("pdf-only-btn");
+        this.containerEl.appendChild(this.extractAllBtn);
 
         document.body.appendChild(this.containerEl);
     }
@@ -166,6 +172,21 @@ export class FloatingManager {
         attachAction(this.quoteBtn, "copyAsQuote");
         attachAction(this.annotateBtn, "annotateSelection");
         attachAction(this.removeBtn, "removeHighlightSelection");
+
+        // Special: Extract All PDF
+        if (this.extractAllBtn) {
+            const handler = (evt) => {
+                preventFocus(evt);
+                const { View } = require('obsidian');
+                const view = this.app.workspace.getActiveViewOfType(View);
+                if (view && view.getViewType() === "pdf") {
+                    this.plugin.extractAllPdfText(view);
+                }
+                this.hide();
+            };
+            this.extractAllBtn.addEventListener("mousedown", handler);
+            this.extractAllBtn.addEventListener("touchstart", handler, { passive: false });
+        }
 
         // Color palette buttons
         this.colorButtons.forEach((btn, index) => {
@@ -257,13 +278,17 @@ export class FloatingManager {
     _doHandleSelection() {
         const { View } = require('obsidian');
         let view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        let isPdf = false;
         if (!view || view.getMode() !== "preview") {
             view = this.app.workspace.getActiveViewOfType(View);
             if (!view || view.getViewType() !== "pdf") {
                 this.hide();
                 return;
             }
+            isPdf = true;
         }
+
+        this.containerEl.toggleClass("is-pdf-view", isPdf);
 
         const sel = window.getSelection();
         const snippet = sel?.toString() ?? "";

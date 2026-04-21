@@ -178,7 +178,6 @@ export default class ReadingHighlighterPlugin extends Plugin {
         this.addCommand({
             id: "tag-selection",
             name: "Tag selection (Reading View)",
-            hotkeys: [{ modifiers: ["Mod", "Shift"], key: "t" }],
             checkCallback: (checking) => {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
@@ -186,6 +185,22 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 this.tagSelection(view);
                 return true;
             },
+        });
+
+        // Full PDF Extraction
+        this.addCommand({
+            id: "extract-all-pdf-text",
+            name: "Extract All Text from Current PDF",
+            checkCallback: (checking) => {
+                const view = this.app.workspace.getActiveViewOfType(require("obsidian").View);
+                if (view && view.getViewType() === "pdf") {
+                    if (!checking) {
+                        this.extractAllPdfText(view);
+                    }
+                    return true;
+                }
+                return false;
+            }
         });
 
         // Annotate selection
@@ -555,12 +570,15 @@ export default class ReadingHighlighterPlugin extends Plugin {
     async savePdfHighlight(view, selectionSnapshot, mode, payload) {
         if (!view.file) return;
 
-        const snippet = selectionSnapshot?.text || window.getSelection()?.toString() || "";
+        let snippet = selectionSnapshot?.text || window.getSelection()?.toString() || "";
         if (!snippet.trim()) {
             const { Notice } = require('obsidian');
             new Notice("No text selected.");
             return;
         }
+
+        // PDF Flow Restorer: Remove hard line breaks but preserve paragraph breaks
+        snippet = this.sanitizePdfText(snippet);
 
         const pdfName = view.file.basename;
         const companionFile = `${view.file.parent.path}/${pdfName} - Highlights.md`;
@@ -576,9 +594,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
             }
         } else if (mode === "action") {
             if (payload === "highlightSelection") {
-                highlightOutput = `==${highlightOutput}==`;
+                // Remove the automatic '==' wrapping for PDF content as requested
+                highlightOutput = snippet.trim();
             } else if (payload === "copyAsQuote") {
-                this.copyAsQuote(view, selectionSnapshot);
+                this.copyAsQuote(view, { ...selectionSnapshot, text: snippet });
                 return;
             } else {
                 return; // other actions ignored currently for PDFs
@@ -586,7 +605,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
 
         const blockId = "^" + Math.random().toString(36).substring(2, 8);
-        const appendString = `> ${highlightOutput}\n> — [[${view.file.path}|${pdfName}]] ${blockId}\n\n`;
+        
+        // Blockquote formatting: Ensure every line in a multi-paragraph selection is prefixed with '> '
+        const blockquotedText = highlightOutput.split("\n").map(line => `> ${line}`).join("\n");
+        const appendString = `${blockquotedText}\n> — [[${view.file.path}|${pdfName}]] ${blockId}\n\n`;
 
         try {
             const { Notice } = require("obsidian");
@@ -609,6 +631,88 @@ export default class ReadingHighlighterPlugin extends Plugin {
             console.error("Failed to save PDF highlight", e);
             const { Notice } = require("obsidian");
             new Notice("Failed to save PDF highlight");
+        }
+    }
+
+    sanitizePdfText(text) {
+        if (!text) return text;
+        
+        // 1. Normalize line endings and collapse horizontal tabs/spaces
+        let sanitized = text.replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ");
+
+        // 2. Remove PDF Hard-Hyphenation (e.g., "per- \n sonal" -> "personal")
+        sanitized = sanitized.replace(/(\w)-\n(\w)/g, "$1$2");
+
+        // 3. Protect Structural boundaries (Double Newlines and Lists)
+        // Double newlines are 100% paragraph breaks.
+        sanitized = sanitized.replace(/\n\n+/g, "[[PAR_BREAK]]");
+        // List markers at the start of a line
+        sanitized = sanitized.replace(/\n(?=[ \t]*[-*+] |[ \t]*\d+[.)] )/g, "[[LIST_BREAK]]");
+
+        // 4. Surgical Merge (The "Marker" Heuristic):
+        // We ONLY join lines if the current line does NOT end in terminal punctuation (.!?:;)
+        // This preserves paragraph ends and sentence ends that happen to coincide with line endings,
+        // but heals fragments in the middle of sentences (the most common PDF issue).
+        sanitized = sanitized.replace(/(?<![.!?/:;])\n/g, " ");
+
+        // 5. Restore protected structural breaks
+        sanitized = sanitized.replace(/\[\[PAR_BREAK\]\]/g, "\n\n");
+        sanitized = sanitized.replace(/\[\[LIST_BREAK\]\]/g, "\n");
+
+        // 6. Final whitespace normalization
+        return sanitized.replace(/[ \t]+/g, " ").trim();
+    }
+
+    async extractAllPdfText(view) {
+        if (!view || view.getViewType() !== "pdf" || !view.file) {
+            new Notice("Please open a PDF file first.");
+            return;
+        }
+
+        const { Notice, loadPdfJs } = require("obsidian");
+        const notice = new Notice("Extracting all PDF text...", 0);
+
+        try {
+            const pdfjs = await loadPdfJs();
+            const buffer = await this.app.vault.readBinary(view.file);
+            const loadingTask = pdfjs.getDocument({ data: buffer });
+            const pdf = await loadingTask.promise;
+
+            let fullText = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                const strings = content.items.map(item => item.str);
+                
+                // Group strings by their vertical position (Y-coordinate) to detect lines
+                // pdf.js text items have a transform [scaleX, skewY, skewX, scaleY, x, y]
+                // item.transform[5] is the Y coordinate
+                let lastY = -1;
+                let pageText = "";
+                for (const item of content.items) {
+                    if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
+                        pageText += "\n";
+                    } else if (lastY !== -1) {
+                        pageText += " ";
+                    }
+                    pageText += item.str;
+                    lastY = item.transform[5];
+                }
+                fullText += pageText + "\n\n";
+                
+                if (i % 10 === 0) notice.setMessage(`Extracting text... Page ${i}/${pdf.numPages}`);
+            }
+
+            // Reuse the existing Save logic with a whole-doc snapshot
+            const dummySnapshot = { text: fullText };
+            await this.savePdfHighlight(view, dummySnapshot, "action", "highlightSelection");
+            
+            notice.hide();
+            new Notice(`Successfully extracted ${pdf.numPages} pages.`);
+        } catch (e) {
+            console.error("Full PDF extraction failed", e);
+            notice.hide();
+            new Notice("Failed to extract PDF text.");
         }
     }
 

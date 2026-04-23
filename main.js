@@ -3496,7 +3496,7 @@ ${appendString}`;
         }
       }
       const following = raw.substring(expandedEnd);
-      const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\])/);
+      const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:](\s|$)?)/);
       if (matchForward) {
         expandedEnd += matchForward[0].length;
         expanded = true;
@@ -3531,6 +3531,7 @@ ${appendString}`;
       fullTag = fullTag ? `${fullTag} #${cleanAutoTag}` : `#${cleanAutoTag}`;
     }
     const processedLines = lines.map((line) => {
+      var _a, _b;
       let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
       if (this.isTableAlignmentRow(line)) return line;
       if (this.isTableDataRow(line)) {
@@ -3541,8 +3542,8 @@ ${appendString}`;
           if (idx === 0 || idx === parts.length - 1) return cell;
           const trimmedCell = cell.trim();
           if (!trimmedCell) return cell;
-          const leadWS = cell.match(/^(\s*)/)[1];
-          const trailWS = cell.match(/(\s*)$/)[1];
+          const leadWS2 = cell.match(/^(\s*)/)[1];
+          const trailWS2 = cell.match(/(\s*)$/)[1];
           let wrapped;
           if (mode === "highlight" || mode === "tag") {
             if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
@@ -3555,7 +3556,7 @@ ${appendString}`;
           } else {
             wrapped = trimmedCell;
           }
-          return `${leadWS}${wrapped}${trailWS}`;
+          return `${leadWS2}${wrapped}${trailWS2}`;
         });
         return wrappedParts.join("|");
       }
@@ -3569,19 +3570,26 @@ ${appendString}`;
       if (mode === "remove") return cleanLine;
       const { indent, prefix, content } = this.splitMarkdownLine(cleanLine);
       if (!content.trim()) return line;
-      const trimmedContent = content.trim();
+      const leadWS = ((_a = content.match(/^(\s*)/)) == null ? void 0 : _a[1]) || "";
+      const trailWS = ((_b = content.match(/(\s*)$/)) == null ? void 0 : _b[1]) || "";
+      const actualContent = content.substring(leadWS.length, content.length - trailWS.length);
+      if (!actualContent) return line;
       const tagStr = fullTag ? `${fullTag} ` : "";
-      let wrappedContent = trimmedContent;
+      let wrappedContent = actualContent;
       if (mode === "highlight" || mode === "tag") {
         if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-          wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${trimmedContent}</mark>`;
+          wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${actualContent}</mark>`;
         } else {
-          wrappedContent = `==${trimmedContent}==`;
+          wrappedContent = `==${actualContent}==`;
         }
       } else if (mode === "color") {
-        wrappedContent = `<mark style="background: ${payload}; color: black;">${trimmedContent}</mark>`;
+        wrappedContent = `<mark style="background: ${payload}; color: black;">${actualContent}</mark>`;
+      } else if (mode === "bold") {
+        wrappedContent = `**${actualContent}**`;
+      } else if (mode === "italic") {
+        wrappedContent = `*${actualContent}*`;
       }
-      return `${indent}${prefix}${tagStr}${wrappedContent}`;
+      return `${indent}${prefix}${leadWS}${tagStr}${wrappedContent}${trailWS}`;
     });
     const replaceBlock = processedLines.join(newline);
     const newContent = raw.substring(0, expandedStart) + replaceBlock + raw.substring(expandedEnd);

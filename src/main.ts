@@ -1075,7 +1075,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 }
             }
             const following = raw.substring(expandedEnd);
-            const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\])/);
+            // Added '.' and '?' to the forward expansion to ensure trailing punctuation is captured
+            const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:](\s|$)?)/);
             if (matchForward) {
                 expandedEnd += matchForward[0].length;
                 expanded = true;
@@ -1148,19 +1149,32 @@ export default class ReadingHighlighterPlugin extends Plugin {
             if (mode === "remove") return cleanLine;
             const { indent, prefix, content } = this.splitMarkdownLine(cleanLine);
             if (!content.trim()) return line;
-            const trimmedContent = content.trim();
+
+            // Extract leading and trailing whitespace to preserve it outside the highlight
+            const leadWS = content.match(/^(\s*)/)?.[1] || "";
+            const trailWS = content.match(/(\s*)$/)?.[1] || "";
+            const actualContent = content.substring(leadWS.length, content.length - trailWS.length);
+            
+            if (!actualContent) return line;
+
             const tagStr = fullTag ? `${fullTag} ` : "";
-            let wrappedContent = trimmedContent;
+            let wrappedContent = actualContent;
+
             if (mode === "highlight" || mode === "tag") {
                 if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-                    wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${trimmedContent}</mark>`;
+                    wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${actualContent}</mark>`;
                 } else {
-                    wrappedContent = `==${trimmedContent}==`;
+                    wrappedContent = `==${actualContent}==`;
                 }
             } else if (mode === "color") {
-                wrappedContent = `<mark style="background: ${payload}; color: black;">${trimmedContent}</mark>`;
+                wrappedContent = `<mark style="background: ${payload}; color: black;">${actualContent}</mark>`;
+            } else if (mode === "bold") {
+                wrappedContent = `**${actualContent}**`;
+            } else if (mode === "italic") {
+                wrappedContent = `*${actualContent}*`;
             }
-            return `${indent}${prefix}${tagStr}${wrappedContent}`;
+
+            return `${indent}${prefix}${leadWS}${tagStr}${wrappedContent}${trailWS}`;
         });
         const replaceBlock = processedLines.join(newline);
         const newContent = raw.substring(0, expandedStart) + replaceBlock + raw.substring(expandedEnd);

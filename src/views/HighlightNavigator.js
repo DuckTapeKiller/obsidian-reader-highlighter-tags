@@ -27,7 +27,7 @@ export class HighlightNavigatorView extends ItemView {
     }
 
     getIcon() {
-        return "highlighter";
+        return "lamp";
     }
 
     async onOpen() {

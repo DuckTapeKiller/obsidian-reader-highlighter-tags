@@ -159,7 +159,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             this.register(() => btn.remove());
         }
 
-        this.addRibbonIcon("list", "Highlight Navigator", () => {
+        this.addRibbonIcon("lamp", "Highlight Navigator", () => {
             this.activateNavigatorView();
         });
 

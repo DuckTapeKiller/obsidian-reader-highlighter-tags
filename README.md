@@ -1,3 +1,9 @@
+[![GitHub Repo stars](https://img.shields.io/github/stars/DuckTapeKiller/obsidian-reader-highlighter-tags?style=flat&logo=obsidian&color=%238e44ad)](https://github.com/DuckTapeKiller/obsidian-reader-highlighter-tags/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/DuckTapeKiller/obsidian-reader-highlighter-tags?logo=obsidian&color=%238e44ad)](https://github.com/DuckTapeKiller/obsidian-reader-highlighter-tags/issues)
+[![GitHub closed issues](https://img.shields.io/github/issues-closed/DuckTapeKiller/obsidian-reader-highlighter-tags?logo=obsidian&color=%238e44ad)](https://github.com/DuckTapeKiller/obsidian-reader-highlighter-tags/issues?q=is%3Aissue+is%3Aclosed)
+[![GitHub manifest version](https://img.shields.io/github/manifest-json/v/DuckTapeKiller/obsidian-reader-highlighter-tags?logo=obsidian&color=%238e44ad)](https://github.com/DuckTapeKiller/obsidian-reader-highlighter-tags/blob/main/manifest.json)
+[![Downloads](https://img.shields.io/github/downloads/DuckTapeKiller/obsidian-reader-highlighter-tags/total?logo=obsidian&color=%238e44ad)](https://github.com/DuckTapeKiller/obsidian-reader-highlighter-tags/releases)
+
 ![Reader Highlighter Tags Art](https://github.com/user-attachments/assets/3d9d5720-d308-4af5-b277-faab84745f62)
 
 # Reader Highlighter Tags

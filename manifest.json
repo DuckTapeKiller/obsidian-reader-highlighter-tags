@@ -1,7 +1,7 @@
 {
 	"id": "reader-highlighter-tags",
 	"name": "Reader Highlighter Tags",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "0.15.0",
 	"description": "Highlight text and add tags in Reading View.",
 	"author": "DuckTapeKiller",

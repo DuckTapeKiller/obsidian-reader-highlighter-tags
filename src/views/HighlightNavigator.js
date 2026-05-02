@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView } from "obsidian";
+import { ItemView, MarkdownView, Platform } from "obsidian";
 import { getHighlightsFromContent } from "../utils/export";
 
 export const HIGHLIGHT_NAVIGATOR_VIEW = "highlight-navigator";
@@ -37,7 +37,6 @@ export class HighlightNavigatorView extends ItemView {
 
         // Header
         const header = container.createDiv({ cls: "highlight-navigator-header" });
-        header.createEl("h4", { text: "Navigator" });
 
         // View Mode Switcher
         const btnGroup = header.createDiv({ cls: "highlight-navigator-btn-group" });
@@ -155,6 +154,14 @@ export class HighlightNavigatorView extends ItemView {
         container.createDiv({ cls: "highlight-navigator-empty", text: message });
     }
 
+    stripMarkdown(text) {
+        if (!text) return "";
+        return text
+            .replace(/\[\[(?:[^\]|]+\|)?([^\]]+)\]\]/g, "$1") // [[Link]] or [[Link|Alias]] -> Link/Alias
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [Link](URL) -> Link
+            .replace(/[*_~`]+/g, ""); // Bold, Italics, Strikethrough, Code
+    }
+
     renderContent() {
         this.contentEl.empty();
         this.contentEl.removeClass("split-view");
@@ -226,14 +233,9 @@ export class HighlightNavigatorView extends ItemView {
                 el.appendChild(idSpan);
             }
 
-            // Text preview
-            const textPreview = item.text.length > 80
-                ? item.text.substring(0, 80) + "..."
-                : item.text;
-
             const textSpan = document.createElement("span");
             textSpan.addClass("highlight-text");
-            textSpan.textContent = textPreview;
+            textSpan.textContent = this.stripMarkdown(item.text);
             el.appendChild(textSpan);
 
             if (type === "highlights") {
@@ -264,6 +266,16 @@ export class HighlightNavigatorView extends ItemView {
                 line: line,
                 focus: true 
             });
+        }
+
+        // Close the panel (collapse sidebar) on mobile only
+        if (Platform.isMobile) {
+            const root = this.leaf.getRoot();
+            if (root === this.app.workspace.leftSplit) {
+                this.app.workspace.leftSplit.collapse();
+            } else if (root === this.app.workspace.rightSplit) {
+                this.app.workspace.rightSplit.collapse();
+            }
         }
     }
 

@@ -6,8 +6,14 @@ import { AnnotationModal } from "./modals/AnnotationModal";
 import { HighlightNavigatorView, HIGHLIGHT_NAVIGATOR_VIEW } from "./views/HighlightNavigator";
 import { ResearchView, RESEARCH_VIEW } from "./views/ResearchView";
 import { getScroll, applyScroll } from "./utils/dom";
-import { exportHighlightsToMD } from "./utils/export";
+import { exportHighlightsToCSV, exportHighlightsToJSON, exportHighlightsToMD } from "./utils/export";
 import { FailureRecoveryModal } from "./ui/FailureRecoveryModal";
+import {
+    mergeAdjacentHighlightsInRaw,
+    migrateSpanHighlightsInRaw,
+    recolorMarkHighlightsInRaw,
+} from "./utils/highlights";
+import { BulkRecolorModal } from "./modals/BulkRecolorModal";
 
 interface SemanticColor {
     color: string;
@@ -45,20 +51,7 @@ interface ReadingHighlighterSettings {
     learnedNormRules: LearnedNormRule[];
 }
 
-const SMART_SELECTION_TAGS = new Set([
-    "P",
-    "LI",
-    "BLOCKQUOTE",
-    "PRE",
-    "H1",
-    "H2",
-    "H3",
-    "H4",
-    "H5",
-    "H6",
-    "TD",
-    "TH",
-]);
+const SMART_SELECTION_TAGS = new Set(["P", "LI", "BLOCKQUOTE", "PRE", "H1", "H2", "H3", "H4", "H5", "H6", "TD", "TH"]);
 
 const FRONTMATTER_NEEDS_QUOTES_RE = new RegExp("[:\\s{}\\[\\],&*#?|<>=!%@\\\\-]");
 const FRONTMATTER_RESERVED_RE = /^(true|false|null|yes|no|on|off)$/i;
@@ -110,7 +103,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     settings: ReadingHighlighterSettings;
     floatingManager: any; // We could type these better if we converted their files too
     logic: any;
-    lastModification: { file: TFile, original: string } | null = null;
+    lastModification: { file: TFile; original: string } | null = null;
     lastScrollPosition: any = null;
 
     async onload() {
@@ -119,15 +112,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
         this.floatingManager = new FloatingManager(this);
         this.logic = new SelectionLogic(this.app, () => this.settings.learnedNormRules);
 
-        this.registerView(
-            HIGHLIGHT_NAVIGATOR_VIEW,
-            (leaf) => new HighlightNavigatorView(leaf, this)
-        );
+        this.registerView(HIGHLIGHT_NAVIGATOR_VIEW, (leaf) => new HighlightNavigatorView(leaf, this));
 
-        this.registerView(
-            RESEARCH_VIEW,
-            (leaf) => new ResearchView(leaf, this)
-        );
+        this.registerView(RESEARCH_VIEW, (leaf) => new ResearchView(leaf, this));
 
         this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
         this.registerCommands();
@@ -204,7 +191,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                     return true;
                 }
                 return false;
-            }
+            },
         });
 
         this.addCommand({
@@ -281,6 +268,30 @@ export default class ReadingHighlighterPlugin extends Plugin {
         });
 
         this.addCommand({
+            id: "export-highlights-json",
+            name: "Export highlights to JSON",
+            checkCallback: (checking) => {
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (!view || !view.file) return false;
+                if (checking) return true;
+                this.exportHighlightsJSON(view);
+                return true;
+            },
+        });
+
+        this.addCommand({
+            id: "export-highlights-csv",
+            name: "Export highlights to CSV",
+            checkCallback: (checking) => {
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (!view || !view.file) return false;
+                if (checking) return true;
+                this.exportHighlightsCSV(view);
+                return true;
+            },
+        });
+
+        this.addCommand({
             id: "remove-all-highlights",
             name: "Remove all highlights from note",
             checkCallback: (checking) => {
@@ -288,6 +299,42 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 if (!view) return false;
                 if (checking) return true;
                 this.removeAllHighlights(view);
+                return true;
+            },
+        });
+
+        this.addCommand({
+            id: "merge-adjacent-highlights",
+            name: "Merge adjacent highlights in note",
+            checkCallback: (checking) => {
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (!view || !view.file) return false;
+                if (checking) return true;
+                this.mergeAdjacentHighlightsInFile(view.file);
+                return true;
+            },
+        });
+
+        this.addCommand({
+            id: "recolor-mark-highlights",
+            name: "Recolor <mark> highlights in note…",
+            checkCallback: (checking) => {
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (!view || !view.file) return false;
+                if (checking) return true;
+                new BulkRecolorModal(this, view.file).open();
+                return true;
+            },
+        });
+
+        this.addCommand({
+            id: "migrate-span-highlights",
+            name: "Migrate <span> highlights to <mark> in note",
+            checkCallback: (checking) => {
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (!view || !view.file) return false;
+                if (checking) return true;
+                this.migrateSpanHighlightsInFile(view.file);
                 return true;
             },
         });
@@ -340,11 +387,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     async loadSettings() {
-        const loaded = await this.loadData() || {};
+        const loaded = (await this.loadData()) || {};
         this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded, {
-            semanticColors: loaded.semanticColors?.length
-                ? loaded.semanticColors
-                : DEFAULT_SETTINGS.semanticColors
+            semanticColors: loaded.semanticColors?.length ? loaded.semanticColors : DEFAULT_SETTINGS.semanticColors,
         });
     }
 
@@ -355,7 +400,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     getActiveReadingView(): MarkdownView | null {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        return (view && view.getMode() === "preview") ? view : null;
+        return view && view.getMode() === "preview" ? view : null;
     }
 
     getSelectionContext(selectionSnapshot: any) {
@@ -397,7 +442,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     getAllowedBlocksInRange(range: Range, root: HTMLElement) {
         if (!root) return [];
-        const selector = Array.from(SMART_SELECTION_TAGS).map((tag) => tag.toLowerCase()).join(", ");
+        const selector = Array.from(SMART_SELECTION_TAGS)
+            .map((tag) => tag.toLowerCase())
+            .join(", ");
         const blocks = Array.from(root.querySelectorAll(selector)).filter((element: HTMLElement) => {
             const text = this.getElementText(element);
             if (!text) return false;
@@ -407,11 +454,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 return false;
             }
         });
-        return blocks.filter((element) => !blocks.some((other) => other !== element && other.contains(element))) as HTMLElement[];
+        return blocks.filter(
+            (element) => !blocks.some((other) => other !== element && other.contains(element))
+        ) as HTMLElement[];
     }
 
     getClosestAllowedBlock(node: Node, root: HTMLElement): HTMLElement | null {
-        let current = node?.nodeType === Node.ELEMENT_NODE ? node as HTMLElement : node?.parentElement;
+        let current = node?.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node?.parentElement;
         while (current && current !== root) {
             if (SMART_SELECTION_TAGS.has(current.tagName) && this.getElementText(current)) {
                 return current;
@@ -474,10 +523,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             return;
         }
         try {
-            await this.app.vault.modify(
-                this.lastModification.file,
-                this.lastModification.original
-            );
+            await this.app.vault.modify(this.lastModification.file, this.lastModification.original);
             new Notice("Undone last highlight.");
             this.lastModification = null;
         } catch (err) {
@@ -545,7 +591,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const pdfName = view.file.basename;
         const companionFile = `${view.file.parent.path}/${pdfName} - Highlights.md`;
         const fileExists = this.app.vault.getAbstractFileByPath(companionFile);
-        
+
         let highlightOutput = snippet.trim();
         if (mode === "color") {
             const index = typeof payload === "number" ? payload : parseInt(payload);
@@ -565,7 +611,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
 
         const blockId = "^" + Math.random().toString(36).substring(2, 8);
-        const blockquotedText = highlightOutput.split("\n").map(line => `> ${line}`).join("\n");
+        const blockquotedText = highlightOutput
+            .split("\n")
+            .map((line) => `> ${line}`)
+            .join("\n");
         const appendString = `${blockquotedText}\n> — [[${view.file.path}|${pdfName}]] ${blockId}\n\n`;
 
         try {
@@ -694,7 +743,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     addRecentTag(tag: string) {
         const cleanTag = tag.replace(/^#/, "").trim();
         if (!cleanTag) return;
-        this.settings.recentTags = this.settings.recentTags.filter(t => t !== cleanTag);
+        this.settings.recentTags = this.settings.recentTags.filter((t) => t !== cleanTag);
         this.settings.recentTags.unshift(cleanTag);
         if (this.settings.recentTags.length > this.settings.maxRecentTags) {
             this.settings.recentTags = this.settings.recentTags.slice(0, this.settings.maxRecentTags);
@@ -807,6 +856,54 @@ export default class ReadingHighlighterPlugin extends Plugin {
         new Notice("All highlights removed.");
     }
 
+    async mergeAdjacentHighlightsInFile(file: TFile) {
+        await this.saveUndoState(file);
+        const raw = await this.app.vault.read(file);
+        const result = mergeAdjacentHighlightsInRaw(raw);
+
+        if (!result.mergedCount) {
+            new Notice("No adjacent highlights to merge.");
+            return;
+        }
+
+        await this.app.vault.modify(file, result.raw);
+        new Notice(`Merged ${result.mergedCount} highlight${result.mergedCount === 1 ? "" : "s"}.`);
+    }
+
+    async recolorMarkHighlightsInFile(file: TFile, fromColor: string, toColor: string) {
+        const targetColor = String(toColor || "").trim();
+        if (!targetColor) {
+            new Notice("Choose a target color first.");
+            return;
+        }
+
+        await this.saveUndoState(file);
+        const raw = await this.app.vault.read(file);
+        const result = recolorMarkHighlightsInRaw(raw, { fromColor, toColor: targetColor });
+
+        if (!result.changedCount) {
+            new Notice("No matching <mark> highlights to recolor.");
+            return;
+        }
+
+        await this.app.vault.modify(file, result.raw);
+        new Notice(`Recolored ${result.changedCount} highlight${result.changedCount === 1 ? "" : "s"}.`);
+    }
+
+    async migrateSpanHighlightsInFile(file: TFile) {
+        await this.saveUndoState(file);
+        const raw = await this.app.vault.read(file);
+        const result = migrateSpanHighlightsInRaw(raw);
+
+        if (!result.changedCount) {
+            new Notice("No <span> background highlights found to migrate.");
+            return;
+        }
+
+        await this.app.vault.modify(file, result.raw);
+        new Notice(`Migrated ${result.changedCount} highlight${result.changedCount === 1 ? "" : "s"} to <mark>.`);
+    }
+
     async exportHighlights(view: MarkdownView) {
         try {
             const exportPath = await exportHighlightsToMD(this.app, view.file);
@@ -821,6 +918,34 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
     }
 
+    async exportHighlightsJSON(view: MarkdownView) {
+        try {
+            const exportPath = await exportHighlightsToJSON(this.app, view.file);
+            new Notice(`Highlights exported to ${exportPath}`);
+            const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
+            if (exportFile instanceof TFile) {
+                await this.app.workspace.getLeaf().openFile(exportFile);
+            }
+        } catch (err) {
+            new Notice("Failed to export highlights to JSON.");
+            console.error(err);
+        }
+    }
+
+    async exportHighlightsCSV(view: MarkdownView) {
+        try {
+            const exportPath = await exportHighlightsToCSV(this.app, view.file);
+            new Notice(`Highlights exported to ${exportPath}`);
+            const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
+            if (exportFile instanceof TFile) {
+                await this.app.workspace.getLeaf().openFile(exportFile);
+            }
+        } catch (err) {
+            new Notice("Failed to export highlights to CSV.");
+            console.error(err);
+        }
+    }
+
     async copyAsQuote(view: MarkdownView, selectionSnapshot?: any) {
         const sel = window.getSelection();
         const request = this.buildSelectionRequest(view, selectionSnapshot);
@@ -828,7 +953,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
             new Notice("No text selected.");
             return;
         }
-        const quotedText = request.snippet.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
+        const quotedText = request.snippet
+            .split(/\r?\n/)
+            .map((line) => `> ${line}`)
+            .join("\n");
         const frontmatter = this.app.metadataCache.getFileCache(view.file)?.frontmatter || {};
         const quote = this.expandQuoteTemplate(view.file, quotedText, frontmatter);
         const copied = await this.writeClipboardText(quote);
@@ -901,7 +1029,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     expandQuoteTemplate(file: TFile, quotedText: string, frontmatter: any = {}) {
-        const sourceUrl = String(frontmatter.url || frontmatter.source || frontmatter.link || "").replace(/#:~:text=[^&]+(&|$)/, "");
+        const sourceUrl = String(frontmatter.url || frontmatter.source || frontmatter.link || "").replace(
+            /#:~:text=[^&]+(&|$)/,
+            ""
+        );
         const timestamp = this.formatTimestamp(new Date());
         const variables: Record<string, string> = {
             text: quotedText,
@@ -910,9 +1041,14 @@ export default class ReadingHighlighterPlugin extends Plugin {
             date: timestamp.split("T")[0],
             time: timestamp,
             domain: this.extractDomain(sourceUrl),
-            author: this.normalizeFrontmatterValue(frontmatter.author || frontmatter.authors || frontmatter.creator || ""),
+            author: this.normalizeFrontmatterValue(
+                frontmatter.author || frontmatter.authors || frontmatter.creator || ""
+            ),
         };
-        return this.settings.quoteTemplate.replace(/{{(text|file|path|date|time|domain|author)}}/g, (_, key) => variables[key] || "");
+        return this.settings.quoteTemplate.replace(
+            /{{(text|file|path|date|time|domain|author)}}/g,
+            (_, key) => variables[key] || ""
+        );
     }
 
     async writeClipboardText(text: string) {
@@ -970,7 +1106,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     normalizeFrontmatterValue(value: any) {
         if (Array.isArray(value)) {
-            return value.map((item) => String(item).trim()).filter(Boolean).join(", ");
+            return value
+                .map((item) => String(item).trim())
+                .filter(Boolean)
+                .join(", ");
         }
         return String(value || "").trim();
     }
@@ -1017,7 +1156,11 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     needsYamlQuotes(value: string) {
         const trimmedValue = String(value || "").trim();
-        return FRONTMATTER_NEEDS_QUOTES_RE.test(trimmedValue) || /^\d/.test(trimmedValue) || FRONTMATTER_RESERVED_RE.test(trimmedValue);
+        return (
+            FRONTMATTER_NEEDS_QUOTES_RE.test(trimmedValue) ||
+            /^\d/.test(trimmedValue) ||
+            FRONTMATTER_RESERVED_RE.test(trimmedValue)
+        );
     }
 
     normalizeTagForComparison(tag: string) {
@@ -1042,22 +1185,28 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     isTableDataRow(line: string) {
         const trimmed = line.trim();
-        if (!trimmed.startsWith("|"))
-            return false;
-        if (this.isTableAlignmentRow(line))
-            return false;
+        if (!trimmed.startsWith("|")) return false;
+        if (this.isTableAlignmentRow(line)) return false;
         return (trimmed.match(/\|/g) || []).length >= 2;
     }
 
-    async applyMarkdownModification(file: TFile, raw: string, start: number, end: number, mode: string, payload = "", autoTag = "") {
+    async applyMarkdownModification(
+        file: TFile,
+        raw: string,
+        start: number,
+        end: number,
+        mode: string,
+        payload = "",
+        autoTag = ""
+    ) {
         if (!raw) {
             raw = await this.app.vault.read(file);
         }
         let expandedStart = start;
         let expandedEnd = end;
         let bodyStart = 0;
-        if (raw.startsWith('---')) {
-            const secondDash = raw.indexOf('---', 3);
+        if (raw.startsWith("---")) {
+            const secondDash = raw.indexOf("---", 3);
             if (secondDash !== -1) {
                 bodyStart = secondDash + 3;
             }
@@ -1076,7 +1225,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
             }
             const following = raw.substring(expandedEnd);
             // Expanded to include balanced punctuation, quotes (including « »), and footnotes
-            const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:]["']?|[)\]}"'»”’›.?!,;:](\s|$)?)/);
+            const matchForward = following.match(
+                /^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:]["']?|[)\]}"'»”’›.?!,;:](\s|$)?)/
+            );
             if (matchForward) {
                 expandedEnd += matchForward[0].length;
                 expanded = true;
@@ -1091,10 +1242,15 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const newline = raw.includes("\r\n") ? "\r\n" : "\n";
         const lines = selectedText.split(/\r?\n/);
         let fullTag = "";
-        const sanitizeTag = (t: string) => t.trim().replace(/^#/, '').replace(/\s+/g, '_');
+        const sanitizeTag = (t: string) => t.trim().replace(/^#/, "").replace(/\s+/g, "_");
         if (mode === "tag" && payload) {
             const prefix = this.settings.defaultTagPrefix ? sanitizeTag(this.settings.defaultTagPrefix) : "";
-            const cleanPayload = payload.split(/\s+/).map(sanitizeTag).filter(t => t).map(t => `#${t}`).join(" ");
+            const cleanPayload = payload
+                .split(/\s+/)
+                .map(sanitizeTag)
+                .filter((t) => t)
+                .map((t) => `#${t}`)
+                .join(" ");
             if (prefix) {
                 fullTag = `#${sanitizeTag(prefix)} ${cleanPayload}`;
             } else {
@@ -1154,7 +1310,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const leadWS = content.match(/^(\s*)/)?.[1] || "";
             const trailWS = content.match(/(\s*)$/)?.[1] || "";
             const actualContent = content.substring(leadWS.length, content.length - trailWS.length);
-            
+
             if (!actualContent) return line;
 
             const tagStr = fullTag ? `${fullTag} ` : "";
@@ -1194,10 +1350,14 @@ export default class ReadingHighlighterPlugin extends Plugin {
                                 frontmatter.tags.push(targetTag);
                             }
                         } else if (typeof frontmatter.tags === "string") {
-                            const existingTags = frontmatter.tags.includes(',') 
-                                ? frontmatter.tags.split(',').map(t => t.trim())
-                                : frontmatter.tags.split(/\s+/).map(t => t.trim());
-                            const cleanTags = existingTags.filter((tag) => this.normalizeTagForComparison(tag) !== this.normalizeTagForComparison(targetTag) && tag !== "");
+                            const existingTags = frontmatter.tags.includes(",")
+                                ? frontmatter.tags.split(",").map((t) => t.trim())
+                                : frontmatter.tags.split(/\s+/).map((t) => t.trim());
+                            const cleanTags = existingTags.filter(
+                                (tag) =>
+                                    this.normalizeTagForComparison(tag) !== this.normalizeTagForComparison(targetTag) &&
+                                    tag !== ""
+                            );
                             if (cleanTags.length === existingTags.length) {
                                 frontmatter.tags = [...cleanTags, targetTag];
                             }
@@ -1224,7 +1384,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
         new FailureRecoveryModal(this.app, report, async (correctedText: string, learnedRule: LearnedNormRule) => {
             if (learnedRule && learnedRule.stripPattern) {
-                const existing = this.settings.learnedNormRules.find(r => r.stripPattern === learnedRule.stripPattern);
+                const existing = this.settings.learnedNormRules.find(
+                    (r) => r.stripPattern === learnedRule.stripPattern
+                );
                 if (!existing) {
                     this.settings.learnedNormRules.push(learnedRule);
                     await this.saveSettings();
@@ -1260,49 +1422,51 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName("Toolbar Position")
             .setDesc("Choose where the floating toolbar should appear.")
-            .addDropdown(dropdown => dropdown
-                .addOption("text", "Next to text")
-                .addOption("top", "Fixed at Top Center")
-                .addOption("bottom", "Fixed at Bottom Center")
-                .addOption("left", "Fixed Left Side")
-                .addOption("right", "Fixed Right Side (Default)")
-                .setValue(this.plugin.settings.toolbarPosition)
-                .onChange(async (value) => {
-                    this.plugin.settings.toolbarPosition = value;
-                    await this.plugin.saveSettings();
-                }));
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption("text", "Next to text")
+                    .addOption("top", "Fixed at Top Center")
+                    .addOption("bottom", "Fixed at Bottom Center")
+                    .addOption("left", "Fixed Left Side")
+                    .addOption("right", "Fixed Right Side (Default)")
+                    .setValue(this.plugin.settings.toolbarPosition)
+                    .onChange(async (value) => {
+                        this.plugin.settings.toolbarPosition = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
         containerEl.createEl("h3", { text: "Highlighting" });
         new Setting(containerEl)
             .setName("Enable Color Highlighting")
             .setDesc("Use HTML <mark> tags with specific colors instead of == syntax.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableColorHighlighting)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
                     this.plugin.settings.enableColorHighlighting = value;
                     await this.plugin.saveSettings();
                     this.display();
-                }));
+                })
+            );
         if (this.plugin.settings.enableColorHighlighting) {
             new Setting(containerEl)
                 .setName("Highlight Color")
                 .setDesc("Hex code for the default highlight color.")
-                .addColorPicker(color => color
-                    .setValue(this.plugin.settings.highlightColor || "#FFEE58")
-                    .onChange(async (value) => {
+                .addColorPicker((color) =>
+                    color.setValue(this.plugin.settings.highlightColor || "#FFEE58").onChange(async (value) => {
                         this.plugin.settings.highlightColor = value;
                         await this.plugin.saveSettings();
-                    }));
+                    })
+                );
         }
         new Setting(containerEl)
             .setName("Enable Color Palette")
             .setDesc("Show a palette of 5 colors in the toolbar for quick selection.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableColorPalette)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
                     this.plugin.settings.enableColorPalette = value;
                     await this.plugin.saveSettings();
                     this.display();
-                }));
+                })
+            );
         if (this.plugin.settings.enableColorPalette) {
             containerEl.createEl("h4", { text: "Semantic Color Meanings" });
             this.plugin.settings.semanticColors.forEach((item, index) => {
@@ -1314,162 +1478,164 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 colorPreview.style.backgroundColor = item.color;
                 colorPreview.style.marginRight = "10px";
                 setting.controlEl.appendChild(colorPreview);
-                setting.addText(text => text
-                    .setPlaceholder("Meaning (e.g. Disagree)")
-                    .setValue(item.meaning)
-                    .onChange(async (value) => {
-                        this.plugin.settings.semanticColors[index].meaning = value;
-                        await this.plugin.saveSettings();
-                    }));
+                setting.addText((text) =>
+                    text
+                        .setPlaceholder("Meaning (e.g. Disagree)")
+                        .setValue(item.meaning)
+                        .onChange(async (value) => {
+                            this.plugin.settings.semanticColors[index].meaning = value;
+                            await this.plugin.saveSettings();
+                        })
+                );
             });
         }
         containerEl.createEl("h3", { text: "Tags" });
         new Setting(containerEl)
             .setName("Default Tag Prefix")
             .setDesc("Automatically add this tag to every highlight (e.g., 'book').")
-            .addText(text => text
-                .setPlaceholder("book")
-                .setValue(this.plugin.settings.defaultTagPrefix)
-                .onChange(async (value) => {
-                    this.plugin.settings.defaultTagPrefix = value.replace(/\s+/g, '_').replace(/^#/, '');
-                    await this.plugin.saveSettings();
-                }));
+            .addText((text) =>
+                text
+                    .setPlaceholder("book")
+                    .setValue(this.plugin.settings.defaultTagPrefix)
+                    .onChange(async (value) => {
+                        this.plugin.settings.defaultTagPrefix = value.replace(/\s+/g, "_").replace(/^#/, "");
+                        await this.plugin.saveSettings();
+                    })
+            );
         new Setting(containerEl)
             .setName("Smart Tag Suggestions")
             .setDesc("Suggest tags based on recent usage, folder, and frontmatter.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableSmartTagSuggestions)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.enableSmartTagSuggestions).onChange(async (value) => {
                     this.plugin.settings.enableSmartTagSuggestions = value;
                     await this.plugin.saveSettings();
-                }));
+                })
+            );
         new Setting(containerEl)
             .setName("Enable Smart Paragraph Selection")
             .setDesc("Snap selections inside a paragraph, list item, heading, or blockquote to the entire block.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableSmartParagraphSelection)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.enableSmartParagraphSelection).onChange(async (value) => {
                     this.plugin.settings.enableSmartParagraphSelection = value;
                     await this.plugin.saveSettings();
-                }));
+                })
+            );
         containerEl.createEl("h3", { text: "Quote Template" });
         new Setting(containerEl)
             .setName("Quote Format")
-            .setDesc("Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}, {{time}}, {{domain}}, {{author}}")
-            .addTextArea(text => text
-                .setValue(this.plugin.settings.quoteTemplate)
-                .onChange(async (value) => {
+            .setDesc(
+                "Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}, {{time}}, {{domain}}, {{author}}"
+            )
+            .addTextArea((text) =>
+                text.setValue(this.plugin.settings.quoteTemplate).onChange(async (value) => {
                     this.plugin.settings.quoteTemplate = value;
                     await this.plugin.saveSettings();
-                }));
+                })
+            );
         containerEl.createEl("h3", { text: "Annotations" });
         new Setting(containerEl)
             .setName("Enable Annotations")
             .setDesc("Add comments to selections as footnotes.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableAnnotations)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.enableAnnotations).onChange(async (value) => {
                     this.plugin.settings.enableAnnotations = value;
                     await this.plugin.saveSettings();
-                }));
+                })
+            );
         new Setting(containerEl)
             .setName("Show Annotation Button")
             .setDesc("Show the annotation button in the toolbar.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.showAnnotationButton)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.showAnnotationButton).onChange(async (value) => {
                     this.plugin.settings.showAnnotationButton = value;
                     await this.plugin.saveSettings();
-                }));
+                })
+            );
         containerEl.createEl("h3", { text: "Reading Progress" });
         new Setting(containerEl)
             .setName("Track Reading Progress")
             .setDesc("Remember scroll position when leaving a file.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableReadingProgress)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.enableReadingProgress).onChange(async (value) => {
                     this.plugin.settings.enableReadingProgress = value;
                     await this.plugin.saveSettings();
-                }));
+                })
+            );
         new Setting(containerEl)
             .setName("Clear Reading Positions")
             .setDesc(`Currently tracking ${Object.keys(this.plugin.settings.readingPositions).length} file(s).`)
-            .addButton(button => button
-                .setButtonText("Clear All")
-                .onClick(async () => {
+            .addButton((button) =>
+                button.setButtonText("Clear All").onClick(async () => {
                     this.plugin.settings.readingPositions = {};
                     await this.plugin.saveSettings();
                     new Notice("Reading positions cleared.");
                     this.display();
-                }));
+                })
+            );
         containerEl.createEl("h3", { text: "Toolbar Buttons" });
-        new Setting(containerEl)
-            .setName("Show Tag Button")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.showTagButton)
-                .onChange(async (value) => {
-                    this.plugin.settings.showTagButton = value;
-                    await this.plugin.saveSettings();
-                }));
-        new Setting(containerEl)
-            .setName("Show Quote Button")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.showQuoteButton)
-                .onChange(async (value) => {
-                    this.plugin.settings.showQuoteButton = value;
-                    await this.plugin.saveSettings();
-                }));
-        new Setting(containerEl)
-            .setName("Show Remove Button")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.showRemoveButton)
-                .onChange(async (value) => {
-                    this.plugin.settings.showRemoveButton = value;
-                    await this.plugin.saveSettings();
-                }));
+        new Setting(containerEl).setName("Show Tag Button").addToggle((toggle) =>
+            toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
+                this.plugin.settings.showTagButton = value;
+                await this.plugin.saveSettings();
+            })
+        );
+        new Setting(containerEl).setName("Show Quote Button").addToggle((toggle) =>
+            toggle.setValue(this.plugin.settings.showQuoteButton).onChange(async (value) => {
+                this.plugin.settings.showQuoteButton = value;
+                await this.plugin.saveSettings();
+            })
+        );
+        new Setting(containerEl).setName("Show Remove Button").addToggle((toggle) =>
+            toggle.setValue(this.plugin.settings.showRemoveButton).onChange(async (value) => {
+                this.plugin.settings.showRemoveButton = value;
+                await this.plugin.saveSettings();
+            })
+        );
         containerEl.createEl("h3", { text: "Mobile & UX" });
         new Setting(containerEl)
             .setName("Haptic Feedback")
             .setDesc("Vibrate slightly on success (Mobile only).")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableHaptics)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.enableHaptics).onChange(async (value) => {
                     this.plugin.settings.enableHaptics = value;
                     await this.plugin.saveSettings();
-                }));
+                })
+            );
         new Setting(containerEl)
             .setName("Show Button Tooltips")
             .setDesc("Show tooltips when hovering over toolbar buttons.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.showTooltips)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.showTooltips).onChange(async (value) => {
                     this.plugin.settings.showTooltips = value;
                     await this.plugin.saveSettings();
-                }));
+                })
+            );
         containerEl.createEl("h3", { text: "Frontmatter Integration" });
         let tagSetting: Setting;
         new Setting(containerEl)
             .setName("Auto-tag highlight in Frontmatter")
             .setDesc("Automatically inject a specific tag into the note's frontmatter whenever you highlight text.")
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableFrontmatterTag)
-                .onChange(async (value) => {
+            .addToggle((toggle) =>
+                toggle.setValue(this.plugin.settings.enableFrontmatterTag).onChange(async (value) => {
                     this.plugin.settings.enableFrontmatterTag = value;
                     await this.plugin.saveSettings();
                     if (tagSetting) {
                         tagSetting.settingEl.style.display = value ? "" : "none";
                     }
-                }));
+                })
+            );
         tagSetting = new Setting(containerEl)
             .setName("Frontmatter highlight tag")
             .setDesc("The tag to add (e.g. 'resaltados'). Do not include the # symbol.")
-            .addText(text => text
-                .setPlaceholder("resaltados")
-                .setValue(this.plugin.settings.frontmatterTag)
-                .onChange(async (value) => {
-                    this.plugin.settings.frontmatterTag = value.replace(/^#/, '');
-                    await this.plugin.saveSettings();
-                }));
+            .addText((text) =>
+                text
+                    .setPlaceholder("resaltados")
+                    .setValue(this.plugin.settings.frontmatterTag)
+                    .onChange(async (value) => {
+                        this.plugin.settings.frontmatterTag = value.replace(/^#/, "");
+                        await this.plugin.saveSettings();
+                    })
+            );
         tagSetting.settingEl.style.display = this.plugin.settings.enableFrontmatterTag ? "" : "none";
         containerEl.createEl("h3", { text: "Learned Normalization Rules" });
         if (this.plugin.settings.learnedNormRules.length === 0) {
@@ -1479,18 +1645,20 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 new Setting(containerEl)
                     .setName(`Rule ${index + 1}`)
                     .setDesc(`Ignore: "${rule.stripPattern}"`)
-                    .addButton(btn => btn
-                        .setButtonText("Delete")
-                        .setWarning()
-                        .onClick(async () => {
-                            this.plugin.settings.learnedNormRules.splice(index, 1);
-                            await this.plugin.saveSettings();
-                            this.display();
-                            new Notice("Rule deleted.");
-                        }));
+                    .addButton((btn) =>
+                        btn
+                            .setButtonText("Delete")
+                            .setWarning()
+                            .onClick(async () => {
+                                this.plugin.settings.learnedNormRules.splice(index, 1);
+                                await this.plugin.saveSettings();
+                                this.display();
+                                new Notice("Rule deleted.");
+                            })
+                    );
             });
-            new Setting(containerEl)
-                .addButton(btn => btn
+            new Setting(containerEl).addButton((btn) =>
+                btn
                     .setButtonText("Clear All Rules")
                     .setWarning()
                     .onClick(async () => {
@@ -1498,7 +1666,8 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                         this.display();
                         new Notice("All rules cleared.");
-                    }));
+                    })
+            );
         }
     }
 }

@@ -31,10 +31,10 @@ export class TagSuggestModal extends Modal {
                 this.smartSuggestionEl.createEl("span", { text: "Suggestions: ", cls: "smart-suggestions-label" });
 
                 const chipsContainer = this.smartSuggestionEl.createDiv({ cls: "smart-suggestions-chips" });
-                smartTags.forEach(tag => {
+                smartTags.forEach((tag) => {
                     const chip = chipsContainer.createEl("button", {
                         text: `#${tag}`,
-                        cls: "smart-suggestion-chip"
+                        cls: "smart-suggestion-chip",
                     });
                     chip.onclick = () => {
                         this.toggleTag(tag);
@@ -53,7 +53,7 @@ export class TagSuggestModal extends Modal {
         const input = inputContainer.createEl("input", {
             type: "text",
             cls: "tag-search-input",
-            attr: { placeholder: "Search or create tag..." }
+            attr: { placeholder: "Search or create tag..." },
         });
         const doneBtn = inputContainer.createEl("button", { text: "Done", cls: "mod-cta tag-done-btn" });
 
@@ -67,7 +67,7 @@ export class TagSuggestModal extends Modal {
 
         // Load correct tags
         const tagCounts = this.app.metadataCache.getTags();
-        this.allTags = Object.keys(tagCounts).map(t => t.substring(1)); // strip #
+        this.allTags = Object.keys(tagCounts).map((t) => t.substring(1)); // strip #
 
         // Handlers
         input.addEventListener("input", (e) => {
@@ -119,7 +119,7 @@ export class TagSuggestModal extends Modal {
                 const fmTags = Array.isArray(cache.frontmatter.tags)
                     ? cache.frontmatter.tags
                     : [cache.frontmatter.tags];
-                fmTags.forEach(tag => {
+                fmTags.forEach((tag) => {
                     const cleanTag = String(tag).replace(/^#/, "");
                     if (cleanTag && !suggestions.includes(cleanTag)) {
                         suggestions.push(cleanTag);
@@ -137,10 +137,10 @@ export class TagSuggestModal extends Modal {
         const cleanQuery = query.toLowerCase().replace(/\s+/g, "_");
 
         // Filter tags
-        let matches = this.allTags.filter(t => t.toLowerCase().includes(cleanQuery));
+        let matches = this.allTags.filter((t) => t.toLowerCase().includes(cleanQuery));
 
         // Exact Match / Create Logic
-        const isExact = matches.some(t => t.toLowerCase() === cleanQuery);
+        const isExact = matches.some((t) => t.toLowerCase() === cleanQuery);
 
         if (cleanQuery && !isExact) {
             // Add creation option at top
@@ -148,7 +148,7 @@ export class TagSuggestModal extends Modal {
         }
 
         // Limit to 50 for performance
-        matches.slice(0, 50).forEach(tag => {
+        matches.slice(0, 50).forEach((tag) => {
             if (!this.selectedTags.has(tag)) {
                 this.renderItem(tag, false);
             }
@@ -189,12 +189,12 @@ export class TagSuggestModal extends Modal {
         if (this.selectedTags.size === 0) {
             this.selectedContainer.createSpan({
                 text: "No tags selected",
-                cls: "no-tags-hint"
+                cls: "no-tags-hint",
             });
             return;
         }
 
-        this.selectedTags.forEach(tag => {
+        this.selectedTags.forEach((tag) => {
             const chip = this.selectedContainer.createDiv({ cls: "tag-chip" });
             chip.createSpan({ text: `#${tag}` });
             const close = chip.createSpan({ cls: "tag-chip-close", text: "×" });
@@ -207,7 +207,9 @@ export class TagSuggestModal extends Modal {
 
     submit() {
         // Join tags with spaces and #
-        const result = Array.from(this.selectedTags).map(t => `#${t}`).join(" ");
+        const result = Array.from(this.selectedTags)
+            .map((t) => `#${t}`)
+            .join(" ");
         this.onChoose(result);
         this.close();
     }

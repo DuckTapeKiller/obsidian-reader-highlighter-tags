@@ -37,7 +37,7 @@ export class FloatingManager {
     unload() {
         this.containerEl?.remove();
         this.containerEl = null;
-        this._handlers.forEach(cleanup => cleanup());
+        this._handlers.forEach((cleanup) => cleanup());
         this._handlers = [];
         if (this._selectionDebounceTimer) {
             clearTimeout(this._selectionDebounceTimer);
@@ -139,10 +139,10 @@ export class FloatingManager {
 
             const handler = (evt) => {
                 preventFocus(evt);
-                const { View } = require('obsidian');
+                const { View } = require("obsidian");
                 let view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 let isPdf = false;
-                
+
                 if (!view || view.getMode() !== "preview") {
                     view = this.app.workspace.getActiveViewOfType(View);
                     if (view && view.getViewType() === "pdf") {
@@ -158,7 +158,7 @@ export class FloatingManager {
                 } else {
                     this.plugin[actionName](view, this._selectionSnapshot);
                 }
-                
+
                 this.hide();
             };
 
@@ -177,7 +177,7 @@ export class FloatingManager {
         if (this.extractAllBtn) {
             const handler = (evt) => {
                 preventFocus(evt);
-                const { View } = require('obsidian');
+                const { View } = require("obsidian");
                 const view = this.app.workspace.getActiveViewOfType(View);
                 if (view && view.getViewType() === "pdf") {
                     this.plugin.extractAllPdfText(view);
@@ -192,10 +192,10 @@ export class FloatingManager {
         this.colorButtons.forEach((btn, index) => {
             const handler = (evt) => {
                 preventFocus(evt);
-                const { View } = require('obsidian');
+                const { View } = require("obsidian");
                 let view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 let isPdf = false;
-                
+
                 if (!view || view.getMode() !== "preview") {
                     view = this.app.workspace.getActiveViewOfType(View);
                     if (view && view.getViewType() === "pdf") {
@@ -211,7 +211,7 @@ export class FloatingManager {
                 } else {
                     this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
                 }
-                
+
                 this.hide();
             };
 
@@ -226,31 +226,43 @@ export class FloatingManager {
         // behaviour and causes partial (single-word) highlights.
         if (!Platform.isIosApp) return;
 
-        document.addEventListener("touchstart", (e) => {
-            this.longPressTimer = setTimeout(() => {
-                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                const sel = window.getSelection();
+        document.addEventListener(
+            "touchstart",
+            (_e) => {
+                this.longPressTimer = setTimeout(() => {
+                    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                    const sel = window.getSelection();
 
-                if (view && view.getMode() === "preview" && sel?.toString().trim()) {
-                    this.plugin.highlightSelection(view);
-                    this.hide();
+                    if (view && view.getMode() === "preview" && sel?.toString().trim()) {
+                        this.plugin.highlightSelection(view);
+                        this.hide();
+                    }
+                }, 600);
+            },
+            { passive: true }
+        );
+
+        document.addEventListener(
+            "touchmove",
+            () => {
+                if (this.longPressTimer) {
+                    clearTimeout(this.longPressTimer);
+                    this.longPressTimer = null;
                 }
-            }, 600);
-        }, { passive: true });
+            },
+            { passive: true }
+        );
 
-        document.addEventListener("touchmove", () => {
-            if (this.longPressTimer) {
-                clearTimeout(this.longPressTimer);
-                this.longPressTimer = null;
-            }
-        }, { passive: true });
-
-        document.addEventListener("touchend", () => {
-            if (this.longPressTimer) {
-                clearTimeout(this.longPressTimer);
-                this.longPressTimer = null;
-            }
-        }, { passive: true });
+        document.addEventListener(
+            "touchend",
+            () => {
+                if (this.longPressTimer) {
+                    clearTimeout(this.longPressTimer);
+                    this.longPressTimer = null;
+                }
+            },
+            { passive: true }
+        );
     }
 
     /**
@@ -276,7 +288,7 @@ export class FloatingManager {
 
     /** Internal: actually process the current selection state. */
     _doHandleSelection() {
-        const { View } = require('obsidian');
+        const { View } = require("obsidian");
         let view = this.app.workspace.getActiveViewOfType(MarkdownView);
         let isPdf = false;
         if (!view || view.getMode() !== "preview") {
@@ -347,7 +359,7 @@ export class FloatingManager {
                 // to avoid being hidden behind it.
                 const gap = 12;
                 let top = rect.bottom + gap;
-                let left = rect.left + (rect.width / 2) - (containerWidth / 2);
+                let left = rect.left + rect.width / 2 - containerWidth / 2;
 
                 // If not enough room below, try above with extra clearance
                 // for the native menu (~50px for the menu itself)
@@ -365,7 +377,7 @@ export class FloatingManager {
             } else {
                 // ── iOS / Desktop: place toolbar ABOVE the selection (original) ──
                 let top = rect.top - containerHeight - 10;
-                let left = rect.left + (rect.width / 2) - (containerWidth / 2);
+                let left = rect.left + rect.width / 2 - containerWidth / 2;
 
                 if (top < 10) top = rect.bottom + 10;
                 if (left < 10) left = 10;
@@ -374,23 +386,19 @@ export class FloatingManager {
                 this.containerEl.style.top = `${top}px`;
                 this.containerEl.style.left = `${left}px`;
             }
-
         } else if (pos === "top") {
             this.containerEl.style.top = "80px";
             this.containerEl.style.left = "50%";
             this.containerEl.style.transform = "translateX(-50%)";
-
         } else if (pos === "bottom") {
             this.containerEl.style.bottom = "100px";
             this.containerEl.style.left = "50%";
             this.containerEl.style.transform = "translateX(-50%)";
-
         } else if (pos === "left") {
             this.containerEl.style.top = "50%";
             this.containerEl.style.left = "10px";
             this.containerEl.style.transform = "translateY(-50%)";
             this.containerEl.addClass("reading-highlighter-vertical");
-
         } else if (pos === "right") {
             this.containerEl.style.top = "50%";
             this.containerEl.style.right = "10px";

@@ -90,10 +90,10 @@
 }
 
 /* Standardised Erase Hover - Red in BOTH modes */
-.reading-highlighter-remove-btn:hover,
-.theme-light .reading-highlighter-remove-btn:hover {
-    background: rgba(239, 83, 80, 1) !important;
-    color: white !important;
+body .reading-highlighter-remove-btn:hover,
+body.theme-light .reading-highlighter-remove-btn:hover {
+    background: rgba(239, 83, 80, 1);
+    color: white;
 }
 
 /* === Color Palette === */
@@ -302,6 +302,102 @@
     gap: 8px;
 }
 
+/* === Highlight Edit Modal === */
+body .reading-highlighter-highlight-edit-modal .highlight-edit-error {
+    color: var(--text-error);
+    margin-top: 8px;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-preview {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    padding: 12px;
+    margin: 8px 0 14px;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-preview-label {
+    color: var(--text-muted);
+    font-size: 0.8em;
+    margin-bottom: 6px;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-preview-text {
+    color: var(--text-normal);
+    font-size: 0.95em;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-color-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 6px 0 2px;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-color-input {
+    width: 44px;
+    height: 32px;
+    padding: 0;
+    border-radius: var(--input-radius);
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-color-text {
+    flex: 1;
+    min-width: 0;
+    border-radius: var(--input-radius);
+    padding: 6px 10px;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-palette {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 6px;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-palette-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--button-radius);
+    border: 1px solid var(--background-modifier-border);
+    padding: 0;
+    cursor: pointer;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-tags-input {
+    width: 100%;
+    border-radius: var(--input-radius);
+    padding: 6px 10px;
+    box-sizing: border-box;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-annotation-input {
+    width: 100%;
+    min-height: 88px;
+    border-radius: var(--input-radius);
+    padding: 10px;
+    box-sizing: border-box;
+    resize: vertical;
+    font-family: inherit;
+}
+
+body .reading-highlighter-highlight-edit-modal .highlight-edit-footer {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
 /* === Highlight Navigator View === */
 .highlight-navigator-container {
     display: flex;
@@ -310,10 +406,10 @@
     padding: 0;
 }
 
-.highlight-navigator-header {
+body .highlight-navigator-container .highlight-navigator-header {
     display: flex;
     flex-direction: column;
-    padding: 12px 0 !important;
+    padding: 12px 0;
     gap: 12px;
 }
 
@@ -323,14 +419,14 @@
     font-weight: 600;
 }
 
-.highlight-navigator-btn-group {
+body .highlight-navigator-container .highlight-navigator-btn-group {
     display: flex;
     background: transparent;
     border-radius: var(--radius-m);
     padding: 0;
-    width: calc(100% - 16px) !important;
-    margin: 0 auto !important;
-    box-sizing: border-box !important;
+    width: calc(100% - 16px);
+    margin: 0 auto;
+    box-sizing: border-box;
 }
 
 .nav-btn {
@@ -357,17 +453,17 @@
     color: var(--text-on-accent);
 }
 
-.highlight-navigator-search {
-    padding: 0 0 12px 0 !important;
+body .highlight-navigator-container .highlight-navigator-search {
+    padding: 0 0 12px;
 }
 
-.nav-search-input {
-    width: calc(100% - 16px) !important;
-    margin: 0 auto !important;
-    display: block !important;
+body .highlight-navigator-container .nav-search-input {
+    width: calc(100% - 16px);
+    margin: 0 auto;
+    display: block;
     border-radius: var(--input-radius);
     padding: 6px 10px;
-    box-sizing: border-box !important;
+    box-sizing: border-box;
 }
 
 .highlight-navigator-content {
@@ -414,12 +510,12 @@
     border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.highlight-navigator-list {
+body .highlight-navigator-container .highlight-navigator-list {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    width: calc(100% - 16px) !important;
-    margin: 0 auto !important;
+    width: calc(100% - 16px);
+    margin: 0 auto;
 }
 
 .highlight-navigator-item {
@@ -462,6 +558,40 @@
     word-break: break-word;
 }
 
+body .highlight-navigator-container .highlight-navigator-item .highlight-item-menu {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--button-radius);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+    font-size: 18px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+body .highlight-navigator-container .highlight-navigator-item:hover .highlight-item-menu {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+body .highlight-navigator-container .highlight-navigator-item .highlight-item-menu:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border);
+    color: var(--text-normal);
+}
+
+body.is-mobile .highlight-navigator-container .highlight-navigator-item .highlight-item-menu {
+    opacity: 1;
+    pointer-events: auto;
+}
+
 .highlight-number {
     font-size: 0.75em;
     color: var(--text-muted);
@@ -471,17 +601,17 @@
     flex-shrink: 0;
 }
 
-.highlight-navigator-footer {
-    padding: 12px 0 !important;
+body .highlight-navigator-container .highlight-navigator-footer {
+    padding: 12px 0;
     border-top: 1px solid var(--background-modifier-border);
 }
 
-.highlight-navigator-footer-buttons {
+body .highlight-navigator-container .highlight-navigator-footer-buttons {
     display: flex;
     gap: 8px;
-    width: calc(100% - 16px) !important;
-    margin: 0 auto !important;
-    box-sizing: border-box !important;
+    width: calc(100% - 16px);
+    margin: 0 auto;
+    box-sizing: border-box;
 }
 
 .highlight-navigator-footer-buttons button {
@@ -527,21 +657,21 @@
     }
 
     /* Highlighter Navigator Optimization */
-    .highlight-navigator-header {
-        padding: 4px 0 4px 0 !important; /* Move buttons to the very top */
-        gap: 4px !important;
+    body .highlight-navigator-container .highlight-navigator-header {
+        padding: 4px 0; /* Move buttons to the very top */
+        gap: 4px;
     }
 
-    .highlight-navigator-footer {
-        padding: 8px 0 12px 0 !important; /* Move it up a bit */
+    body .highlight-navigator-container .highlight-navigator-footer {
+        padding: 8px 0 12px; /* Move it up a bit */
     }
 
-    .highlight-navigator-search {
-        padding: 0 0 4px 0 !important;
+    body .highlight-navigator-container .highlight-navigator-search {
+        padding: 0 0 4px;
     }
 
-    .highlight-navigator-container {
-        padding-bottom: 8px !important;
+    body .highlight-navigator-container {
+        padding-bottom: 8px;
     }
 }
 
@@ -592,151 +722,168 @@
 }
 
 /* === Mobile: Push annotation modal to top when keyboard is open === */
-/* Force position using !important to override element-level styles from Obsidian */
+/* Force position by using higher specificity than Obsidian's base modal rules */
 
 /* We now target the modal element itself which has the class 'reading-highlighter-annotation-modal' */
-.is-mobile .modal.reading-highlighter-annotation-modal {
-    position: fixed !important;
-    top: 60px !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    margin: 0 !important;
+body.is-mobile .modal.reading-highlighter-annotation-modal {
+    position: fixed;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
 
     /* Grow to fit content, up to 85vh */
-    height: auto !important;
-    max-height: 85vh !important;
-    width: 90vw !important;
+    height: auto;
+    max-height: 85vh;
+    width: 90vw;
 
     /* Ensure it floats above everything */
-    z-index: 10000 !important;
+    z-index: 10000;
 
     /* Align to top */
-    align-self: flex-start !important;
+    align-self: flex-start;
 
     /* KILL ALL ANIMATIONS/TRANSITIONS aggressively to stop glitches */
-    transition: none !important;
-    animation: none !important;
-    transform: translateX(-50%) !important;
-    /* Ensure transform is static */
-    border-radius: var(--radius-l) !important;
+    transition: none;
+    animation: none;
+    border-radius: var(--radius-l);
 }
 
-.reading-highlighter-modal-container,
-.reading-highlighter-modal-container .modal-bg,
-.reading-highlighter-modal-container .modal {
-    transition: none !important;
-    animation: none !important;
+body .reading-highlighter-modal-container,
+body .reading-highlighter-modal-container .modal-bg,
+body .reading-highlighter-modal-container .modal {
+    transition: none;
+    animation: none;
 }
 
-/* Also kill container animations if possible via descendent selection hack or general reset */
-.is-mobile .modal-container:has(.reading-highlighter-annotation-modal) {
-    transition: none !important;
-    animation: none !important;
+body.is-mobile .reading-highlighter-annotation-modal .modal-content {
+    max-height: none;
+    overflow-y: visible;
 }
 
-.is-mobile .reading-highlighter-annotation-modal .modal-content {
-    max-height: none !important;
-    overflow-y: visible !important;
+/* === Mobile: Push highlight edit modal to top when keyboard is open === */
+body.is-mobile .modal.reading-highlighter-highlight-edit-modal {
+    position: fixed;
+    top: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
+
+    height: auto;
+    max-height: 85vh;
+    width: 94vw;
+
+    z-index: 10000;
+    align-self: flex-start;
+
+    transition: none;
+    animation: none;
+    border-radius: var(--radius-l);
+}
+
+body.is-mobile .reading-highlighter-highlight-edit-modal .modal-content {
+    max-height: none;
+    overflow-y: visible;
 }
 
 /* === Mobile: Push tag modal to top when keyboard is open === */
-.is-mobile .modal.reading-highlighter-tag-modal {
-    position: fixed !important;
-    top: 30px !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    margin: 0 !important;
+body.is-mobile .modal.reading-highlighter-tag-modal {
+    position: fixed;
+    top: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
 
     /* Allow modal to grow as needed */
-    height: auto !important;
-    max-height: none !important;
-    width: 94vw !important;
+    height: auto;
+    max-height: none;
+    width: 94vw;
 
     /* Ensure it floats above everything */
-    z-index: 10000 !important;
+    z-index: 10000;
 
     /* Align to top */
-    align-self: flex-start !important;
+    align-self: flex-start;
 
     /* No animations */
-    transition: none !important;
-    animation: none !important;
-    border-radius: var(--radius-l) !important;
+    transition: none;
+    animation: none;
+    border-radius: var(--radius-l);
 }
 
 /* Compact modal content on mobile - allow overflow */
-.is-mobile .reading-highlighter-tag-modal .modal-content {
-    padding: 12px !important;
-    overflow-y: visible !important;
-    max-height: none !important;
+body.is-mobile .reading-highlighter-tag-modal .modal-content {
+    padding: 12px;
+    overflow-y: visible;
+    max-height: none;
 }
 
 /* Smaller title */
-.is-mobile .reading-highlighter-tag-modal h2 {
-    font-size: 1em !important;
-    margin: 0 0 8px 0 !important;
+body.is-mobile .reading-highlighter-tag-modal h2 {
+    font-size: 1em;
+    margin: 0 0 8px;
 }
 
 /* Compact smart suggestions */
-.is-mobile .reading-highlighter-tag-modal .smart-suggestions-container {
-    margin-bottom: 8px !important;
-    padding: 6px 8px !important;
-    border-radius: var(--radius-m) !important;
+body.is-mobile .reading-highlighter-tag-modal .smart-suggestions-container {
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    border-radius: var(--radius-m);
 }
 
-.is-mobile .reading-highlighter-tag-modal .smart-suggestions-chips {
-    margin-top: 4px !important;
-    gap: 4px !important;
+body.is-mobile .reading-highlighter-tag-modal .smart-suggestions-chips {
+    margin-top: 4px;
+    gap: 4px;
 }
 
-.is-mobile .reading-highlighter-tag-modal .smart-suggestion-chip {
-    padding: 3px 8px !important;
-    font-size: 0.8em !important;
-    border-radius: var(--radius-s) !important;
+body.is-mobile .reading-highlighter-tag-modal .smart-suggestion-chip {
+    padding: 3px 8px;
+    font-size: 0.8em;
+    border-radius: var(--radius-s);
 }
 
 /* Compact selected tags container */
-.is-mobile .reading-highlighter-tag-modal .selected-tags-container {
-    margin-bottom: 8px !important;
-    min-height: 28px !important;
-    padding: 6px !important;
-    gap: 4px !important;
-    border-radius: var(--radius-m) !important;
+body.is-mobile .reading-highlighter-tag-modal .selected-tags-container {
+    margin-bottom: 8px;
+    min-height: 28px;
+    padding: 6px;
+    gap: 4px;
+    border-radius: var(--radius-m);
 }
 
-.is-mobile .reading-highlighter-tag-modal .tag-chip {
-    padding: 3px 8px !important;
-    font-size: 11px !important;
-    border-radius: var(--radius-s) !important;
+body.is-mobile .reading-highlighter-tag-modal .tag-chip {
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: var(--radius-s);
 }
 
 /* Compact search input */
-.is-mobile .reading-highlighter-tag-modal .tag-search-input-container {
-    margin-bottom: 8px !important;
+body.is-mobile .reading-highlighter-tag-modal .tag-search-input-container {
+    margin-bottom: 8px;
 }
 
-.is-mobile .reading-highlighter-tag-modal .tag-search-input {
-    padding: 6px 10px !important;
-    font-size: 14px !important;
-    border-radius: var(--input-radius) !important;
+body.is-mobile .reading-highlighter-tag-modal .tag-search-input {
+    padding: 6px 10px;
+    font-size: 14px;
+    border-radius: var(--input-radius);
 }
 
 /* Suggestions list - allow it to show with scrolling */
-.is-mobile .reading-highlighter-tag-modal .tag-suggestions-list {
-    max-height: 150px !important;
-    overflow-y: auto !important;
-    border-radius: var(--radius-m) !important;
+body.is-mobile .reading-highlighter-tag-modal .tag-suggestions-list {
+    max-height: 150px;
+    overflow-y: auto;
+    border-radius: var(--radius-m);
 }
 
-.is-mobile .reading-highlighter-tag-modal .suggestion-item {
-    padding: 8px 10px !important;
+body.is-mobile .reading-highlighter-tag-modal .suggestion-item {
+    padding: 8px 10px;
 }
 
 /* Compact Done button on mobile */
-.is-mobile .reading-highlighter-tag-modal .tag-done-btn {
-    padding: 6px 12px !important;
-    font-size: 14px !important;
-    border-radius: var(--button-radius) !important;
+body.is-mobile .reading-highlighter-tag-modal .tag-done-btn {
+    padding: 6px 12px;
+    font-size: 14px;
+    border-radius: var(--button-radius);
 }
 
 /* === Settings Page Enhancements === */
@@ -758,23 +905,23 @@
     flex-direction: column;
     height: 100%;
     padding: 0;
-    overflow-x: hidden !important;
+    overflow-x: hidden;
     box-sizing: border-box;
 }
 
 /* Force Obsidian's internal content layer to stay contained */
 .workspace-leaf-content[data-type="reader-research-view"] .view-content {
-    overflow-x: hidden !important;
-    padding: 0 !important;
+    overflow-x: hidden;
+    padding: 0;
 }
 
 /* Mobile-Specific Strictness */
-.is-mobile .workspace-leaf-content[data-type="reader-research-view"],
-.is-mobile .workspace-leaf-content[data-type="reader-research-view"] .view-content,
-.is-mobile .research-view-container {
-    overflow-x: hidden !important;
-    width: 100% !important;
-    max-width: 100vw !important;
+body.is-mobile .workspace-leaf-content[data-type="reader-research-view"],
+body.is-mobile .workspace-leaf-content[data-type="reader-research-view"] .view-content,
+body.is-mobile .research-view-container {
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100vw;
     position: relative;
     touch-action: pan-y; /* Only allow vertical panning */
 }
@@ -930,7 +1077,7 @@
 .research-view-content {
     flex: 1;
     overflow-y: auto;
-    overflow-x: hidden !important;
+    overflow-x: hidden;
     padding: 16px;
     display: flex;
     flex-direction: column;
@@ -1136,8 +1283,8 @@
 }
 
 /* Wide Correction Input */
-.recovery-input-setting {
-    display: block !important;
+body .setting-item.recovery-input-setting {
+    display: block;
 }
 
 .recovery-input-setting .setting-item-info {
@@ -1167,11 +1314,11 @@
 }
 
 /* PDF-specific visibility */
-.reading-highlighter-float-container button.pdf-only-btn {
-    display: none !important;
+body .reading-highlighter-float-container button.pdf-only-btn {
+    display: none;
 }
 
-.reading-highlighter-float-container.is-pdf-view button.pdf-only-btn {
-    display: flex !important;
+body .reading-highlighter-float-container.is-pdf-view button.pdf-only-btn {
+    display: flex;
     color: var(--interactive-accent);
 }

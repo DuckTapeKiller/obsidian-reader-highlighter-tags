@@ -9,7 +9,7 @@ export class ResearchView extends ItemView {
         super(leaf);
         this.plugin = plugin;
         this.scanner = new VaultScanner(plugin.app);
-        
+
         this.scanResults = [];
         this.searchQuery = "";
         this.filterKey = "All Properties"; // default
@@ -18,7 +18,7 @@ export class ResearchView extends ItemView {
         this.activeColors = new Set();
         this.isScanning = false;
         this.expandedFiles = new Set(); // store file.path of expanded files
-        
+
         this.progressEl = null;
         this.progressTextEl = null;
     }
@@ -42,10 +42,10 @@ export class ResearchView extends ItemView {
 
         // Header
         const header = container.createDiv({ cls: "research-view-header" });
-        
+
         const titleRow = header.createDiv({ cls: "research-view-title-row" });
         titleRow.createEl("h3", { text: "Research View" });
-        
+
         const scanBtn = titleRow.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
         scanBtn.onclick = () => this.startScan();
 
@@ -54,13 +54,13 @@ export class ResearchView extends ItemView {
 
         // Search Bar & Date Filter
         const searchContainer = header.createDiv({ cls: "research-view-search" });
-        
-        const searchInput = searchContainer.createEl("input", { 
-            type: "text", 
+
+        const searchInput = searchContainer.createEl("input", {
+            type: "text",
             placeholder: "Search all highlights...",
-            cls: "research-search-input"
+            cls: "research-search-input",
         });
-        
+
         searchInput.oninput = (e) => {
             this.searchQuery = e.target.value.toLowerCase();
             this.renderContent();
@@ -68,9 +68,9 @@ export class ResearchView extends ItemView {
 
         // Property Filtering Row
         const propertyFilterRow = header.createDiv({ cls: "research-view-property-filter" });
-        
-        this.propertySelect = propertyFilterRow.createEl("select", { 
-            cls: "research-property-select" 
+
+        this.propertySelect = propertyFilterRow.createEl("select", {
+            cls: "research-property-select",
         });
         this.updatePropertySelector();
 
@@ -82,7 +82,7 @@ export class ResearchView extends ItemView {
         const propertyInput = propertyFilterRow.createEl("input", {
             type: "text",
             placeholder: "Filter by value...",
-            cls: "research-property-input"
+            cls: "research-property-input",
         });
 
         propertyInput.oninput = (e) => {
@@ -96,14 +96,14 @@ export class ResearchView extends ItemView {
             this.plugin.settings.semanticColors.forEach((colorItem) => {
                 if (!colorItem.meaning) return; // Only show colors that have a meaning defined
 
-                const chip = filterContainer.createEl("button", { 
+                const chip = filterContainer.createEl("button", {
                     cls: "research-color-chip",
                 });
-                
+
                 // Dot indicator
                 const dot = chip.createSpan({ cls: "research-color-dot" });
                 dot.style.backgroundColor = colorItem.color;
-                
+
                 chip.createSpan({ text: colorItem.meaning });
 
                 chip.onclick = () => {
@@ -121,7 +121,10 @@ export class ResearchView extends ItemView {
         }
 
         // Progress bar container (hidden by default)
-        this.progressContainer = header.createDiv({ cls: "research-progress-container", attr: { style: "display: none;" } });
+        this.progressContainer = header.createDiv({
+            cls: "research-progress-container",
+            attr: { style: "display: none;" },
+        });
         this.progressTextEl = this.progressContainer.createDiv({ cls: "research-progress-text" });
         const progressTrack = this.progressContainer.createDiv({ cls: "research-progress-track" });
         this.progressEl = progressTrack.createDiv({ cls: "research-progress-bar" });
@@ -135,24 +138,24 @@ export class ResearchView extends ItemView {
 
     async startScan() {
         if (this.isScanning) return;
-        
+
         this.isScanning = true;
         this.progressContainer.style.display = "block";
         this.contentEl.empty();
-        
+
         try {
             this.scanResults = await this.scanner.scanVault((current, total, lastFile) => {
                 const percent = Math.round((current / total) * 100);
                 this.progressEl.style.width = `${percent}%`;
                 this.progressTextEl.textContent = `Scanning: ${current}/${total} (${percent}%) - ${lastFile}...`;
             });
-            
+
             // Collect all property keys
             this.allPropertyKeys.clear();
             this.allPropertyKeys.add("All Properties");
             for (const res of this.scanResults) {
                 if (res.frontmatter) {
-                    Object.keys(res.frontmatter).forEach(key => this.allPropertyKeys.add(key));
+                    Object.keys(res.frontmatter).forEach((key) => this.allPropertyKeys.add(key));
                 }
             }
             this.updatePropertySelector();
@@ -175,14 +178,14 @@ export class ResearchView extends ItemView {
         if (!this.propertySelect) return;
         const currentVal = this.filterKey;
         this.propertySelect.empty();
-        
+
         const sortedKeys = Array.from(this.allPropertyKeys).sort((a, b) => {
             if (a === "All Properties") return -1;
             if (b === "All Properties") return 1;
             return a.localeCompare(b);
         });
 
-        sortedKeys.forEach(key => {
+        sortedKeys.forEach((key) => {
             const opt = this.propertySelect.createEl("option", { text: key, value: key });
             if (key === currentVal) opt.selected = true;
         });
@@ -190,13 +193,13 @@ export class ResearchView extends ItemView {
 
     renderContent() {
         if (this.isScanning) return;
-        
+
         this.contentEl.empty();
 
         if (this.scanResults.length === 0) {
-            this.contentEl.createDiv({ 
-                cls: "research-empty", 
-                text: "No highlights found. Click 'Scan Vault' to analyze." 
+            this.contentEl.createDiv({
+                cls: "research-empty",
+                text: "No highlights found. Click 'Scan Vault' to analyze.",
             });
             return;
         }
@@ -214,21 +217,21 @@ export class ResearchView extends ItemView {
         // Apply property filter
         if (this.filterKey && this.filterKey !== "All Properties" && this.filterValue) {
             const filterVal = this.filterValue.toLowerCase().replace(/^#/, "");
-            allHighlights = allHighlights.filter(h => {
+            allHighlights = allHighlights.filter((h) => {
                 const val = h.frontmatter?.[this.filterKey];
                 if (val === undefined || val === null) return false;
 
                 // Handle Tags specifically
                 if (this.filterKey === "tags" || this.filterKey === "tag") {
                     if (Array.isArray(val)) {
-                        return val.some(t => String(t).toLowerCase().replace(/^#/, "").includes(filterVal));
+                        return val.some((t) => String(t).toLowerCase().replace(/^#/, "").includes(filterVal));
                     }
                     return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
                 }
 
                 // Handle Arrays
                 if (Array.isArray(val)) {
-                    return val.some(v => String(v).toLowerCase().includes(filterVal));
+                    return val.some((v) => String(v).toLowerCase().includes(filterVal));
                 }
 
                 // Default string match
@@ -238,14 +241,12 @@ export class ResearchView extends ItemView {
 
         // Apply search filter
         if (this.searchQuery) {
-            allHighlights = allHighlights.filter(h =>
-                h.text.toLowerCase().includes(this.searchQuery)
-            );
+            allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
         }
 
         // Apply color filter
         if (this.activeColors.size > 0) {
-            allHighlights = allHighlights.filter(h => {
+            allHighlights = allHighlights.filter((h) => {
                 if (!h.color) return false;
                 return this.activeColors.has(h.color.toLowerCase());
             });
@@ -273,25 +274,25 @@ export class ResearchView extends ItemView {
                 const groupEl = this.contentEl.createDiv({ cls: "research-group" });
 
                 const headerEl = groupEl.createDiv({ cls: "research-group-header" });
-                
+
                 const expandIcon = headerEl.createSpan({ cls: "research-expand-icon" });
                 expandIcon.innerHTML = "▼";
-                
+
                 headerEl.createSpan({ cls: "research-group-title", text: group.file.basename });
                 headerEl.createSpan({ cls: "research-group-badge", text: `${group.highlights.length}` });
 
                 const listEl = groupEl.createDiv({ cls: "research-highlight-list" });
-                
+
                 group.highlights.forEach((h) => {
                     const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
-                    
+
                     if (h.color) {
                         const dot = itemEl.createSpan({ cls: "research-color-dot" });
                         dot.style.backgroundColor = h.color;
                     }
 
                     itemEl.createSpan({ cls: "research-item-text", text: h.text });
-                    
+
                     itemEl.onclick = (e) => {
                         e.stopPropagation();
                         this.jumpToHighlight(group.file, h.line);
@@ -315,9 +316,7 @@ export class ResearchView extends ItemView {
                 }
 
                 // Highlight text (truncated for readability)
-                const displayText = h.text.length > 120
-                    ? h.text.substring(0, 120) + "..."
-                    : h.text;
+                const displayText = h.text.length > 120 ? h.text.substring(0, 120) + "..." : h.text;
                 itemEl.createSpan({ cls: "research-item-text", text: displayText });
 
                 // Source file badge
@@ -334,20 +333,20 @@ export class ResearchView extends ItemView {
 
     async jumpToHighlight(file, line) {
         // Open file in new leaf/tab OR current active
-        const leaf = this.app.workspace.getLeaf('tab');
+        const leaf = this.app.workspace.getLeaf("tab");
         await leaf.openFile(file);
-        
+
         if (leaf.view instanceof MarkdownView) {
-            leaf.setEphemeralState({ 
-                line: line, 
-                focus: true 
+            leaf.setEphemeralState({
+                line: line,
+                focus: true,
             });
         }
     }
 
     async exportToCanvas() {
         if (this.isScanning) return;
-        
+
         let allHighlights = [];
         for (const res of this.scanResults) {
             for (const h of res.highlights) {
@@ -357,19 +356,19 @@ export class ResearchView extends ItemView {
 
         if (this.filterKey && this.filterKey !== "All Properties" && this.filterValue) {
             const filterVal = this.filterValue.toLowerCase().replace(/^#/, "");
-            allHighlights = allHighlights.filter(h => {
+            allHighlights = allHighlights.filter((h) => {
                 const val = h.frontmatter?.[this.filterKey];
                 if (val === undefined || val === null) return false;
 
                 if (this.filterKey === "tags" || this.filterKey === "tag") {
                     if (Array.isArray(val)) {
-                        return val.some(t => String(t).toLowerCase().replace(/^#/, "").includes(filterVal));
+                        return val.some((t) => String(t).toLowerCase().replace(/^#/, "").includes(filterVal));
                     }
                     return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
                 }
 
                 if (Array.isArray(val)) {
-                    return val.some(v => String(v).toLowerCase().includes(filterVal));
+                    return val.some((v) => String(v).toLowerCase().includes(filterVal));
                 }
 
                 return String(val).toLowerCase().includes(filterVal);
@@ -377,13 +376,11 @@ export class ResearchView extends ItemView {
         }
 
         if (this.searchQuery) {
-            allHighlights = allHighlights.filter(h =>
-                h.text.toLowerCase().includes(this.searchQuery)
-            );
+            allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
         }
 
         if (this.activeColors.size > 0) {
-            allHighlights = allHighlights.filter(h => {
+            allHighlights = allHighlights.filter((h) => {
                 if (!h.color) return false;
                 return this.activeColors.has(h.color.toLowerCase());
             });
@@ -402,7 +399,7 @@ export class ResearchView extends ItemView {
             const exportPath = await exportHighlightsToCanvas(this.app, allHighlights);
             const file = this.app.vault.getAbstractFileByPath(exportPath);
             if (file) {
-                const leaf = this.app.workspace.getLeaf('tab');
+                const leaf = this.app.workspace.getLeaf("tab");
                 await leaf.openFile(file);
             }
         } catch (e) {

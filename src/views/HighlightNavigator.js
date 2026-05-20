@@ -1,5 +1,7 @@
-import { ItemView, MarkdownView, Platform } from "obsidian";
+import { ItemView, MarkdownView, Menu, Platform } from "obsidian";
 import { getHighlightsFromContent } from "../utils/export";
+import { HighlightEditModal } from "../modals/HighlightEditModal";
+import { BulkRecolorModal } from "../modals/BulkRecolorModal";
 
 export const HIGHLIGHT_NAVIGATOR_VIEW = "highlight-navigator";
 
@@ -43,13 +45,13 @@ export class HighlightNavigatorView extends ItemView {
         const modes = [
             { label: "Highlights", value: "highlights" },
             { label: "Footnotes", value: "footnotes" },
-            { label: "Both", value: "split" }
+            { label: "Both", value: "split" },
         ];
 
         modes.forEach((m) => {
             const btn = btnGroup.createEl("button", { text: m.label, cls: "nav-btn" });
             if (this.viewMode === m.value) btn.addClass("is-active");
-            
+
             btn.onclick = () => {
                 btnGroup.querySelectorAll(".nav-btn").forEach((el) => el.removeClass("is-active"));
                 btn.addClass("is-active");
@@ -60,10 +62,10 @@ export class HighlightNavigatorView extends ItemView {
 
         // Search Bar
         const searchContainer = container.createDiv({ cls: "highlight-navigator-search" });
-        const searchInput = searchContainer.createEl("input", { 
-            type: "text", 
+        const searchInput = searchContainer.createEl("input", {
+            type: "text",
             placeholder: "Search...",
-            cls: "nav-search-input"
+            cls: "nav-search-input",
         });
         searchInput.oninput = (e) => {
             this.searchQuery = e.target.value.toLowerCase();
@@ -79,12 +81,20 @@ export class HighlightNavigatorView extends ItemView {
 
         const exportBtn = footerBtnGroup.createEl("button", { text: "Export MD", cls: "mod-cta" });
         exportBtn.onclick = () => this.exportHighlights();
+        exportBtn.oncontextmenu = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.openExportMenu(e);
+        };
 
         const canvasBtn = footerBtnGroup.createEl("button", { text: "Canvas", cls: "mod-cta" });
         canvasBtn.onclick = () => this.exportCurrentFileToCanvas();
 
         const scanBtn = footerBtnGroup.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
         scanBtn.onclick = () => this.plugin.activateResearchView();
+
+        const bulkBtn = footerBtnGroup.createEl("button", { text: "Bulk", cls: "mod-cta" });
+        bulkBtn.onclick = (e) => this.openBulkMenu(e);
 
         // Register for file changes
         this.registerEvent(
@@ -142,7 +152,7 @@ export class HighlightNavigatorView extends ItemView {
                 footnotes.push({
                     id: match[1],
                     text: match[2].trim(),
-                    line: lineIdx
+                    line: lineIdx,
                 });
             }
         });
@@ -181,7 +191,7 @@ export class HighlightNavigatorView extends ItemView {
 
     renderList(container, items, type) {
         // Filter items based on search query
-        const filteredItems = items.filter(item => {
+        const filteredItems = items.filter((item) => {
             if (!this.searchQuery) return true;
             return item.text.toLowerCase().includes(this.searchQuery);
         });
@@ -197,7 +207,7 @@ export class HighlightNavigatorView extends ItemView {
 
         const title = type === "highlights" ? "Highlights" : "Footnotes";
         const stats = container.createDiv({ cls: "highlight-navigator-stats" });
-        
+
         let statsText = `${filteredItems.length} ${title.toLowerCase()}`;
         if (this.searchQuery && filteredItems.length !== items.length) {
             statsText += ` (filtered from ${items.length})`;
@@ -239,11 +249,29 @@ export class HighlightNavigatorView extends ItemView {
             el.appendChild(textSpan);
 
             if (type === "highlights") {
+                // Actions menu (hidden until hover on desktop; always available on mobile)
+                const menuBtn = document.createElement("button");
+                menuBtn.addClass("highlight-item-menu");
+                menuBtn.setAttribute("aria-label", "Highlight actions");
+                menuBtn.textContent = "⋯";
+                menuBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.openHighlightActionsMenu(item, e);
+                };
+                el.appendChild(menuBtn);
+
                 // Number badge
                 const numberBadge = document.createElement("span");
                 numberBadge.addClass("highlight-number");
                 numberBadge.textContent = `${index + 1}`;
                 el.appendChild(numberBadge);
+
+                el.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.openHighlightActionsMenu(item, e);
+                };
             }
 
             // Click to jump to line
@@ -259,12 +287,90 @@ export class HighlightNavigatorView extends ItemView {
         list.appendChild(fragment);
     }
 
+    openHighlightActionsMenu(item, event) {
+        if (!this.currentFile) return;
+
+        const menu = new Menu();
+        menu.addItem((mi) => {
+            mi.setTitle("Edit…")
+                .setIcon("pencil")
+                .onClick(() => {
+                    new HighlightEditModal(this.plugin, this.currentFile, item.id, () => {
+                        this.refresh(true);
+                    }).open();
+                });
+        });
+
+        menu.addSeparator();
+
+        menu.addItem((mi) => {
+            mi.setTitle("Remove all highlights (note)")
+                .setIcon("eraser")
+                .setWarning(true)
+                .onClick(() => {
+                    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                    if (!view || !view.file || view.file.path !== this.currentFile.path) {
+                        // Still allow removal even if user isn't in preview; operate on file directly.
+                        this.plugin.saveUndoState(this.currentFile).then(async () => {
+                            let raw = await this.app.vault.read(this.currentFile);
+                            raw = raw.replace(/==(.*?)==/gs, "$1");
+                            raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/gs, "$1");
+                            await this.app.vault.modify(this.currentFile, raw);
+                            this.refresh(true);
+                        });
+                        return;
+                    }
+                    this.plugin.removeAllHighlights(view);
+                    this.refresh(true);
+                });
+        });
+
+        menu.showAtMouseEvent(event);
+    }
+
+    openBulkMenu(event) {
+        if (!this.currentFile) return;
+
+        const menu = new Menu();
+        menu.addItem((mi) => {
+            mi.setTitle("Merge adjacent highlights (note)")
+                .setIcon("git-merge")
+                .onClick(async () => {
+                    await this.plugin.mergeAdjacentHighlightsInFile(this.currentFile);
+                    this.refresh(true);
+                });
+        });
+
+        menu.addItem((mi) => {
+            mi.setTitle("Recolor <mark> highlights (note)…")
+                .setIcon("palette")
+                .onClick(() => {
+                    new BulkRecolorModal(this.plugin, this.currentFile, () => {
+                        this.refresh(true);
+                    }).open();
+                });
+        });
+
+        menu.addSeparator();
+
+        menu.addItem((mi) => {
+            mi.setTitle("Migrate <span> highlights to <mark> (note)")
+                .setIcon("wand")
+                .onClick(async () => {
+                    await this.plugin.migrateSpanHighlightsInFile(this.currentFile);
+                    this.refresh(true);
+                });
+        });
+
+        menu.showAtMouseEvent(event);
+    }
+
     async jumpToLine(line) {
         const leaf = this.app.workspace.getMostRecentLeaf();
         if (leaf && leaf.view instanceof MarkdownView) {
-            leaf.setEphemeralState({ 
+            leaf.setEphemeralState({
                 line: line,
-                focus: true 
+                focus: true,
             });
         }
 
@@ -289,7 +395,58 @@ export class HighlightNavigatorView extends ItemView {
             // Open the exported file
             const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
             if (exportFile) {
-                await this.app.workspace.getLeaf('tab').openFile(exportFile);
+                await this.app.workspace.getLeaf("tab").openFile(exportFile);
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    openExportMenu(event) {
+        if (!this.currentFile) return;
+
+        const menu = new Menu();
+        menu.addItem((mi) => {
+            mi.setTitle("Export MD")
+                .setIcon("file-text")
+                .onClick(() => this.exportHighlights());
+        });
+        menu.addItem((mi) => {
+            mi.setTitle("Export JSON")
+                .setIcon("code")
+                .onClick(() => this.exportHighlightsJSON());
+        });
+        menu.addItem((mi) => {
+            mi.setTitle("Export CSV")
+                .setIcon("table")
+                .onClick(() => this.exportHighlightsCSV());
+        });
+
+        menu.showAtMouseEvent(event);
+    }
+
+    async exportHighlightsJSON() {
+        if (!this.currentFile) return;
+        try {
+            const { exportHighlightsToJSON } = await import("../utils/export");
+            const exportPath = await exportHighlightsToJSON(this.app, this.currentFile);
+            const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
+            if (exportFile) {
+                await this.app.workspace.getLeaf("tab").openFile(exportFile);
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    async exportHighlightsCSV() {
+        if (!this.currentFile) return;
+        try {
+            const { exportHighlightsToCSV } = await import("../utils/export");
+            const exportPath = await exportHighlightsToCSV(this.app, this.currentFile);
+            const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
+            if (exportFile) {
+                await this.app.workspace.getLeaf("tab").openFile(exportFile);
             }
         } catch (err) {
             console.error(err);
@@ -301,11 +458,11 @@ export class HighlightNavigatorView extends ItemView {
 
         try {
             const { exportHighlightsToCanvas } = await import("../utils/canvas");
-            
+
             // Map current highlights to the format expected by canvas util
-            const highlights = this.highlights.map(h => ({
+            const highlights = this.highlights.map((h) => ({
                 ...h,
-                file: this.currentFile
+                file: this.currentFile,
             }));
 
             if (highlights.length === 0) {
@@ -317,10 +474,10 @@ export class HighlightNavigatorView extends ItemView {
             const { Notice } = require("obsidian");
             new Notice("Generating Canvas...");
             const exportPath = await exportHighlightsToCanvas(this.app, highlights);
-            
+
             const file = this.app.vault.getAbstractFileByPath(exportPath);
             if (file) {
-                await this.app.workspace.getLeaf('tab').openFile(file);
+                await this.app.workspace.getLeaf("tab").openFile(file);
             }
         } catch (err) {
             console.error(err);

@@ -16,16 +16,16 @@ export class AnnotationModal extends Modal {
         this.modalEl.addClass("reading-highlighter-annotation-modal");
 
         // Add class to container to manage animations
-        if (this.containerEl) {
-            this.containerEl.addClass("reading-highlighter-modal-container");
+        const modalContainer = this.containerEl ?? this.modalEl?.closest?.(".modal-container");
+        if (modalContainer) {
+            modalContainer.classList.add("reading-highlighter-modal-container");
         }
-
 
         contentEl.createEl("h2", { text: "Add Annotation" });
 
         contentEl.createEl("p", {
             text: "Your comment will be added as a footnote at the bottom of the document.",
-            cls: "annotation-description"
+            cls: "annotation-description",
         });
 
         const textArea = new TextAreaComponent(contentEl);

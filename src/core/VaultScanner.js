@@ -15,16 +15,16 @@ export class VaultScanner {
         const files = this.app.vault.getMarkdownFiles();
         const total = files.length;
         const results = [];
-        
+
         // Batch configuration to avoid blocking UI
         const BATCH_SIZE = 20;
 
         for (let i = 0; i < total; i += BATCH_SIZE) {
             const batch = files.slice(i, i + BATCH_SIZE);
-            
+
             const batchPromises = batch.map(async (file) => {
                 const stat = file.stat;
-                
+
                 // Check cache
                 const cached = this.cache.get(file.path);
                 if (cached && cached.mtime === stat.mtime) {
@@ -36,19 +36,19 @@ export class VaultScanner {
                 const highlights = getHighlightsFromContent(content);
                 const metadata = this.app.metadataCache.getFileCache(file);
                 const frontmatter = metadata?.frontmatter || {};
-                
+
                 // Update cache
                 this.cache.set(file.path, {
                     mtime: stat.mtime,
                     highlights: highlights,
-                    frontmatter: frontmatter
+                    frontmatter: frontmatter,
                 });
 
                 return { file, highlights, frontmatter };
             });
 
             const batchResults = await Promise.all(batchPromises);
-            
+
             for (const res of batchResults) {
                 if (res.highlights.length > 0) {
                     results.push(res);
@@ -61,12 +61,12 @@ export class VaultScanner {
             onProgress(current, total, lastFileName);
 
             // Yield to main thread
-            await new Promise(resolve => setTimeout(resolve, 0));
+            await new Promise((resolve) => setTimeout(resolve, 0));
         }
 
         // Sort results by file name
         results.sort((a, b) => a.file.basename.localeCompare(b.file.basename));
-        
+
         return results;
     }
 

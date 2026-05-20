@@ -3,9 +3,7 @@
  */
 
 export function getScroll(view) {
-    return typeof view.previewMode?.getScroll === "function"
-        ? view.previewMode.getScroll()
-        : getFallbackScroll(view);
+    return typeof view.previewMode?.getScroll === "function" ? view.previewMode.getScroll() : getFallbackScroll(view);
 }
 
 export function applyScroll(view, pos) {

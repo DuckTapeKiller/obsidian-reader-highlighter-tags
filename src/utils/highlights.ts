@@ -1,12 +1,78 @@
-function escapeRegex(text) {
+export type HighlightType = "markdown" | "html";
+export type FootnotePlacement = "after" | "inside";
+
+export interface Highlight {
+    id: string;
+    text: string;
+    line: number;
+    type: HighlightType;
+    color?: string | null;
+    start: number;
+    end: number;
+    innerStart: number;
+    innerEnd: number;
+    openTagStart: number;
+    openTagEnd: number;
+    closeTagStart: number;
+    closeTagEnd: number;
+    openTag?: string;
+    tagsText: string;
+    tagsStart: number | null;
+    tagsEnd: number | null;
+    footnoteId: string | null;
+    footnoteStart: number | null;
+    footnoteEnd: number | null;
+    footnotePlacement: FootnotePlacement | null;
+    annotation: string;
+}
+
+export interface Footnote {
+    id: string;
+    text: string;
+    line: number;
+    start: number;
+    end: number;
+}
+
+export interface ParsedHighlights {
+    highlights: Highlight[];
+    footnotes: Map<string, Footnote>;
+}
+
+interface StyleAttr {
+    quote: string;
+    value: string;
+    index: number;
+    length: number;
+}
+
+interface TagsRange {
+    tagsText: string;
+    tagsStart: number | null;
+    tagsEnd: number | null;
+}
+
+interface FootnoteInfo {
+    id: string;
+    start: number;
+    end: number;
+    placement: FootnotePlacement;
+}
+
+interface Deletion {
+    start: number;
+    end: number;
+}
+
+function escapeRegex(text: string): string {
     return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function detectNewline(raw) {
+function detectNewline(raw: string): string {
     return raw.includes("\r\n") ? "\r\n" : "\n";
 }
 
-function extractStyleAttribute(openTag) {
+function extractStyleAttribute(openTag: string): StyleAttr | null {
     const styleMatch = openTag.match(/\sstyle=(["'])([\s\S]*?)\1/i);
     if (!styleMatch) return null;
     return {
@@ -17,7 +83,7 @@ function extractStyleAttribute(openTag) {
     };
 }
 
-function extractBackgroundFromStyle(styleValue) {
+function extractBackgroundFromStyle(styleValue: string | null | undefined): string | null {
     if (!styleValue) return null;
     const parts = styleValue
         .split(";")
@@ -35,7 +101,7 @@ function extractBackgroundFromStyle(styleValue) {
     return null;
 }
 
-function normalizeTagsText(tagsText) {
+function normalizeTagsText(tagsText: string): string {
     const tokens = String(tagsText || "")
         .split(/\s+/)
         .map((token) => token.trim())
@@ -47,10 +113,10 @@ function normalizeTagsText(tagsText) {
     return cleaned.join(" ");
 }
 
-export function parseFootnotes(raw) {
+export function parseFootnotes(raw: string): Map<string, Footnote> {
     const newline = detectNewline(raw);
     const lines = raw.split(/\r?\n/);
-    const results = new Map();
+    const results = new Map<string, Footnote>();
     let offset = 0;
 
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
@@ -71,10 +137,10 @@ export function parseFootnotes(raw) {
     return results;
 }
 
-export function parseHighlights(raw) {
+export function parseHighlights(raw: string): ParsedHighlights {
     const newline = detectNewline(raw);
     const footnotes = parseFootnotes(raw);
-    const highlights = [];
+    const highlights: Highlight[] = [];
 
     const lines = raw.split(/\r?\n/);
     let lineOffset = 0;
@@ -86,7 +152,7 @@ export function parseHighlights(raw) {
         const markdownPattern = /==(.*?)==/g;
         const htmlPattern = /<mark\b[^>]*>(.*?)<\/mark>/gi;
 
-        let match;
+        let match: RegExpExecArray | null;
         while ((match = markdownPattern.exec(line)) !== null) {
             const start = lineOffset + match.index;
             const end = start + match[0].length;
@@ -190,7 +256,7 @@ export function parseHighlights(raw) {
     return { highlights, footnotes };
 }
 
-function extractLeadingTagsRange(line, lineOffset, wrapperStartInLine) {
+function extractLeadingTagsRange(line: string, lineOffset: number, wrapperStartInLine: number): TagsRange {
     if (wrapperStartInLine <= 0) return { tagsText: "", tagsStart: null, tagsEnd: null };
     const before = line.slice(0, wrapperStartInLine);
 
@@ -219,7 +285,19 @@ function extractLeadingTagsRange(line, lineOffset, wrapperStartInLine) {
     };
 }
 
-function detectFootnoteForHighlight({ line, lineOffset, wrapperEndInLine, innerText, innerStart }) {
+function detectFootnoteForHighlight({
+    line,
+    lineOffset,
+    wrapperEndInLine,
+    innerText,
+    innerStart,
+}: {
+    line: string;
+    lineOffset: number;
+    wrapperEndInLine: number;
+    innerText: string;
+    innerStart: number;
+}): FootnoteInfo | null {
     const after = line.slice(wrapperEndInLine);
     const afterMatch = after.match(/^\[\^([^\]]+)\]/);
     if (afterMatch) {
@@ -247,11 +325,11 @@ function detectFootnoteForHighlight({ line, lineOffset, wrapperEndInLine, innerT
     };
 }
 
-export function findHighlightById(parsed, id) {
+export function findHighlightById(parsed: ParsedHighlights, id: string): Highlight | null {
     return parsed.highlights.find((h) => h.id === id) || null;
 }
 
-export function removeHighlightFromRaw(raw, highlight) {
+export function removeHighlightFromRaw(raw: string, highlight: Highlight | null): string {
     if (!highlight) return raw;
     const before = raw.slice(0, highlight.openTagStart);
     const inner = raw.slice(highlight.innerStart, highlight.innerEnd);
@@ -259,7 +337,7 @@ export function removeHighlightFromRaw(raw, highlight) {
     return before + inner + after;
 }
 
-export function updateHighlightTagsInRaw(raw, highlight, newTagsText) {
+export function updateHighlightTagsInRaw(raw: string, highlight: Highlight | null, newTagsText: string): string {
     if (!highlight) return raw;
     const normalized = normalizeTagsText(newTagsText);
     const replacement = normalized ? `${normalized} ` : "";
@@ -273,7 +351,7 @@ export function updateHighlightTagsInRaw(raw, highlight, newTagsText) {
     return raw.slice(0, highlight.openTagStart) + replacement + raw.slice(highlight.openTagStart);
 }
 
-function buildUpdatedOpenTag(openTag, newColor) {
+function buildUpdatedOpenTag(openTag: string, newColor: string): string {
     const styleAttr = extractStyleAttribute(openTag);
     if (!styleAttr) {
         return openTag.replace(/^<mark\b/i, `<mark style="background: ${newColor}; color: black;"`);
@@ -284,7 +362,7 @@ function buildUpdatedOpenTag(openTag, newColor) {
         .split(";")
         .map((part) => part.trim())
         .filter(Boolean);
-    let updated = [];
+    const updated: string[] = [];
     let replaced = false;
 
     for (const decl of decls) {
@@ -314,7 +392,7 @@ function buildUpdatedOpenTag(openTag, newColor) {
     return openTag.replace(/\sstyle=(["'])([\s\S]*?)\1/i, ` style=${quoted}`);
 }
 
-export function updateHighlightColorInRaw(raw, highlight, newColor) {
+export function updateHighlightColorInRaw(raw: string, highlight: Highlight | null, newColor: string): string {
     if (!highlight) return raw;
     if (!newColor) return raw;
 
@@ -330,10 +408,10 @@ export function updateHighlightColorInRaw(raw, highlight, newColor) {
     return raw.slice(0, highlight.openTagStart) + replacement + raw.slice(highlight.closeTagEnd);
 }
 
-function nextNumericFootnoteId(raw) {
+function nextNumericFootnoteId(raw: string): string {
     const pattern = /\[\^(\d+)\]/g;
     let maxNumber = 0;
-    let match;
+    let match: RegExpExecArray | null;
     while ((match = pattern.exec(raw)) !== null) {
         const num = parseInt(match[1]);
         if (num > maxNumber) maxNumber = num;
@@ -341,13 +419,17 @@ function nextNumericFootnoteId(raw) {
     return String(maxNumber + 1);
 }
 
-function countFootnoteRefs(raw, footnoteId) {
+function countFootnoteRefs(raw: string, footnoteId: string): number {
     const re = new RegExp(`\\[\\^${escapeRegex(footnoteId)}\\]`, "g");
     const matches = raw.match(re);
     return matches ? matches.length : 0;
 }
 
-export function updateHighlightAnnotationInRaw(raw, highlight, newAnnotationText) {
+export function updateHighlightAnnotationInRaw(
+    raw: string,
+    highlight: Highlight | null,
+    newAnnotationText: string
+): string {
     if (!highlight) return raw;
     const annotation = String(newAnnotationText ?? "").trim();
     const newline = detectNewline(raw);
@@ -423,7 +505,7 @@ export function updateHighlightAnnotationInRaw(raw, highlight, newAnnotationText
  * removing a highlight, but for standalone annotations that are not attached to
  * a `==`/`<mark>` wrapper (those created via "Add annotation to selection").
  */
-export function removeFootnoteFromRaw(raw, footnoteId) {
+export function removeFootnoteFromRaw(raw: string, footnoteId: string): { raw: string; changed: boolean } {
     let updated = String(raw ?? "");
     const id = String(footnoteId ?? "").trim();
     if (!id) return { raw: updated, changed: false };
@@ -465,7 +547,7 @@ export function removeFootnoteFromRaw(raw, footnoteId) {
  * Remove every footnote annotation in the note (references + definitions).
  * Returns the rewritten raw text and how many distinct footnotes were removed.
  */
-export function removeAllFootnotesFromRaw(raw) {
+export function removeAllFootnotesFromRaw(raw: string): { raw: string; removedCount: number } {
     let updated = String(raw ?? "");
     const ids = [...parseFootnotes(updated).keys()];
     let removedCount = 0;
@@ -481,7 +563,7 @@ export function removeAllFootnotesFromRaw(raw) {
     return { raw: updated, removedCount };
 }
 
-function applyDeletions(raw, deletions) {
+function applyDeletions(raw: string, deletions: Deletion[]): string {
     const ranges = (deletions || [])
         .filter((r) => r && Number.isInteger(r.start) && Number.isInteger(r.end) && r.end > r.start)
         .sort((a, b) => b.start - a.start);
@@ -493,7 +575,7 @@ function applyDeletions(raw, deletions) {
     return updated;
 }
 
-export function mergeAdjacentHighlightsInRaw(raw) {
+export function mergeAdjacentHighlightsInRaw(raw: string): { raw: string; mergedCount: number } {
     let updated = String(raw ?? "");
     let mergedCount = 0;
     let passes = 0;
@@ -502,7 +584,7 @@ export function mergeAdjacentHighlightsInRaw(raw) {
         passes++;
         const parsed = parseHighlights(updated);
         const highlights = parsed.highlights;
-        const deletions = [];
+        const deletions: Deletion[] = [];
         let mergedThisPass = 0;
 
         for (let i = 0; i < highlights.length - 1; i++) {
@@ -537,7 +619,10 @@ export function mergeAdjacentHighlightsInRaw(raw) {
     return { raw: updated, mergedCount };
 }
 
-export function recolorMarkHighlightsInRaw(raw, { fromColor = "", toColor = "" } = {}) {
+export function recolorMarkHighlightsInRaw(
+    raw: string,
+    { fromColor = "", toColor = "" }: { fromColor?: string; toColor?: string } = {}
+): { raw: string; changedCount: number } {
     let updated = String(raw ?? "");
     const targetColor = String(toColor || "").trim();
     if (!targetColor) {
@@ -570,14 +655,14 @@ export function recolorMarkHighlightsInRaw(raw, { fromColor = "", toColor = "" }
     return { raw: updated, changedCount };
 }
 
-export function migrateSpanHighlightsInRaw(raw) {
+export function migrateSpanHighlightsInRaw(raw: string): { raw: string; changedCount: number } {
     let updated = String(raw ?? "");
     let changedCount = 0;
 
     // Convert <span style="background...">...</span> into <mark style="background...">...</mark>
     // This is intentionally conservative: only spans with a background/background-color declaration are migrated.
     const spanRe = /<span\b([^>]*)>([\s\S]*?)<\/span>/gi;
-    updated = updated.replace(spanRe, (full, attrs, inner) => {
+    updated = updated.replace(spanRe, (full, attrs: string, inner: string) => {
         const styleMatch = String(attrs || "").match(/\sstyle=(["'])([\s\S]*?)\1/i);
         if (!styleMatch) return full;
         const background = extractBackgroundFromStyle(styleMatch[2]);

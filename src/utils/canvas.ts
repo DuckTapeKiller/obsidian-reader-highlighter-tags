@@ -2,27 +2,52 @@
  * Generates an Obsidian Canvas from an array of highlights.
  * Grouped visually by file.
  */
+import { App, TFile } from "obsidian";
+import type { Highlight } from "./highlights";
+import { formatDate } from "./time";
 
-function generateId() {
+export type HighlightWithFile = Highlight & { file: TFile };
+
+interface CanvasNode {
+    id: string;
+    type: "file" | "text";
+    file?: string;
+    text?: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    color: string;
+}
+
+interface CanvasEdge {
+    id: string;
+    fromNode: string;
+    fromSide: string;
+    toNode: string;
+    toSide: string;
+}
+
+function generateId(): string {
     return Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12);
 }
 
-export async function exportHighlightsToCanvas(app, allHighlights) {
+export async function exportHighlightsToCanvas(app: App, allHighlights: HighlightWithFile[]): Promise<string> {
     if (!allHighlights || allHighlights.length === 0) {
         throw new Error("No highlights to export.");
     }
 
     // Group highlights by file path
-    const groups = new Map();
+    const groups = new Map<string, { file: TFile; highlights: HighlightWithFile[] }>();
     for (const h of allHighlights) {
         if (!groups.has(h.file.path)) {
             groups.set(h.file.path, { file: h.file, highlights: [] });
         }
-        groups.get(h.file.path).highlights.push(h);
+        groups.get(h.file.path)!.highlights.push(h);
     }
 
-    const nodes = [];
-    const edges = [];
+    const nodes: CanvasNode[] = [];
+    const edges: CanvasEdge[] = [];
 
     let columnIndex = 0;
     const COLUMN_WIDTH = 500;
@@ -55,7 +80,7 @@ export async function exportHighlightsToCanvas(app, allHighlights) {
             // Canvas colors: 1:red, 2:orange, 3:yellow, 4:green, 5:cyan, 6:purple
             let canvasColor = "";
             if (h.color) {
-                const colorMap = {
+                const colorMap: Record<string, string> = {
                     "#ffcdd2": "1",
                     "#f8bbd0": "6",
                     "#e1bee7": "6",
@@ -107,8 +132,8 @@ export async function exportHighlightsToCanvas(app, allHighlights) {
     };
 
     // Generate filename
-    const date = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
-    let exportPath = `Research Canvas ${date}.canvas`;
+    const date = formatDate("YYYYMMDD-HHmmss");
+    const exportPath = `Research Canvas ${date}.canvas`;
 
     await app.vault.create(exportPath, JSON.stringify(canvasData, null, 2));
 

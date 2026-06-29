@@ -1,11 +1,14 @@
-import { Modal, TextAreaComponent } from "obsidian";
+import { App, Modal, TextAreaComponent } from "obsidian";
 
 /**
  * Modal for adding annotations/comments to highlighted text.
- * Comments are added as footnotes at the bottom of the activeDocument.
+ * Comments are added as footnotes at the bottom of the document.
  */
 export class AnnotationModal extends Modal {
-    constructor(app, onSubmit) {
+    onSubmit: (comment: string) => void | Promise<void>;
+    comment: string;
+
+    constructor(app: App, onSubmit: (comment: string) => void | Promise<void>) {
         super(app);
         this.onSubmit = onSubmit;
         this.comment = "";
@@ -24,7 +27,7 @@ export class AnnotationModal extends Modal {
         contentEl.createEl("h2", { text: "Add Annotation" });
 
         contentEl.createEl("p", {
-            text: "Your comment will be added as a footnote at the bottom of the activeDocument.",
+            text: "Your comment will be added as a footnote at the bottom of the document.",
             cls: "annotation-description",
         });
 
@@ -58,7 +61,7 @@ export class AnnotationModal extends Modal {
 
     submit() {
         if (this.comment.trim()) {
-            this.onSubmit(this.comment.trim());
+            void this.onSubmit(this.comment.trim());
         }
         this.close();
     }

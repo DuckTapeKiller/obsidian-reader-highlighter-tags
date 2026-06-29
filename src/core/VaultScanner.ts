@@ -1,20 +1,37 @@
+import { App, TFile } from "obsidian";
 import { getHighlightsFromContent } from "../utils/export";
+import type { Highlight } from "../utils/highlights";
+
+export interface ScanResult {
+    file: TFile;
+    highlights: Highlight[];
+    frontmatter: Record<string, unknown>;
+}
+
+interface CacheEntry {
+    mtime: number;
+    highlights: Highlight[];
+    frontmatter: Record<string, unknown>;
+}
+
+type ProgressCallback = (current: number, total: number, filename: string) => void;
 
 export class VaultScanner {
-    constructor(app) {
+    app: App;
+    cache: Map<string, CacheEntry>;
+
+    constructor(app: App) {
         this.app = app;
-        this.cache = new Map(); // path -> { mtime, highlights }
+        this.cache = new Map();
     }
 
     /**
      * Scans the entire vault for highlights asynchronously.
-     * @param {function} onProgress - Callback with signatures (current, total, filename)
-     * @returns {Promise<Array>} Array of { file: TFile, highlights: Array }
      */
-    async scanVault(onProgress = () => {}) {
+    async scanVault(onProgress: ProgressCallback = () => {}): Promise<ScanResult[]> {
         const files = this.app.vault.getMarkdownFiles();
         const total = files.length;
-        const results = [];
+        const results: ScanResult[] = [];
 
         // Batch configuration to avoid blocking UI
         const BATCH_SIZE = 20;
@@ -22,7 +39,7 @@ export class VaultScanner {
         for (let i = 0; i < total; i += BATCH_SIZE) {
             const batch = files.slice(i, i + BATCH_SIZE);
 
-            const batchPromises = batch.map(async (file) => {
+            const batchPromises = batch.map(async (file): Promise<ScanResult> => {
                 const stat = file.stat;
 
                 // Check cache
@@ -35,7 +52,7 @@ export class VaultScanner {
                 const content = await this.app.vault.cachedRead(file);
                 const highlights = getHighlightsFromContent(content);
                 const metadata = this.app.metadataCache.getFileCache(file);
-                const frontmatter = metadata?.frontmatter || {};
+                const frontmatter = (metadata?.frontmatter as Record<string, unknown>) || {};
 
                 // Update cache
                 this.cache.set(file.path, {
@@ -73,7 +90,7 @@ export class VaultScanner {
     /**
      * Clear the cache to force a full re-scan
      */
-    clearCache() {
+    clearCache(): void {
         this.cache.clear();
     }
 }

@@ -1,16 +1,47 @@
-import { ItemView, MarkdownView, Menu, Notice, Platform } from "obsidian";
+import {
+    ItemView,
+    MarkdownView,
+    Menu,
+    MenuItem,
+    Notice,
+    Platform,
+    WorkspaceLeaf,
+    TFile,
+    TAbstractFile,
+} from "obsidian";
+import type ReadingHighlighterPlugin from "../main";
 import { getHighlightsFromContent } from "../utils/export";
+import type { Highlight } from "../utils/highlights";
+import type { HighlightWithFile } from "../utils/canvas";
 import { HighlightEditModal } from "../modals/HighlightEditModal";
 import { BulkRecolorModal } from "../modals/BulkRecolorModal";
 
 export const HIGHLIGHT_NAVIGATOR_VIEW = "highlight-navigator";
 
+interface NavFootnote {
+    id: string;
+    text: string;
+    line: number;
+    displayNumber: number | null;
+    refLine: number;
+}
+
+type NavItem = Highlight | NavFootnote;
+type ListType = "highlights" | "footnotes";
+
 /**
- * Enhanced Sidebar view that displays all highlights and footnotes in the current activeDocument.
+ * Enhanced Sidebar view that displays all highlights and footnotes in the current document.
  * Includes tabbed switching and split views for premium navigator experience.
  */
 export class HighlightNavigatorView extends ItemView {
-    constructor(leaf, plugin) {
+    plugin: ReadingHighlighterPlugin;
+    highlights: Highlight[];
+    footnotes: NavFootnote[];
+    currentFile: TFile | null;
+    viewMode: string;
+    searchQuery: string;
+
+    constructor(leaf: WorkspaceLeaf, plugin: ReadingHighlighterPlugin) {
         super(leaf);
         this.plugin = plugin;
         this.highlights = [];
@@ -33,7 +64,7 @@ export class HighlightNavigatorView extends ItemView {
     }
 
     async onOpen() {
-        const container = this.containerEl.children[1];
+        const container = this.containerEl.children[1] as HTMLElement;
         container.empty();
         container.addClass("highlight-navigator-container");
 
@@ -68,7 +99,7 @@ export class HighlightNavigatorView extends ItemView {
             cls: "nav-search-input",
         });
         searchInput.oninput = (e) => {
-            this.searchQuery = e.target.value.toLowerCase();
+            this.searchQuery = (e.target as HTMLInputElement).value.toLowerCase();
             this.renderContent();
         };
 
@@ -80,7 +111,7 @@ export class HighlightNavigatorView extends ItemView {
         const footerBtnGroup = footer.createDiv({ cls: "highlight-navigator-footer-buttons" });
 
         const exportBtn = footerBtnGroup.createEl("button", { text: "Export MD", cls: "mod-cta" });
-        exportBtn.onclick = () => this.exportHighlights();
+        exportBtn.onclick = () => void this.exportHighlights();
         exportBtn.oncontextmenu = (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -88,10 +119,10 @@ export class HighlightNavigatorView extends ItemView {
         };
 
         const canvasBtn = footerBtnGroup.createEl("button", { text: "Canvas", cls: "mod-cta" });
-        canvasBtn.onclick = () => this.exportCurrentFileToCanvas();
+        canvasBtn.onclick = () => void this.exportCurrentFileToCanvas();
 
         const scanBtn = footerBtnGroup.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
-        scanBtn.onclick = () => this.plugin.activateResearchView();
+        scanBtn.onclick = () => void this.plugin.activateResearchView();
 
         const bulkBtn = footerBtnGroup.createEl("button", { text: "Bulk", cls: "mod-cta" });
         bulkBtn.onclick = (e) => this.openBulkMenu(e);
@@ -99,23 +130,23 @@ export class HighlightNavigatorView extends ItemView {
         // Register for file changes
         this.registerEvent(
             this.app.workspace.on("active-leaf-change", () => {
-                this.refresh();
+                void this.refresh();
             })
         );
 
         this.registerEvent(
-            this.app.vault.on("modify", (file) => {
+            this.app.vault.on("modify", (file: TAbstractFile) => {
                 if (this.currentFile && file.path === this.currentFile.path) {
-                    this.refresh(true);
+                    void this.refresh(true);
                 }
             })
         );
 
-        this.refresh();
+        void this.refresh();
     }
 
     async refresh(force = false) {
-        let targetFile;
+        let targetFile: TFile | null;
 
         if (force) {
             // Forced refresh (after an edit/removal, or on a modify event):
@@ -156,12 +187,12 @@ export class HighlightNavigatorView extends ItemView {
         }
     }
 
-    getFootnotesFromContent(raw) {
+    getFootnotesFromContent(raw: string): NavFootnote[] {
         const lines = raw.split("\n");
 
         // Pass 1: collect definitions `[^id]: text` (one per line).
-        const definitions = [];
-        const definedIds = new Set();
+        const definitions: { id: string; text: string; line: number }[] = [];
+        const definedIds = new Set<string>();
         lines.forEach((line, lineIdx) => {
             const match = line.match(/^\s*\[\^([^\]]+)\]:\s*(.+)$/);
             if (match) {
@@ -178,12 +209,12 @@ export class HighlightNavigatorView extends ItemView {
         // record the first reference line as the jump target, since the
         // reference lives in the body and scrolls reliably (the definition
         // section at the bottom is not line-addressable in Reading View).
-        const displayNumberById = new Map();
-        const refLineById = new Map();
+        const displayNumberById = new Map<string, number>();
+        const refLineById = new Map<string, number>();
         let nextNumber = 1;
         lines.forEach((line, lineIdx) => {
             const refRe = /\[\^([^\]]+)\](?!:)/g;
-            let m;
+            let m: RegExpExecArray | null;
             while ((m = refRe.exec(line)) !== null) {
                 const id = m[1];
                 if (!definedIds.has(id)) continue;
@@ -192,10 +223,10 @@ export class HighlightNavigatorView extends ItemView {
             }
         });
 
-        let footnotes = definitions.map((def) => ({
+        let footnotes: NavFootnote[] = definitions.map((def) => ({
             ...def,
-            displayNumber: displayNumberById.has(def.id) ? displayNumberById.get(def.id) : null,
-            refLine: refLineById.has(def.id) ? refLineById.get(def.id) : def.line,
+            displayNumber: displayNumberById.has(def.id) ? (displayNumberById.get(def.id) as number) : null,
+            refLine: refLineById.has(def.id) ? (refLineById.get(def.id) as number) : def.line,
         }));
 
         // Orphan handling is SCOPED, so normal notes are never affected.
@@ -223,12 +254,12 @@ export class HighlightNavigatorView extends ItemView {
         return footnotes;
     }
 
-    showEmpty(message, container = this.contentEl) {
+    showEmpty(message: string, container: HTMLElement = this.contentEl) {
         container.empty();
         container.createDiv({ cls: "highlight-navigator-empty", text: message });
     }
 
-    stripMarkdown(text) {
+    stripMarkdown(text: string): string {
         if (!text) return "";
         return text
             .replace(/\[\[(?:[^\]|]+\|)?([^\]]+)\]\]/g, "$1") // [[Link]] or [[Link|Alias]] -> Link/Alias
@@ -253,7 +284,7 @@ export class HighlightNavigatorView extends ItemView {
         }
     }
 
-    renderList(container, items, type) {
+    renderList(container: HTMLElement, items: NavItem[], type: ListType) {
         // Filter items based on search query
         const filteredItems = items.filter((item) => {
             if (!this.searchQuery) return true;
@@ -286,11 +317,12 @@ export class HighlightNavigatorView extends ItemView {
             el.addClass("highlight-navigator-item");
 
             if (type === "highlights") {
+                const highlight = item as Highlight;
                 // Color indicator
-                if (item.color) {
+                if (highlight.color) {
                     const colorDot = activeDocument.createElement("span");
                     colorDot.addClass("highlight-color-dot");
-                    colorDot.setCssStyles({ backgroundColor: item.color });
+                    colorDot.setCssStyles({ backgroundColor: highlight.color });
                     el.appendChild(colorDot);
                 } else {
                     const colorDot = activeDocument.createElement("span");
@@ -298,6 +330,7 @@ export class HighlightNavigatorView extends ItemView {
                     el.appendChild(colorDot);
                 }
             } else {
+                const footnote = item as NavFootnote;
                 // Footnote indicator: show the number Obsidian renders in
                 // Reading View (sequential by first appearance), not the literal
                 // id — those differ for out-of-order names (e.g. Wikipedia
@@ -305,8 +338,9 @@ export class HighlightNavigatorView extends ItemView {
                 // definitions have no rendered number, so fall back to `[^id]`.
                 const idSpan = activeDocument.createElement("span");
                 idSpan.addClass("footnote-id");
-                idSpan.textContent = item.displayNumber != null ? `${item.displayNumber} ` : `[^${item.id}] `;
-                idSpan.setAttribute("title", `[^${item.id}]`);
+                idSpan.textContent =
+                    footnote.displayNumber != null ? `${footnote.displayNumber} ` : `[^${footnote.id}] `;
+                idSpan.setAttribute("title", `[^${footnote.id}]`);
                 idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
                 el.appendChild(idSpan);
             }
@@ -318,11 +352,11 @@ export class HighlightNavigatorView extends ItemView {
 
             // Actions menu (hidden until hover on desktop; always available on mobile).
             // Available for both highlights and footnote annotations.
-            const openMenu = (e) => {
+            const openMenu = (e: MouseEvent) => {
                 if (type === "highlights") {
-                    this.openHighlightActionsMenu(item, e);
+                    this.openHighlightActionsMenu(item as Highlight, e);
                 } else {
-                    this.openFootnoteActionsMenu(item, e);
+                    this.openFootnoteActionsMenu(item as NavFootnote, e);
                 }
             };
 
@@ -358,9 +392,9 @@ export class HighlightNavigatorView extends ItemView {
                 e.preventDefault();
                 e.stopPropagation();
                 if (type === "footnotes") {
-                    this.jumpToFootnote(item);
+                    void this.jumpToFootnote(item as NavFootnote);
                 } else {
-                    this.jumpToLine(item.line);
+                    void this.jumpToLine((item as Highlight).line);
                 }
             };
 
@@ -370,7 +404,7 @@ export class HighlightNavigatorView extends ItemView {
         list.appendChild(fragment);
     }
 
-    async copyItemText(item) {
+    async copyItemText(item: NavItem) {
         const text = (item?.text ?? "").trim();
         if (!text) {
             new Notice("Nothing to copy.");
@@ -380,41 +414,42 @@ export class HighlightNavigatorView extends ItemView {
         new Notice(ok ? "Copied to clipboard." : "Failed to copy.");
     }
 
-    openHighlightActionsMenu(item, event) {
-        if (!this.currentFile) return;
+    openHighlightActionsMenu(item: Highlight, event: MouseEvent) {
+        const currentFile = this.currentFile;
+        if (!currentFile) return;
 
         const menu = new Menu();
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Copy")
                 .setIcon("copy")
-                .onClick(() => this.copyItemText(item));
+                .onClick(() => void this.copyItemText(item));
         });
 
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Edit…")
                 .setIcon("pencil")
                 .onClick(() => {
-                    new HighlightEditModal(this.plugin, this.currentFile, item.id, () => {
-                        this.refresh(true);
+                    new HighlightEditModal(this.plugin, currentFile, item.id, () => {
+                        void this.refresh(true);
                     }).open();
                 });
         });
 
         menu.addSeparator();
 
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Remove all highlights (note)")
                 .setIcon("eraser")
                 .setWarning(true)
                 .onClick(async () => {
                     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                    if (!view || !view.file || view.file.path !== this.currentFile.path) {
+                    if (!view || !view.file || view.file.path !== currentFile.path) {
                         // Still allow removal even if user isn't in preview; operate on file directly.
-                        await this.plugin.saveUndoState(this.currentFile);
-                        let raw = await this.app.vault.read(this.currentFile);
+                        await this.plugin.saveUndoState(currentFile);
+                        let raw = await this.app.vault.read(currentFile);
                         raw = raw.replace(/==(.*?)==/gs, "$1");
                         raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/gs, "$1");
-                        await this.app.vault.modify(this.currentFile, raw);
+                        await this.app.vault.modify(currentFile, raw);
                         await this.refresh(true);
                         return;
                     }
@@ -426,36 +461,37 @@ export class HighlightNavigatorView extends ItemView {
         menu.showAtMouseEvent(event);
     }
 
-    openFootnoteActionsMenu(item, event) {
-        if (!this.currentFile) return;
+    openFootnoteActionsMenu(item: NavFootnote, event: MouseEvent) {
+        const currentFile = this.currentFile;
+        if (!currentFile) return;
 
         const menu = new Menu();
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Copy")
                 .setIcon("copy")
-                .onClick(() => this.copyItemText(item));
+                .onClick(() => void this.copyItemText(item));
         });
 
         menu.addSeparator();
 
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Remove annotation")
                 .setIcon("trash-2")
                 .setWarning(true)
                 .onClick(async () => {
-                    await this.plugin.removeAnnotationById(this.currentFile, item.id);
+                    await this.plugin.removeAnnotationById(currentFile, item.id);
                     await this.refresh(true);
                 });
         });
 
         menu.addSeparator();
 
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Remove all annotations (note)")
                 .setIcon("eraser")
                 .setWarning(true)
                 .onClick(async () => {
-                    await this.plugin.removeAllAnnotations(this.currentFile);
+                    await this.plugin.removeAllAnnotations(currentFile);
                     await this.refresh(true);
                 });
         });
@@ -463,44 +499,45 @@ export class HighlightNavigatorView extends ItemView {
         menu.showAtMouseEvent(event);
     }
 
-    openBulkMenu(event) {
-        if (!this.currentFile) return;
+    openBulkMenu(event: MouseEvent) {
+        const currentFile = this.currentFile;
+        if (!currentFile) return;
 
         const menu = new Menu();
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Merge adjacent highlights (note)")
                 .setIcon("git-merge")
                 .onClick(async () => {
-                    await this.plugin.mergeAdjacentHighlightsInFile(this.currentFile);
-                    this.refresh(true);
+                    await this.plugin.mergeAdjacentHighlightsInFile(currentFile);
+                    void this.refresh(true);
                 });
         });
 
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Recolor <mark> highlights (note)…")
                 .setIcon("palette")
                 .onClick(() => {
-                    new BulkRecolorModal(this.plugin, this.currentFile, () => {
-                        this.refresh(true);
+                    new BulkRecolorModal(this.plugin, currentFile, () => {
+                        void this.refresh(true);
                     }).open();
                 });
         });
 
         menu.addSeparator();
 
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Migrate <span> highlights to <mark> (note)")
                 .setIcon("wand")
                 .onClick(async () => {
-                    await this.plugin.migrateSpanHighlightsInFile(this.currentFile);
-                    this.refresh(true);
+                    await this.plugin.migrateSpanHighlightsInFile(currentFile);
+                    void this.refresh(true);
                 });
         });
 
         menu.showAtMouseEvent(event);
     }
 
-    async jumpToLine(line) {
+    async jumpToLine(line: number) {
         const leaf = this.app.workspace.getMostRecentLeaf();
         if (leaf && leaf.view instanceof MarkdownView) {
             leaf.setEphemeralState({
@@ -521,11 +558,11 @@ export class HighlightNavigatorView extends ItemView {
      * definition and flashes it. If the link can't be found we fall back to the
      * reference, so behavior never regresses below "show me where it's used".
      */
-    async jumpToFootnote(item) {
+    async jumpToFootnote(item: NavFootnote) {
         const leaf = this.app.workspace.getMostRecentLeaf();
         const view = leaf && leaf.view instanceof MarkdownView ? leaf.view : null;
 
-        if (!view) {
+        if (!leaf || !view) {
             this.collapseSidebarOnMobile();
             return;
         }
@@ -551,13 +588,15 @@ export class HighlightNavigatorView extends ItemView {
         this.collapseSidebarOnMobile();
     }
 
-    findFootnoteRefAnchor(root, item) {
+    findFootnoteRefAnchor(root: HTMLElement, item: NavFootnote): HTMLAnchorElement | null {
         if (!root) return null;
-        const anchors = root.querySelectorAll("sup.footnote-ref a, a.footnote-ref, sup[id^='fnref'] a");
+        const anchors = root.querySelectorAll<HTMLAnchorElement>(
+            "sup.footnote-ref a, a.footnote-ref, sup[id^='fnref'] a"
+        );
         const wanted = item.displayNumber != null ? String(item.displayNumber) : null;
 
         if (wanted) {
-            for (const a of anchors) {
+            for (const a of Array.from(anchors)) {
                 // Reading View renders the sequential number as the link text.
                 if ((a.textContent || "").replace(/\D/g, "") === wanted) {
                     return a;
@@ -578,15 +617,16 @@ export class HighlightNavigatorView extends ItemView {
     }
 
     async exportHighlights() {
-        if (!this.currentFile) return;
+        const currentFile = this.currentFile;
+        if (!currentFile) return;
 
         try {
             const { exportHighlightsToMD } = await import("../utils/export");
-            const exportPath = await exportHighlightsToMD(this.app, this.currentFile);
+            const exportPath = await exportHighlightsToMD(this.app, currentFile);
 
             // Open the exported file
             const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
-            if (exportFile) {
+            if (exportFile instanceof TFile) {
                 await this.app.workspace.getLeaf("tab").openFile(exportFile);
             }
         } catch (err) {
@@ -594,36 +634,37 @@ export class HighlightNavigatorView extends ItemView {
         }
     }
 
-    openExportMenu(event) {
+    openExportMenu(event: MouseEvent) {
         if (!this.currentFile) return;
 
         const menu = new Menu();
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Export MD")
                 .setIcon("file-text")
-                .onClick(() => this.exportHighlights());
+                .onClick(() => void this.exportHighlights());
         });
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Export JSON")
                 .setIcon("code")
-                .onClick(() => this.exportHighlightsJSON());
+                .onClick(() => void this.exportHighlightsJSON());
         });
-        menu.addItem((mi) => {
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Export CSV")
                 .setIcon("table")
-                .onClick(() => this.exportHighlightsCSV());
+                .onClick(() => void this.exportHighlightsCSV());
         });
 
         menu.showAtMouseEvent(event);
     }
 
     async exportHighlightsJSON() {
-        if (!this.currentFile) return;
+        const currentFile = this.currentFile;
+        if (!currentFile) return;
         try {
             const { exportHighlightsToJSON } = await import("../utils/export");
-            const exportPath = await exportHighlightsToJSON(this.app, this.currentFile);
+            const exportPath = await exportHighlightsToJSON(this.app, currentFile);
             const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
-            if (exportFile) {
+            if (exportFile instanceof TFile) {
                 await this.app.workspace.getLeaf("tab").openFile(exportFile);
             }
         } catch (err) {
@@ -632,12 +673,13 @@ export class HighlightNavigatorView extends ItemView {
     }
 
     async exportHighlightsCSV() {
-        if (!this.currentFile) return;
+        const currentFile = this.currentFile;
+        if (!currentFile) return;
         try {
             const { exportHighlightsToCSV } = await import("../utils/export");
-            const exportPath = await exportHighlightsToCSV(this.app, this.currentFile);
+            const exportPath = await exportHighlightsToCSV(this.app, currentFile);
             const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
-            if (exportFile) {
+            if (exportFile instanceof TFile) {
                 await this.app.workspace.getLeaf("tab").openFile(exportFile);
             }
         } catch (err) {
@@ -646,15 +688,16 @@ export class HighlightNavigatorView extends ItemView {
     }
 
     async exportCurrentFileToCanvas() {
-        if (!this.currentFile) return;
+        const currentFile = this.currentFile;
+        if (!currentFile) return;
 
         try {
             const { exportHighlightsToCanvas } = await import("../utils/canvas");
 
             // Map current highlights to the format expected by canvas util
-            const highlights = this.highlights.map((h) => ({
+            const highlights: HighlightWithFile[] = this.highlights.map((h) => ({
                 ...h,
-                file: this.currentFile,
+                file: currentFile,
             }));
 
             if (highlights.length === 0) {
@@ -666,7 +709,7 @@ export class HighlightNavigatorView extends ItemView {
             const exportPath = await exportHighlightsToCanvas(this.app, highlights);
 
             const file = this.app.vault.getAbstractFileByPath(exportPath);
-            if (file) {
+            if (file instanceof TFile) {
                 await this.app.workspace.getLeaf("tab").openFile(file);
             }
         } catch (err) {

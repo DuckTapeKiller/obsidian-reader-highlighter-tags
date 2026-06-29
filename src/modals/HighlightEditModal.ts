@@ -1,4 +1,5 @@
-import { Modal, Setting, Notice } from "obsidian";
+import { Modal, Setting, Notice, TFile } from "obsidian";
+import type ReadingHighlighterPlugin from "../main";
 import { TagSuggestModal } from "./TagSuggestModal";
 import {
     parseHighlights,
@@ -9,8 +10,31 @@ import {
     updateHighlightTagsInRaw,
 } from "../utils/highlights";
 
+interface EditState {
+    style: string;
+    color: string;
+    tags: string;
+    annotation: string;
+}
+
 export class HighlightEditModal extends Modal {
-    constructor(plugin, file, highlightId, onApplied = () => {}) {
+    plugin: ReadingHighlighterPlugin;
+    file: TFile;
+    highlightId: string;
+    onApplied: (raw: string) => void;
+    state: EditState;
+    colorSettingEl!: HTMLElement;
+    tagsInput!: HTMLInputElement;
+    annotationInput!: HTMLTextAreaElement;
+    colorInput!: HTMLInputElement;
+    colorTextInput!: HTMLInputElement;
+
+    constructor(
+        plugin: ReadingHighlighterPlugin,
+        file: TFile,
+        highlightId: string,
+        onApplied: (raw: string) => void = () => {}
+    ) {
         super(plugin.app);
         this.plugin = plugin;
         this.file = file;
@@ -34,7 +58,7 @@ export class HighlightEditModal extends Modal {
 
         contentEl.createEl("h2", { text: "Edit Highlight" });
 
-        let raw;
+        let raw: string;
         try {
             raw = await this.app.vault.read(this.file);
         } catch (err) {
@@ -84,7 +108,7 @@ export class HighlightEditModal extends Modal {
         });
         this.tagsInput.value = this.state.tags;
         this.tagsInput.oninput = (e) => {
-            this.state.tags = e.target.value;
+            this.state.tags = (e.target as HTMLInputElement).value;
         };
         tagsSetting.addButton((btn) =>
             btn.setButtonText("Pick").onClick(() => {
@@ -105,7 +129,7 @@ export class HighlightEditModal extends Modal {
         this.annotationInput.rows = 3;
         this.annotationInput.value = this.state.annotation;
         this.annotationInput.oninput = (e) => {
-            this.state.annotation = e.target.value;
+            this.state.annotation = (e.target as HTMLTextAreaElement).value;
         };
 
         const footer = contentEl.createDiv({ cls: "modal-footer highlight-edit-footer" });
@@ -114,14 +138,10 @@ export class HighlightEditModal extends Modal {
         cancelBtn.onclick = () => this.close();
 
         const removeBtn = footer.createEl("button", { text: "Remove Highlight" });
-        removeBtn.onclick = async () => {
-            await this.applyEdits({ remove: true });
-        };
+        removeBtn.onclick = () => void this.applyEdits({ remove: true });
 
         const applyBtn = footer.createEl("button", { text: "Apply", cls: "mod-cta" });
-        applyBtn.onclick = async () => {
-            await this.applyEdits({ remove: false });
-        };
+        applyBtn.onclick = () => void this.applyEdits({ remove: false });
 
         this.updateColorControls();
     }
@@ -150,7 +170,7 @@ export class HighlightEditModal extends Modal {
         });
         colorText.value = this.state.color || "";
         colorText.oninput = (e) => {
-            const next = e.target.value.trim();
+            const next = (e.target as HTMLInputElement).value.trim();
             this.state.color = next;
             if (/^#[0-9a-fA-F]{6}$/.test(next)) {
                 this.colorInput.value = next;
@@ -158,7 +178,7 @@ export class HighlightEditModal extends Modal {
         };
         this.colorTextInput = colorText;
         this.colorInput.oninput = (e) => {
-            const next = e.target.value;
+            const next = (e.target as HTMLInputElement).value;
             this.state.color = next;
             this.colorTextInput.value = next;
         };
@@ -188,7 +208,7 @@ export class HighlightEditModal extends Modal {
         if (this.colorTextInput) this.colorTextInput.disabled = !enabled;
     }
 
-    async applyEdits({ remove }) {
+    async applyEdits({ remove }: { remove: boolean }) {
         try {
             await this.plugin.saveUndoState(this.file);
 
@@ -244,7 +264,7 @@ export class HighlightEditModal extends Modal {
             new Notice(remove ? "Highlight removed." : "Highlight updated.");
         } catch (err) {
             console.error(err);
-            new Notice(err?.message || "Failed to update highlight.");
+            new Notice(err instanceof Error ? err.message : "Failed to update highlight.");
         }
     }
 

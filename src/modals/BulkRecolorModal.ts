@@ -1,7 +1,23 @@
-import { Modal, Setting } from "obsidian";
+import { Modal, Setting, TFile } from "obsidian";
+import type ReadingHighlighterPlugin from "../main";
+
+interface BulkRecolorState {
+    limitFrom: boolean;
+    fromColor: string;
+    toColor: string;
+}
 
 export class BulkRecolorModal extends Modal {
-    constructor(plugin, file, onApplied = () => {}) {
+    plugin: ReadingHighlighterPlugin;
+    file: TFile;
+    onApplied: () => void;
+    state: BulkRecolorState;
+    fromSetting?: Setting;
+    toSetting?: Setting;
+    fromColorInput?: HTMLInputElement;
+    toColorInput?: HTMLInputElement;
+
+    constructor(plugin: ReadingHighlighterPlugin, file: TFile, onApplied: () => void = () => {}) {
         super(plugin.app);
         this.plugin = plugin;
         this.file = file;
@@ -57,8 +73,8 @@ export class BulkRecolorModal extends Modal {
         this.fromColorInput = fromControl.createEl("input", { type: "color" });
         this.fromColorInput.value = this.state.fromColor;
         this.fromColorInput.oninput = (e) => {
-            this.state.fromColor = e.target.value;
-            const textInput = this.fromSetting.controlEl.querySelector("input[type='text']");
+            this.state.fromColor = (e.target as HTMLInputElement).value;
+            const textInput = this.fromSetting?.controlEl.querySelector<HTMLInputElement>("input[type='text']");
             if (textInput) textInput.value = this.state.fromColor;
         };
 
@@ -80,8 +96,8 @@ export class BulkRecolorModal extends Modal {
         this.toColorInput = toControl.createEl("input", { type: "color" });
         this.toColorInput.value = this.state.toColor;
         this.toColorInput.oninput = (e) => {
-            this.state.toColor = e.target.value;
-            const textInput = this.toSetting.controlEl.querySelector("input[type='text']");
+            this.state.toColor = (e.target as HTMLInputElement).value;
+            const textInput = this.toSetting?.controlEl.querySelector<HTMLInputElement>("input[type='text']");
             if (textInput) textInput.value = this.state.toColor;
         };
 
@@ -90,12 +106,13 @@ export class BulkRecolorModal extends Modal {
         cancelBtn.onclick = () => this.close();
 
         const applyBtn = footer.createEl("button", { text: "Apply", cls: "mod-cta" });
-        applyBtn.onclick = async () => {
-            const from = this.state.limitFrom ? this.state.fromColor : "";
-            await this.plugin.recolorMarkHighlightsInFile(this.file, from, this.state.toColor);
-            this.onApplied();
-            this.close();
-        };
+        applyBtn.onclick = () =>
+            void (async () => {
+                const from = this.state.limitFrom ? this.state.fromColor : "";
+                await this.plugin.recolorMarkHighlightsInFile(this.file, from, this.state.toColor);
+                this.onApplied();
+                this.close();
+            })();
 
         this.updateEnabledState();
     }
@@ -106,8 +123,8 @@ export class BulkRecolorModal extends Modal {
         if (fromColor) fromColor.disabled = !enabled;
 
         // Disable the text input as well.
-        if (this.fromSetting) {
-            const textInput = this.fromSetting.controlEl.querySelector("input[type='text']");
+        if (this.fromSetting !== undefined) {
+            const textInput = this.fromSetting.controlEl.querySelector<HTMLInputElement>("input[type='text']");
             if (textInput) textInput.disabled = !enabled;
         }
     }

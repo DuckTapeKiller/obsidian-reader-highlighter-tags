@@ -2,13 +2,15 @@
  * Export highlights from a file to a new markdown file.
  * Finds all ==text== and <mark>text</mark> elements and creates a summary.
  */
-import { parseHighlights } from "./highlights";
+import { App, TFile } from "obsidian";
+import { parseHighlights, type Highlight } from "./highlights";
+import { formatDate } from "./time";
 
-function detectNewline(raw) {
+function detectNewline(raw: string): string {
     return raw.includes("\r\n") ? "\r\n" : "\n";
 }
 
-function csvEscape(value) {
+function csvEscape(value: unknown): string {
     const str = value == null ? "" : String(value);
     if (/[",\r\n]/.test(str)) {
         return `"${str.replace(/"/g, '""')}"`;
@@ -16,13 +18,19 @@ function csvEscape(value) {
     return str;
 }
 
-function ensureBlockIdsForHighlightLines(raw, highlights) {
+interface EnsuredBlockIds {
+    raw: string;
+    changed: boolean;
+    lineToBlockId: Map<number, string>;
+}
+
+function ensureBlockIdsForHighlightLines(raw: string, highlights: Highlight[]): EnsuredBlockIds {
     const newline = detectNewline(raw);
     const lines = raw.split(/\r?\n/);
     const lineSet = new Set(highlights.map((h) => h.line).filter((n) => Number.isInteger(n)));
 
     let changed = false;
-    const lineToBlockId = new Map();
+    const lineToBlockId = new Map<number, string>();
 
     for (const lineIdx of lineSet) {
         if (lineIdx < 0 || lineIdx >= lines.length) continue;
@@ -45,12 +53,16 @@ function ensureBlockIdsForHighlightLines(raw, highlights) {
     };
 }
 
-export async function exportHighlightsToMD(app, file) {
-    let raw = await app.vault.read(file);
+function parentPath(file: TFile): string {
+    return file.parent?.path ?? "";
+}
+
+export async function exportHighlightsToMD(app: App, file: TFile): Promise<string> {
+    const raw = await app.vault.read(file);
     let changed = false;
 
     const lines = raw.split("\n");
-    const highlights = [];
+    const highlights: { text: string }[] = [];
 
     const markdownPattern = /==(.*?)==/g;
     const htmlPattern = /<mark[^>]*>(.*?)<\/mark>/g;
@@ -70,7 +82,7 @@ export async function exportHighlightsToMD(app, file) {
         }
 
         if (hasHighlight) {
-            let blockMatch = lines[lineIdx].match(/\s(\^[a-zA-Z0-9-]+)$/);
+            const blockMatch = lines[lineIdx].match(/\s(\^[a-zA-Z0-9-]+)$/);
             let blockId = "";
             if (blockMatch) {
                 blockId = blockMatch[1];
@@ -95,7 +107,7 @@ export async function exportHighlightsToMD(app, file) {
     }
 
     // Get current date
-    const date = window.moment ? window.moment().format("YYYY-MM-DD HH:mm") : new Date().toISOString().split("T")[0];
+    const date = formatDate("YYYY-MM-DD HH:mm");
 
     // Generate export content
     const exportContent = `# Highlights from [[${file.basename}]]
@@ -114,13 +126,13 @@ ${highlights.map((h, i) => `${i + 1}. ${h.text}`).join("\n\n")}
 `;
 
     // Create unique filename
-    let exportPath = `${file.parent.path}/${file.basename} - Highlights.md`;
+    let exportPath = `${parentPath(file)}/${file.basename} - Highlights.md`;
 
     // Check if file exists, if so add timestamp
     const existingFile = app.vault.getAbstractFileByPath(exportPath);
     if (existingFile) {
-        const timestamp = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
-        exportPath = `${file.parent.path}/${file.basename} - Highlights ${timestamp}.md`;
+        const timestamp = formatDate("YYYYMMDD-HHmmss");
+        exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.md`;
     }
 
     await app.vault.create(exportPath, exportContent);
@@ -130,14 +142,13 @@ ${highlights.map((h, i) => `${i + 1}. ${h.text}`).join("\n\n")}
 
 /**
  * Get all highlights from a file for the navigator view.
- * Returns array of { text, type, position, context }
  */
-export function getHighlightsFromContent(raw) {
+export function getHighlightsFromContent(raw: string): Highlight[] {
     const parsed = parseHighlights(raw);
     return parsed.highlights;
 }
 
-export async function exportHighlightsToJSON(app, file) {
+export async function exportHighlightsToJSON(app: App, file: TFile): Promise<string> {
     let raw = await app.vault.read(file);
     const parsed = parseHighlights(raw);
     if (!parsed.highlights.length) {
@@ -150,7 +161,7 @@ export async function exportHighlightsToJSON(app, file) {
         await app.vault.modify(file, raw);
     }
 
-    const date = window.moment ? window.moment().format("YYYY-MM-DD HH:mm") : new Date().toISOString();
+    const date = formatDate("YYYY-MM-DD HH:mm");
 
     const exportData = {
         exported: date,
@@ -174,18 +185,18 @@ export async function exportHighlightsToJSON(app, file) {
         }),
     };
 
-    let exportPath = `${file.parent.path}/${file.basename} - Highlights.json`;
+    let exportPath = `${parentPath(file)}/${file.basename} - Highlights.json`;
     const existingFile = app.vault.getAbstractFileByPath(exportPath);
     if (existingFile) {
-        const timestamp = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
-        exportPath = `${file.parent.path}/${file.basename} - Highlights ${timestamp}.json`;
+        const timestamp = formatDate("YYYYMMDD-HHmmss");
+        exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.json`;
     }
 
     await app.vault.create(exportPath, JSON.stringify(exportData, null, 2));
     return exportPath;
 }
 
-export async function exportHighlightsToCSV(app, file) {
+export async function exportHighlightsToCSV(app: App, file: TFile): Promise<string> {
     let raw = await app.vault.read(file);
     const parsed = parseHighlights(raw);
     if (!parsed.highlights.length) {
@@ -234,11 +245,11 @@ export async function exportHighlightsToCSV(app, file) {
 
     const csv = [header, ...rows].join("\n");
 
-    let exportPath = `${file.parent.path}/${file.basename} - Highlights.csv`;
+    let exportPath = `${parentPath(file)}/${file.basename} - Highlights.csv`;
     const existingFile = app.vault.getAbstractFileByPath(exportPath);
     if (existingFile) {
-        const timestamp = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
-        exportPath = `${file.parent.path}/${file.basename} - Highlights ${timestamp}.csv`;
+        const timestamp = formatDate("YYYYMMDD-HHmmss");
+        exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.csv`;
     }
 
     await app.vault.create(exportPath, csv);

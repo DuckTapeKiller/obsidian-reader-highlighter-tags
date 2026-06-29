@@ -1,3 +1,91 @@
+import { App, TFile, MarkdownView } from "obsidian";
+
+interface LearnedRule {
+    stripPattern?: string;
+}
+
+interface Segment {
+    vStart: number;
+    vEnd: number;
+    file: TFile;
+    pOffset: number;
+}
+
+interface Virtual {
+    text: string;
+    segments: Segment[];
+}
+
+interface OpContext {
+    cache: Map<string, Virtual>;
+    visited: Set<string>;
+}
+
+interface Candidate {
+    start: number;
+    end: number;
+    text?: string;
+    score?: number;
+}
+
+interface RegexResult {
+    index: number;
+    length: number;
+    text: string;
+}
+
+interface OffsetRange {
+    start: number;
+    end: number;
+}
+
+interface LineRecord {
+    raw: string;
+    start: number;
+    end: number;
+    compare: string;
+    skippable: boolean;
+}
+
+interface MarkdownLineParts {
+    indent: string;
+    prefix: string;
+    content: string;
+}
+
+interface FuzzyMap {
+    normalized: string;
+    map: number[];
+}
+
+interface StrategyInfo {
+    tried: boolean;
+    found?: number;
+    reason?: string;
+    results?: Candidate[];
+}
+
+interface Diagnostics {
+    strategies: Record<string, StrategyInfo>;
+}
+
+interface FailureReport {
+    type: string;
+    reason: string;
+    hint: string;
+    rawSnippet: string;
+    cleanedSnippet: string;
+    diagnostics: Diagnostics;
+    bestGuessContext: string;
+}
+
+interface PhysicalResult {
+    file: TFile;
+    start: number;
+    end: number;
+    raw: string;
+}
+
 const BLOCK_LEVEL_TAGS_FOR_SPLIT = new Set([
     "P",
     "LI",
@@ -38,8 +126,13 @@ const MARKDOWN_PREFIX_ONLY_RE =
 const INLINE_DECORATION_RE =
     /<mark[^>]*>|<\/mark>|%%[^%]*%%|==|\*\*|~~|\*|_|`|\[\[|\]\]|\\\$|\\\^|\\\\|\\\{|\\\}|\\\|/g;
 
-export var SelectionLogic = class {
-    constructor(app, getRules = () => []) {
+export class SelectionLogic {
+    app: App;
+    blockLevelTagsForSplit: Set<string>;
+    getRules: () => LearnedRule[];
+    lastFailureReport: FailureReport | null;
+
+    constructor(app: App, getRules: () => LearnedRule[] = () => []) {
         this.app = app;
         this.blockLevelTagsForSplit = BLOCK_LEVEL_TAGS_FOR_SPLIT;
         this.getRules = getRules;
@@ -47,10 +140,10 @@ export var SelectionLogic = class {
     }
 
     // Timeout-safe regex execution to prevent catastrophic backtracking
-    safeRegexExec(regex, text, timeoutMs = 3000) {
+    safeRegexExec(regex: RegExp, text: string, timeoutMs = 3000): RegexResult[] {
         const startTime = Date.now();
-        const results = [];
-        let match;
+        const results: RegexResult[] = [];
+        let match: RegExpExecArray | null;
         try {
             while ((match = regex.exec(text)) !== null) {
                 results.push({
@@ -66,12 +159,18 @@ export var SelectionLogic = class {
                 }
             }
         } catch (e) {
-            console.warn("[Highlighter] Regex execution error:", e.message);
+            console.warn("[Highlighter] Regex execution error:", e instanceof Error ? e.message : String(e));
         }
         return results;
     }
 
-    async locateSelection(processedFile, view, selectionSnippet, context = null, occurrenceIndex = 0) {
+    async locateSelection(
+        processedFile: TFile,
+        view: MarkdownView,
+        selectionSnippet: string,
+        context: string | null = null,
+        occurrenceIndex = 0
+    ): Promise<PhysicalResult | null> {
         this.lastFailureReport = null; // Note 2: Reset at top of call
 
         let snippet = this.stripBrowserJunk(selectionSnippet);
@@ -118,9 +217,9 @@ export var SelectionLogic = class {
         const selectionBlocks = this.splitSelectionBlocks(snippet);
 
         // Track which strategies were attempted for diagnostics
-        const diagnostics = { strategies: {} };
+        const diagnostics: Diagnostics = { strategies: {} };
 
-        let candidates = [];
+        let candidates: Candidate[] = [];
         if (selectionBlocks.length > 1) {
             candidates = this.findBlockSequenceCandidates(bodyContent, selectionBlocks, 0);
             diagnostics.strategies.blockSequence = { tried: true, found: candidates.length };
@@ -175,9 +274,15 @@ export var SelectionLogic = class {
     }
 
     // R1: Diagnostic logging for failed selection matching
-    logSelectionDiagnostics(rawSnippet, cleanedSnippet, bodyContent, selectionBlocks, diagnostics) {
-        const truncate = (str, len = 120) => (str.length > len ? str.substring(0, len) + "…" : str);
-        const hasSupplementary = (str) => [...str].some((ch) => ch.length > 1);
+    logSelectionDiagnostics(
+        rawSnippet: string,
+        cleanedSnippet: string,
+        bodyContent: string,
+        selectionBlocks: string[],
+        diagnostics: Diagnostics
+    ) {
+        const truncate = (str: string, len = 120): string => (str.length > len ? str.substring(0, len) + "…" : str);
+        const hasSupplementary = (str: string) => [...str].some((ch) => ch.length > 1);
 
         console.group("%c[Highlighter] Selection Match Failed", "color: #e74c3c; font-weight: bold");
 
@@ -190,7 +295,7 @@ export var SelectionLogic = class {
         console.log("\n🔍 Strategy Results:");
         for (const [name, result] of Object.entries(diagnostics.strategies)) {
             if (result.tried) {
-                console.log(`  ${result.found > 0 ? "✅" : "❌"} ${name}: ${result.found} candidates`);
+                console.log(`  ${(result.found ?? 0) > 0 ? "✅" : "❌"} ${name}: ${result.found} candidates`);
             } else {
                 console.log(`  ⏭️ ${name}: skipped (${result.reason})`);
             }
@@ -207,11 +312,11 @@ export var SelectionLogic = class {
                     const testMatch = testRegex.exec(bodyContent);
                     console.log("  Test match:", testMatch ? `✅ at offset ${testMatch.index}` : "❌ no match");
                 } catch (e) {
-                    console.log("  Test match: ⚠️ regex error:", e.message);
+                    console.log("  Test match: ⚠️ regex error:", e instanceof Error ? e.message : String(e));
                 }
             }
         } catch (e) {
-            console.log("  Pattern build error:", e.message);
+            console.log("  Pattern build error:", e instanceof Error ? e.message : String(e));
         }
 
         // Show nearby source context
@@ -231,18 +336,18 @@ export var SelectionLogic = class {
     }
 
     async resolveVirtualContent(
-        file,
+        file: TFile,
         depth = 0,
-        opContext = { cache: /* @__PURE__ */ new Map(), visited: /* @__PURE__ */ new Set() },
-        fragment = null
-    ) {
+        opContext: OpContext = { cache: new Map(), visited: new Set() },
+        fragment: string | null = null
+    ): Promise<Virtual> {
         if (depth > 5) {
             return { text: "", segments: [] };
         }
         const fragmentKey = fragment ? String(fragment) : "";
         const cacheKey = fragmentKey ? `${file.path}#${fragmentKey}` : file.path;
         if (opContext.cache.has(cacheKey)) {
-            return opContext.cache.get(cacheKey);
+            return opContext.cache.get(cacheKey)!;
         }
         if (opContext.visited.has(file.path)) {
             return { text: "", segments: [] };
@@ -276,7 +381,7 @@ export var SelectionLogic = class {
         }
 
         let virtualText = "";
-        const segments = [];
+        const segments: Segment[] = [];
         let lastOffset = sliceStart;
         for (const embed of sortedEmbeds) {
             const adjustedStart = embed.position.start.offset - fmOffset;
@@ -347,7 +452,7 @@ export var SelectionLogic = class {
         return result;
     }
 
-    decodeEmbedFragment(fragment) {
+    decodeEmbedFragment(fragment: string | null): string {
         const rawFragment = String(fragment || "").trim();
         if (!rawFragment) return "";
         try {
@@ -357,7 +462,7 @@ export var SelectionLogic = class {
         }
     }
 
-    normalizeHeadingForMatch(text) {
+    normalizeHeadingForMatch(text: string): string {
         return String(text || "")
             .replace(/<[^>]+>/g, "")
             .replace(/[*_~`]+/g, "")
@@ -366,13 +471,13 @@ export var SelectionLogic = class {
             .toLowerCase();
     }
 
-    findHeadingRange(raw, heading) {
+    findHeadingRange(raw: string, heading: string): OffsetRange | null {
         const needle = this.normalizeHeadingForMatch(heading);
         if (!needle) return null;
 
         const headingRe = /^(#{1,6})[ \t]+(.+?)\s*$/gm;
-        const headings = [];
-        let match;
+        const headings: { index: number; level: number; normalized: string }[] = [];
+        let match: RegExpExecArray | null;
         while ((match = headingRe.exec(raw)) !== null) {
             const level = match[1].length;
             const title = match[2] || "";
@@ -401,7 +506,7 @@ export var SelectionLogic = class {
         return { start, end };
     }
 
-    findBlockRange(raw, blockId) {
+    findBlockRange(raw: string, blockId: string): OffsetRange | null {
         const id = String(blockId || "").trim();
         if (!id) return null;
 
@@ -422,7 +527,7 @@ export var SelectionLogic = class {
         return { start: lineStart, end };
     }
 
-    findEmbedFragmentRange(raw, fragment) {
+    findEmbedFragmentRange(raw: string, fragment: string): OffsetRange | null {
         const decoded = this.decodeEmbedFragment(fragment);
         if (!decoded) return null;
 
@@ -432,7 +537,7 @@ export var SelectionLogic = class {
         }
 
         // Headings: #Heading. If nested headings are passed as "H1#H2", try the last segment too.
-        const candidates = [];
+        const candidates: string[] = [];
         candidates.push(decoded);
         if (decoded.includes("#")) {
             const parts = decoded
@@ -452,7 +557,7 @@ export var SelectionLogic = class {
 
     // Structural Filtering Engine (Noise Shield)
     // Computationally strips invisible markdown syntax while keeping offsets perfectly mapped
-    applyStructuralFilter({ text, segments }) {
+    applyStructuralFilter({ text, segments }: Virtual): Virtual {
         const patterns = [
             // Footnotes: [^123]
             /\[\^[^\]]+\]/g,
@@ -478,13 +583,13 @@ export var SelectionLogic = class {
             /<[^>]+>/g,
         ];
 
-        let currentText = text;
-        let currentSegments = [...segments];
+        let currentText: string = text;
+        let currentSegments: Segment[] = [...segments];
 
         for (const regex of patterns) {
-            let match;
+            let match: RegExpExecArray | null;
             regex.lastIndex = 0;
-            const matches = [];
+            const matches: { start: number; end: number; length: number }[] = [];
 
             // Special handling for footnotes
             if (regex.source === "\\[\\^[^\\]]+\\]") {
@@ -514,7 +619,7 @@ export var SelectionLogic = class {
 
                 currentText = currentText.substring(0, start) + currentText.substring(end);
 
-                const newSegments = [];
+                const newSegments: Segment[] = [];
                 for (const seg of currentSegments) {
                     if (seg.vEnd <= start) {
                         newSegments.push(seg);
@@ -548,7 +653,7 @@ export var SelectionLogic = class {
         return { text: currentText, segments: currentSegments };
     }
 
-    mapVirtualToPhysical(vStart, vEnd, segments) {
+    mapVirtualToPhysical(vStart: number, vEnd: number, segments: Segment[]): PhysicalResult | null {
         const startSeg = segments.find((s) => vStart >= s.vStart && vStart < s.vEnd);
         const endSeg = segments.find((s) => vEnd > s.vStart && vEnd <= s.vEnd);
         if (!startSeg || !endSeg) return null;
@@ -562,7 +667,12 @@ export var SelectionLogic = class {
         };
     }
 
-    resolveCandidates(candidates, raw, context, occurrenceIndex) {
+    resolveCandidates(
+        candidates: Candidate[],
+        raw: string,
+        context: string | null,
+        occurrenceIndex: number
+    ): { raw: string; start: number; end: number } | null {
         if (candidates.length === 0) return null;
 
         if (context) {
@@ -573,9 +683,9 @@ export var SelectionLogic = class {
                 return { ...cand, score };
             });
 
-            const bestScore = Math.max(...candidates.map((candidate) => candidate.score));
+            const bestScore = Math.max(...candidates.map((candidate) => candidate.score ?? 0));
             const threshold = bestScore * 0.85;
-            const validCandidates = candidates.filter((candidate) => candidate.score >= threshold);
+            const validCandidates = candidates.filter((candidate) => (candidate.score ?? 0) >= threshold);
 
             if (occurrenceIndex >= 0 && occurrenceIndex < validCandidates.length) {
                 const chosen = validCandidates[occurrenceIndex];
@@ -590,7 +700,7 @@ export var SelectionLogic = class {
         return { raw, start: candidates[0].start, end: candidates[0].end };
     }
 
-    createFlexiblePattern(snippet) {
+    createFlexiblePattern(snippet: string): string {
         const lines = this.splitSelectionBlocks(this.stripUrlsForPatternMatch(snippet), false);
         if (lines.length === 0) {
             return "";
@@ -608,9 +718,9 @@ export var SelectionLogic = class {
         return joined;
     }
 
-    createFlexibleLinePattern(line) {
+    createFlexibleLinePattern(line: string): string {
         const normalizedLine = this.normalizeComparableText(line);
-        const parts = [];
+        const parts: string[] = [];
         let pendingGap = false;
 
         const codePoints = [...normalizedLine];
@@ -641,7 +751,7 @@ export var SelectionLogic = class {
         return `${pattern}(?:(?:${INLINE_DECORATION_PATTERN})){0,3}`;
     }
 
-    getFlexibleCharPattern(char) {
+    getFlexibleCharPattern(char: string): string {
         if (char === "-") {
             return "[-\u2010-\u2015]";
         }
@@ -654,7 +764,7 @@ export var SelectionLogic = class {
         return this.escapeRegex(char);
     }
 
-    stripBrowserJunk(text) {
+    stripBrowserJunk(text: string): string {
         if (!text) {
             return text;
         }
@@ -675,12 +785,12 @@ export var SelectionLogic = class {
             .trim();
     }
 
-    stripUrlsForPatternMatch(snippet) {
+    stripUrlsForPatternMatch(snippet: string): string {
         // Moved to the virtual structural filter
         return snippet;
     }
 
-    findAllCandidates(text, snippet, bodyStart = 0) {
+    findAllCandidates(text: string, snippet: string, bodyStart = 0): Candidate[] {
         const cleanSnippet = snippet.trim();
         if (!cleanSnippet) {
             return [];
@@ -699,8 +809,8 @@ export var SelectionLogic = class {
             const endAnchor = patternSnippet.substring(patternSnippet.length - endAnchorLen);
             const startP = this.createFlexiblePattern(startAnchor);
             const endP = this.createFlexiblePattern(endAnchor);
-            let startRegex;
-            let endRegex;
+            let startRegex: RegExp;
+            let endRegex: RegExp;
             try {
                 startRegex = new RegExp(startP, "gmu");
                 endRegex = new RegExp(endP, "gmu");
@@ -708,9 +818,9 @@ export var SelectionLogic = class {
                 console.error("INVALID REGEX PATTERN (anchor):", e);
                 return [];
             }
-            const startMatches = [];
-            const endMatches = [];
-            let match;
+            const startMatches: RegExpExecArray[] = [];
+            const endMatches: RegExpExecArray[] = [];
+            let match: RegExpExecArray | null;
             try {
                 while ((match = startRegex.exec(text)) !== null) {
                     if (match.index >= bodyStart) {
@@ -756,7 +866,7 @@ export var SelectionLogic = class {
             return [];
         }
 
-        let regex;
+        let regex: RegExp;
         try {
             regex = new RegExp(pattern, "gmu");
         } catch (_error) {
@@ -765,7 +875,7 @@ export var SelectionLogic = class {
             return [];
         }
 
-        const candidates = [];
+        const candidates: Candidate[] = [];
         const results = this.safeRegexExec(regex, text, 3000);
         for (const match of results) {
             candidates.push({
@@ -778,14 +888,14 @@ export var SelectionLogic = class {
         return candidates;
     }
 
-    escapeRegex(str) {
+    escapeRegex(str: string): string {
         return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
 
-    findCandidatesStripped(text, snippet, bodyStart = 0) {
-        const map = [];
+    findCandidatesStripped(text: string, snippet: string, bodyStart = 0): Candidate[] {
+        const map: number[] = [];
         let strippedRaw = "";
-        const isFormattingMarker = (str, pos) => {
+        const isFormattingMarker = (str: string, pos: number): number => {
             const char = str[pos];
             const next1 = str[pos + 1];
             const next2 = str[pos + 2];
@@ -800,7 +910,7 @@ export var SelectionLogic = class {
             }
             return 0;
         };
-        const extractVisibleText = (startPos, endPos) => {
+        const extractVisibleText = (startPos: number, endPos: number): void => {
             for (let i = startPos; i < endPos; i++) {
                 const skip = isFormattingMarker(text, i);
                 if (skip > 0) {
@@ -811,7 +921,7 @@ export var SelectionLogic = class {
                 strippedRaw += text[i];
             }
         };
-        const addRawText = (startPos, endPos) => {
+        const addRawText = (startPos: number, endPos: number): void => {
             for (let i = startPos; i < endPos; i++) {
                 map.push(i);
                 strippedRaw += text[i];
@@ -847,7 +957,7 @@ export var SelectionLogic = class {
             "gm"
         );
         let lastIndex = 0;
-        let match;
+        let match: RegExpExecArray | null;
         try {
             while ((match = tokenRegex.exec(text)) !== null) {
                 for (let i = lastIndex; i < match.index; i++) {
@@ -947,15 +1057,15 @@ export var SelectionLogic = class {
         if (!pattern) {
             return [];
         }
-        let regex;
+        let regex: RegExp;
         try {
             regex = new RegExp(pattern, "gmu");
         } catch (e) {
             console.error("INVALID REGEX PATTERN in findCandidatesStripped:", e);
             return [];
         }
-        const candidates = [];
-        let strippedMatch;
+        const candidates: Candidate[] = [];
+        let strippedMatch: RegExpExecArray | null;
         try {
             while ((strippedMatch = regex.exec(strippedRaw)) !== null) {
                 const strippedStart = strippedMatch.index;
@@ -977,13 +1087,13 @@ export var SelectionLogic = class {
         return candidates;
     }
 
-    findBlockSequenceCandidates(text, selectionBlocks, bodyStart = 0) {
+    findBlockSequenceCandidates(text: string, selectionBlocks: string[], bodyStart = 0): Candidate[] {
         if (selectionBlocks.length === 0) {
             return [];
         }
 
         const documentLines = this.createDocumentLineRecords(text);
-        const candidates = [];
+        const candidates: Candidate[] = [];
 
         for (let startIndex = 0; startIndex < documentLines.length; startIndex++) {
             const firstLine = documentLines[startIndex];
@@ -1024,8 +1134,8 @@ export var SelectionLogic = class {
         return this.dedupeCandidates(candidates);
     }
 
-    createDocumentLineRecords(text) {
-        const lines = [];
+    createDocumentLineRecords(text: string): LineRecord[] {
+        const lines: LineRecord[] = [];
         let offset = 0;
 
         while (offset <= text.length) {
@@ -1050,19 +1160,19 @@ export var SelectionLogic = class {
         return lines;
     }
 
-    splitSelectionBlocks(snippet, filterEmpty = true) {
+    splitSelectionBlocks(snippet: string, filterEmpty = true): string[] {
         const normalized = snippet.replace(/\r\n?/g, "\n");
         const blocks = normalized.split("\n").map((line) => this.normalizeComparableText(line));
         return filterEmpty ? blocks.filter((line) => line.length > 0) : blocks;
     }
 
-    normalizeLineForCompare(line) {
+    normalizeLineForCompare(line: string): string {
         const strippedLine = line.replace(INLINE_DECORATION_RE, "");
         const parts = this.splitMarkdownLine(strippedLine);
         return this.normalizeComparableText(parts.content);
     }
 
-    normalizeComparableText(text) {
+    normalizeComparableText(text: string): string {
         let normalized = this.stripBrowserJunk(text).replace(INLINE_DECORATION_RE, "");
 
         // Strip Obsidian block IDs only when they appear as standalone tokens (usually at end of blocks),
@@ -1072,7 +1182,7 @@ export var SelectionLogic = class {
         return normalized.replace(/\s+/g, " ").trim();
     }
 
-    splitMarkdownLine(line) {
+    splitMarkdownLine(line: string): MarkdownLineParts {
         const indentMatch = line.match(/^\s*/);
         const indent = indentMatch ? indentMatch[0] : "";
         let remainder = line.substring(indent.length);
@@ -1103,7 +1213,7 @@ export var SelectionLogic = class {
         return { indent, prefix, content: remainder };
     }
 
-    lineMatches(source, target) {
+    lineMatches(source: string, target: string): boolean {
         if (!source || !target) {
             return false;
         }
@@ -1123,7 +1233,7 @@ export var SelectionLogic = class {
         return fuzzySource === fuzzyTarget || fuzzySource.includes(fuzzyTarget) || fuzzyTarget.includes(fuzzySource);
     }
 
-    findFuzzyCandidates(text, snippet, bodyStart = 0) {
+    findFuzzyCandidates(text: string, snippet: string, bodyStart = 0): Candidate[] {
         const needle = this.normalizeForFuzzySearch(snippet);
         if (!needle) {
             return [];
@@ -1134,7 +1244,7 @@ export var SelectionLogic = class {
             return [];
         }
 
-        const candidates = [];
+        const candidates: Candidate[] = [];
         let fromIndex = 0;
         while (fromIndex < normalized.length) {
             const matchIndex = normalized.indexOf(needle, fromIndex);
@@ -1161,12 +1271,12 @@ export var SelectionLogic = class {
      * Hybrid Mapping Engine: Find candidates by word-only normalization
      * This is extremely resilient to inline scholarly markers.
      */
-    findHybridCandidates(text, snippet, bodyStart = 0) {
+    findHybridCandidates(text: string, snippet: string, bodyStart = 0): Candidate[] {
         const needle = this.normalizeForFuzzySearch(snippet);
         if (!needle) return [];
 
         const { normalized, map } = this.buildHybridMap(text);
-        const candidates = [];
+        const candidates: Candidate[] = [];
         let fromIndex = 0;
 
         // Direct search in normalized space
@@ -1195,9 +1305,9 @@ export var SelectionLogic = class {
      * Strips all formatting and punctuation but preserves word positions.
      * Case-insensitive for maximum resilience.
      */
-    buildHybridMap(text) {
+    buildHybridMap(text: string): FuzzyMap {
         let normalized = "";
-        const map = [];
+        const map: number[] = [];
         let offset = 0;
 
         // Character by character mapping
@@ -1225,7 +1335,7 @@ export var SelectionLogic = class {
      * Structural Guardrail: "Snaps" highlight boundaries to avoid breaking
      * footnotes, list markers, and callout headers.
      */
-    snapToStructuralBoundaries(fullRaw, candidate) {
+    snapToStructuralBoundaries(fullRaw: string, candidate: Candidate): Candidate {
         const prefixPatterns = [
             /^\[\^[^\]]+\]:\s*/, // Footnote entry
             /^>\s*\[![^\]]+\]\s*/, // Callout header
@@ -1257,9 +1367,9 @@ export var SelectionLogic = class {
         return candidate;
     }
 
-    buildFuzzyMap(text) {
+    buildFuzzyMap(text: string): FuzzyMap {
         let normalized = "";
-        const map = [];
+        const map: number[] = [];
 
         let offset = 0;
         for (const char of text) {
@@ -1273,14 +1383,14 @@ export var SelectionLogic = class {
         return { normalized, map };
     }
 
-    normalizeForFuzzySearch(text) {
+    normalizeForFuzzySearch(text: string): string {
         return [...this.normalizeComparableText(text)]
             .filter((char) => /[\p{L}\p{N}]/u.test(char))
             .join("")
             .toLocaleLowerCase();
     }
 
-    dedupeCandidates(candidates) {
+    dedupeCandidates(candidates: Candidate[]): Candidate[] {
         const seen = new Set();
         return candidates.filter((candidate) => {
             const key = `${candidate.start}:${candidate.end}`;
@@ -1292,7 +1402,7 @@ export var SelectionLogic = class {
         });
     }
 
-    offsetCandidates(candidates, offset) {
+    offsetCandidates(candidates: Candidate[], offset: number): Candidate[] {
         return candidates.map((candidate) => ({
             ...candidate,
             start: candidate.start + offset,
@@ -1300,7 +1410,7 @@ export var SelectionLogic = class {
         }));
     }
 
-    calculateSimilarity(source, target) {
+    calculateSimilarity(source: string, target: string): number {
         if (source === target) return 1e3;
         const sSet = new Set(source.split(" "));
         const tSet = new Set(target.split(" "));
@@ -1318,7 +1428,7 @@ export var SelectionLogic = class {
      * Word-Proximity Matching Strategy (Defined)
      * Finds the densest cluster of words from the snippet within the activeDocument.
      */
-    findProximityCandidates(text, snippet, bodyStart = 0) {
+    findProximityCandidates(text: string, snippet: string, bodyStart = 0): Candidate[] {
         const words = snippet
             .split(/\s+/)
             .filter((w) => w.length > 2)
@@ -1326,7 +1436,7 @@ export var SelectionLogic = class {
         if (words.length < 3) return []; // Too few words for reliable proximity
 
         const lowerText = text.toLocaleLowerCase();
-        const hits = [];
+        const hits: { word: string; offset: number }[] = [];
         for (const word of words) {
             let idx = lowerText.indexOf(word, bodyStart);
             while (idx !== -1) {
@@ -1337,7 +1447,7 @@ export var SelectionLogic = class {
         if (hits.length === 0) return [];
         hits.sort((a, b) => a.offset - b.offset);
 
-        const candidates = [];
+        const candidates: Candidate[] = [];
         const windowSize = snippet.length * 2.5;
 
         for (let i = 0; i < hits.length; i++) {
@@ -1367,13 +1477,18 @@ export var SelectionLogic = class {
         }
 
         return candidates
-            .sort((a, b) => b.score - a.score)
+            .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
             .slice(0, 3)
             .map((c) => ({ start: c.start, end: c.end, text: c.text }));
     }
 
-    classifyFailure(rawSnippet, cleanedSnippet, bodyContent, diagnostics) {
-        const report = {
+    classifyFailure(
+        rawSnippet: string,
+        cleanedSnippet: string,
+        bodyContent: string,
+        diagnostics: Diagnostics
+    ): FailureReport {
+        const report: FailureReport = {
             type: "UNKNOWN",
             reason: "The engine could not locate this text in the Markdown source.",
             hint: "This usually happens when the browser's view of the text differs significantly from the raw file.",
@@ -1395,8 +1510,12 @@ export var SelectionLogic = class {
         // Attempt to extract 'Best Guess' context from diagnostics (Strategy 5 or 6)
         const proximity = diagnostics.strategies.proximityMatch;
         const fuzzy = diagnostics.strategies.fuzzyMatch;
-        let candidates =
-            proximity && proximity.found > 0 ? proximity.results : fuzzy && fuzzy.found > 0 ? fuzzy.results : [];
+        let candidates: Candidate[] =
+            proximity && (proximity.found ?? 0) > 0
+                ? (proximity.results ?? [])
+                : fuzzy && (fuzzy.found ?? 0) > 0
+                  ? (fuzzy.results ?? [])
+                  : [];
 
         // Guaranteed Fallback: If no candidates, conduct a Brute Force word search
         if (candidates.length === 0) {
@@ -1434,4 +1553,4 @@ export var SelectionLogic = class {
 
         return report;
     }
-};
+}

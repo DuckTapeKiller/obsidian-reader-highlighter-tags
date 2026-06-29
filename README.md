@@ -12,8 +12,6 @@ A powerful Obsidian plugin that brings a **Medium-like highlighting experience**
 
 Designed for power users who read long-form content in Obsidian, this plugin allows you to highlight, tag, annotate, and organize your notes without ever switching to Edit mode. It is "smart" about your content—understanding lists, indentation, and identical text occurrences to ensure your markdown remains clean and valid.
 
-dude the probglem is that when i paste this
-
 ### Video Tutorial
 
 https://github.com/user-attachments/assets/ba3172b3-4d6c-4ddf-b1fa-6b1145ab0e36
@@ -76,7 +74,7 @@ Generate highlight notebooks that never get out of date.
 ### UI and Performance
 
 - **Aesthetic Toolbar**: A glassmorphism-inspired floating toolbar with wrapped semantic color grids.
-- **Mobile Optimization**: includes haptic feedback, keyboard-aware modals, and long-press shortcuts for mobile reading efficiency.
+- **Mobile Optimization**: Includes haptic feedback, keyboard-aware modals, and long-press shortcuts for mobile reading efficiency.
 - **Performance**: Asynchronous vault scanning and safe regex execution prevent browser freezes even in massive vaults.
 
 ## Settings
@@ -94,9 +92,11 @@ Generate highlight notebooks that never get out of date.
 ### Integration
 
 - **Reading Progress**: Automatically tracks and restores the scroll position for every note in your vault.
-- **Hotkeys**: Mod+Shift+1-9 for instant semantic color application and comprehensive command registration for all core actions.
+- **Hotkeys**: Every core action (highlight, tag, annotate, apply semantic colors, and more) is registered as a command, so you can assign your own hotkeys from Obsidian's Hotkeys settings. No default hotkeys are bound, to avoid conflicts.
 
 ## Installation
+
+> Requires Obsidian **1.7.2** or newer.
 
 ### Manual Installation
 

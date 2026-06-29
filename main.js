@@ -24,7 +24,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// src/utils/highlights.js
+// src/utils/highlights.ts
 function escapeRegex(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -209,7 +209,13 @@ function extractLeadingTagsRange(line, lineOffset, wrapperStartInLine) {
     tagsEnd: lineOffset + tagsEndInLine
   };
 }
-function detectFootnoteForHighlight({ line, lineOffset, wrapperEndInLine, innerText, innerStart }) {
+function detectFootnoteForHighlight({
+  line,
+  lineOffset,
+  wrapperEndInLine,
+  innerText,
+  innerStart
+}) {
   const after = line.slice(wrapperEndInLine);
   const afterMatch = after.match(/^\[\^([^\]]+)\]/);
   if (afterMatch) {
@@ -260,7 +266,7 @@ function buildUpdatedOpenTag(openTag, newColor) {
   }
   const styleValue = styleAttr.value;
   const decls = styleValue.split(";").map((part) => part.trim()).filter(Boolean);
-  let updated = [];
+  const updated = [];
   let replaced = false;
   for (const decl of decls) {
     const colon = decl.indexOf(":");
@@ -481,11 +487,29 @@ function migrateSpanHighlightsInRaw(raw) {
   return { raw: updated, changedCount };
 }
 var init_highlights = __esm({
-  "src/utils/highlights.js"() {
+  "src/utils/highlights.ts"() {
   }
 });
 
-// src/utils/export.js
+// src/utils/time.ts
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+function formatDate(fmt, date = /* @__PURE__ */ new Date()) {
+  const Y = date.getFullYear();
+  const M = pad2(date.getMonth() + 1);
+  const D = pad2(date.getDate());
+  const h = pad2(date.getHours());
+  const m = pad2(date.getMinutes());
+  const s = pad2(date.getSeconds());
+  return fmt === "YYYYMMDD-HHmmss" ? `${Y}${M}${D}-${h}${m}${s}` : `${Y}-${M}-${D} ${h}:${m}`;
+}
+var init_time = __esm({
+  "src/utils/time.ts"() {
+  }
+});
+
+// src/utils/export.ts
 var export_exports = {};
 __export(export_exports, {
   exportHighlightsToCSV: () => exportHighlightsToCSV,
@@ -528,8 +552,12 @@ function ensureBlockIdsForHighlightLines(raw, highlights) {
     lineToBlockId
   };
 }
+function parentPath(file) {
+  var _a, _b;
+  return (_b = (_a = file.parent) == null ? void 0 : _a.path) != null ? _b : "";
+}
 async function exportHighlightsToMD(app, file) {
-  let raw = await app.vault.read(file);
+  const raw = await app.vault.read(file);
   let changed = false;
   const lines = raw.split("\n");
   const highlights = [];
@@ -546,7 +574,7 @@ async function exportHighlightsToMD(app, file) {
       hasHighlight = true;
     }
     if (hasHighlight) {
-      let blockMatch = lines[lineIdx].match(/\s(\^[a-zA-Z0-9-]+)$/);
+      const blockMatch = lines[lineIdx].match(/\s(\^[a-zA-Z0-9-]+)$/);
       let blockId = "";
       if (blockMatch) {
         blockId = blockMatch[1];
@@ -566,7 +594,7 @@ async function exportHighlightsToMD(app, file) {
   if (changed) {
     await app.vault.modify(file, lines.join("\n"));
   }
-  const date = window.moment ? window.moment().format("YYYY-MM-DD HH:mm") : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const date = formatDate("YYYY-MM-DD HH:mm");
   const exportContent = `# Highlights from [[${file.basename}]]
 
 > Exported: ${date}
@@ -581,11 +609,11 @@ ${highlights.map((h, i) => `${i + 1}. ${h.text}`).join("\n\n")}
 
 *Exported by Reader Highlighter Tags*
 `;
-  let exportPath = `${file.parent.path}/${file.basename} - Highlights.md`;
+  let exportPath = `${parentPath(file)}/${file.basename} - Highlights.md`;
   const existingFile = app.vault.getAbstractFileByPath(exportPath);
   if (existingFile) {
-    const timestamp = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
-    exportPath = `${file.parent.path}/${file.basename} - Highlights ${timestamp}.md`;
+    const timestamp = formatDate("YYYYMMDD-HHmmss");
+    exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.md`;
   }
   await app.vault.create(exportPath, exportContent);
   return exportPath;
@@ -605,7 +633,7 @@ async function exportHighlightsToJSON(app, file) {
   if (ensured.changed) {
     await app.vault.modify(file, raw);
   }
-  const date = window.moment ? window.moment().format("YYYY-MM-DD HH:mm") : (/* @__PURE__ */ new Date()).toISOString();
+  const date = formatDate("YYYY-MM-DD HH:mm");
   const exportData = {
     exported: date,
     source: { path: file.path, basename: file.basename },
@@ -628,11 +656,11 @@ async function exportHighlightsToJSON(app, file) {
       };
     })
   };
-  let exportPath = `${file.parent.path}/${file.basename} - Highlights.json`;
+  let exportPath = `${parentPath(file)}/${file.basename} - Highlights.json`;
   const existingFile = app.vault.getAbstractFileByPath(exportPath);
   if (existingFile) {
-    const timestamp = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
-    exportPath = `${file.parent.path}/${file.basename} - Highlights ${timestamp}.json`;
+    const timestamp = formatDate("YYYYMMDD-HHmmss");
+    exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.json`;
   }
   await app.vault.create(exportPath, JSON.stringify(exportData, null, 2));
   return exportPath;
@@ -682,22 +710,23 @@ async function exportHighlightsToCSV(app, file) {
     ].join(",");
   });
   const csv = [header, ...rows].join("\n");
-  let exportPath = `${file.parent.path}/${file.basename} - Highlights.csv`;
+  let exportPath = `${parentPath(file)}/${file.basename} - Highlights.csv`;
   const existingFile = app.vault.getAbstractFileByPath(exportPath);
   if (existingFile) {
-    const timestamp = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
-    exportPath = `${file.parent.path}/${file.basename} - Highlights ${timestamp}.csv`;
+    const timestamp = formatDate("YYYYMMDD-HHmmss");
+    exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.csv`;
   }
   await app.vault.create(exportPath, csv);
   return exportPath;
 }
 var init_export = __esm({
-  "src/utils/export.js"() {
+  "src/utils/export.ts"() {
     init_highlights();
+    init_time();
   }
 });
 
-// src/utils/canvas.js
+// src/utils/canvas.ts
 var canvas_exports = {};
 __export(canvas_exports, {
   exportHighlightsToCanvas: () => exportHighlightsToCanvas
@@ -788,13 +817,14 @@ async function exportHighlightsToCanvas(app, allHighlights) {
     nodes,
     edges
   };
-  const date = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : Date.now();
-  let exportPath = `Research Canvas ${date}.canvas`;
+  const date = formatDate("YYYYMMDD-HHmmss");
+  const exportPath = `Research Canvas ${date}.canvas`;
   await app.vault.create(exportPath, JSON.stringify(canvasData, null, 2));
   return exportPath;
 }
 var init_canvas = __esm({
-  "src/utils/canvas.js"() {
+  "src/utils/canvas.ts"() {
+    init_time();
   }
 });
 
@@ -806,7 +836,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian9 = require("obsidian");
 
-// src/ui/FloatingManager.js
+// src/ui/FloatingManager.ts
 var import_obsidian = require("obsidian");
 var FloatingManager = class {
   constructor(plugin) {
@@ -925,9 +955,9 @@ var FloatingManager = class {
           }
         }
         if (isPdf) {
-          this.plugin.savePdfHighlight(view, this._selectionSnapshot, "action", actionName);
+          void this.plugin.savePdfHighlight(view, this._selectionSnapshot, "action", actionName);
         } else {
-          this.plugin[actionName](view, this._selectionSnapshot);
+          void this.plugin[actionName](view, this._selectionSnapshot);
         }
         this.hide();
       };
@@ -944,7 +974,7 @@ var FloatingManager = class {
         preventFocus(evt);
         const view = this.app.workspace.getActiveViewOfType(import_obsidian.View);
         if (view && view.getViewType() === "pdf") {
-          this.plugin.extractAllPdfText(view);
+          void this.plugin.extractAllPdfText(view);
         }
         this.hide();
       };
@@ -966,9 +996,9 @@ var FloatingManager = class {
           }
         }
         if (isPdf) {
-          this.plugin.savePdfHighlight(view, this._selectionSnapshot, "color", index);
+          void this.plugin.savePdfHighlight(view, this._selectionSnapshot, "color", index);
         } else {
-          this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
+          void this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
         }
         this.hide();
       };
@@ -980,12 +1010,12 @@ var FloatingManager = class {
     if (!import_obsidian.Platform.isIosApp) return;
     activeDocument.addEventListener(
       "touchstart",
-      (_e) => {
+      () => {
         this.longPressTimer = window.setTimeout(() => {
           const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
           const sel = window.getSelection();
           if (view && view.getMode() === "preview" && (sel == null ? void 0 : sel.toString().trim())) {
-            this.plugin.highlightSelection(view);
+            void this.plugin.highlightSelection(view);
             this.hide();
           }
         }, 600);
@@ -1034,7 +1064,7 @@ var FloatingManager = class {
   }
   /** Internal: actually process the current selection state. */
   _doHandleSelection() {
-    var _a;
+    var _a, _b;
     let view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
     let isPdf = false;
     if (!view || view.getMode() !== "preview") {
@@ -1045,9 +1075,9 @@ var FloatingManager = class {
       }
       isPdf = true;
     }
-    this.containerEl.toggleClass("is-pdf-view", isPdf);
+    (_a = this.containerEl) == null ? void 0 : _a.toggleClass("is-pdf-view", isPdf);
     const sel = window.getSelection();
-    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    const snippet = (_b = sel == null ? void 0 : sel.toString()) != null ? _b : "";
     if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
       let node = sel.anchorNode;
       while (node && node !== activeDocument.body) {
@@ -1117,7 +1147,7 @@ var FloatingManager = class {
   }
 };
 
-// src/core/SelectionLogic.js
+// src/core/SelectionLogic.ts
 var BLOCK_LEVEL_TAGS_FOR_SPLIT = /* @__PURE__ */ new Set([
   "P",
   "LI",
@@ -1170,7 +1200,7 @@ var SelectionLogic = class {
         }
       }
     } catch (e) {
-      console.warn("[Highlighter] Regex execution error:", e.message);
+      console.warn("[Highlighter] Regex execution error:", e instanceof Error ? e.message : String(e));
     }
     return results;
   }
@@ -1253,6 +1283,7 @@ var SelectionLogic = class {
   }
   // R1: Diagnostic logging for failed selection matching
   logSelectionDiagnostics(rawSnippet, cleanedSnippet, bodyContent, selectionBlocks, diagnostics) {
+    var _a;
     const truncate = (str, len = 120) => str.length > len ? str.substring(0, len) + "\u2026" : str;
     const hasSupplementary = (str) => [...str].some((ch) => ch.length > 1);
     console.group("%c[Highlighter] Selection Match Failed", "color: #e74c3c; font-weight: bold");
@@ -1264,7 +1295,7 @@ var SelectionLogic = class {
     console.log("\n\u{1F50D} Strategy Results:");
     for (const [name, result] of Object.entries(diagnostics.strategies)) {
       if (result.tried) {
-        console.log(`  ${result.found > 0 ? "\u2705" : "\u274C"} ${name}: ${result.found} candidates`);
+        console.log(`  ${((_a = result.found) != null ? _a : 0) > 0 ? "\u2705" : "\u274C"} ${name}: ${result.found} candidates`);
       } else {
         console.log(`  \u23ED\uFE0F ${name}: skipped (${result.reason})`);
       }
@@ -1279,11 +1310,11 @@ var SelectionLogic = class {
           const testMatch = testRegex.exec(bodyContent);
           console.log("  Test match:", testMatch ? `\u2705 at offset ${testMatch.index}` : "\u274C no match");
         } catch (e) {
-          console.log("  Test match: \u26A0\uFE0F regex error:", e.message);
+          console.log("  Test match: \u26A0\uFE0F regex error:", e instanceof Error ? e.message : String(e));
         }
       }
     } catch (e) {
-      console.log("  Pattern build error:", e.message);
+      console.log("  Pattern build error:", e instanceof Error ? e.message : String(e));
     }
     const normalizedSnippet = this.normalizeComparableText(cleanedSnippet);
     const firstWord = normalizedSnippet.split(/\s+/)[0];
@@ -1585,9 +1616,15 @@ var SelectionLogic = class {
         const score = this.calculateSimilarity(sourceBlock, cleanContext);
         return { ...cand, score };
       });
-      const bestScore = Math.max(...candidates.map((candidate) => candidate.score));
+      const bestScore = Math.max(...candidates.map((candidate) => {
+        var _a;
+        return (_a = candidate.score) != null ? _a : 0;
+      }));
       const threshold = bestScore * 0.85;
-      const validCandidates = candidates.filter((candidate) => candidate.score >= threshold);
+      const validCandidates = candidates.filter((candidate) => {
+        var _a;
+        return ((_a = candidate.score) != null ? _a : 0) >= threshold;
+      });
       if (occurrenceIndex >= 0 && occurrenceIndex < validCandidates.length) {
         const chosen = validCandidates[occurrenceIndex];
         return { raw, start: chosen.start, end: chosen.end };
@@ -2266,9 +2303,13 @@ var SelectionLogic = class {
         });
       }
     }
-    return candidates.sort((a, b) => b.score - a.score).slice(0, 3).map((c) => ({ start: c.start, end: c.end, text: c.text }));
+    return candidates.sort((a, b) => {
+      var _a, _b;
+      return ((_a = b.score) != null ? _a : 0) - ((_b = a.score) != null ? _b : 0);
+    }).slice(0, 3).map((c) => ({ start: c.start, end: c.end, text: c.text }));
   }
   classifyFailure(rawSnippet, cleanedSnippet, bodyContent, diagnostics) {
+    var _a, _b, _c, _d;
     const report = {
       type: "UNKNOWN",
       reason: "The engine could not locate this text in the Markdown source.",
@@ -2287,7 +2328,7 @@ var SelectionLogic = class {
     }
     const proximity = diagnostics.strategies.proximityMatch;
     const fuzzy = diagnostics.strategies.fuzzyMatch;
-    let candidates = proximity && proximity.found > 0 ? proximity.results : fuzzy && fuzzy.found > 0 ? fuzzy.results : [];
+    let candidates = proximity && ((_a = proximity.found) != null ? _a : 0) > 0 ? (_b = proximity.results) != null ? _b : [] : fuzzy && ((_c = fuzzy.found) != null ? _c : 0) > 0 ? (_d = fuzzy.results) != null ? _d : [] : [];
     if (candidates.length === 0) {
       const words = cleanedSnippet.split(/\s+/).filter((w) => w.length > 3).sort((a, b) => b.length - a.length);
       if (words.length > 0) {
@@ -2315,11 +2356,12 @@ var SelectionLogic = class {
   }
 };
 
-// src/modals/TagSuggestModal.js
+// src/modals/TagSuggestModal.ts
 var import_obsidian2 = require("obsidian");
 var TagSuggestModal = class extends import_obsidian2.Modal {
   constructor(plugin, onChoose) {
     super(plugin.app);
+    this.allTags = [];
     this.plugin = plugin;
     this.onChoose = onChoose;
     this.selectedTags = /* @__PURE__ */ new Set();
@@ -2391,7 +2433,7 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
    * 3. Frontmatter tags
    */
   getSuggestedTags() {
-    var _a, _b;
+    var _a;
     const suggestions = [];
     const activeFile = this.app.workspace.getActiveFile();
     if (((_a = activeFile == null ? void 0 : activeFile.parent) == null ? void 0 : _a.name) && activeFile.parent.name !== "/") {
@@ -2402,8 +2444,10 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
     }
     if (activeFile) {
       const cache = this.app.metadataCache.getFileCache(activeFile);
-      if ((_b = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _b.tags) {
-        const fmTags = Array.isArray(cache.frontmatter.tags) ? cache.frontmatter.tags : [cache.frontmatter.tags];
+      const frontmatter = cache == null ? void 0 : cache.frontmatter;
+      const tagsValue = frontmatter == null ? void 0 : frontmatter.tags;
+      if (tagsValue) {
+        const fmTags = Array.isArray(tagsValue) ? tagsValue : [tagsValue];
         fmTags.forEach((tag) => {
           const cleanTag = String(tag).replace(/^#/, "");
           if (cleanTag && !suggestions.includes(cleanTag)) {
@@ -2417,7 +2461,7 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
   renderSuggestions(query) {
     this.suggestionEl.empty();
     const cleanQuery = query.toLowerCase().replace(/\s+/g, "_");
-    let matches = this.allTags.filter((t) => t.toLowerCase().includes(cleanQuery));
+    const matches = this.allTags.filter((t) => t.toLowerCase().includes(cleanQuery));
     const isExact = matches.some((t) => t.toLowerCase() === cleanQuery);
     if (cleanQuery && !isExact) {
       this.renderItem(cleanQuery, true);
@@ -2437,8 +2481,11 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
     el.addEventListener("click", () => {
       this.toggleTag(tag);
       this.query = "";
-      this.contentEl.querySelector(".tag-search-input").value = "";
-      this.contentEl.querySelector(".tag-search-input").focus();
+      const searchInput = this.contentEl.querySelector(".tag-search-input");
+      if (searchInput) {
+        searchInput.value = "";
+        searchInput.focus();
+      }
       this.renderSuggestions("");
     });
   }
@@ -2472,7 +2519,7 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
   }
   submit() {
     const result = Array.from(this.selectedTags).map((t) => `#${t}`).join(" ");
-    this.onChoose(result);
+    void this.onChoose(result);
     this.close();
   }
   onClose() {
@@ -2481,7 +2528,7 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
   }
 };
 
-// src/modals/AnnotationModal.js
+// src/modals/AnnotationModal.ts
 var import_obsidian3 = require("obsidian");
 var AnnotationModal = class extends import_obsidian3.Modal {
   constructor(app, onSubmit) {
@@ -2499,7 +2546,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
     }
     contentEl.createEl("h2", { text: "Add Annotation" });
     contentEl.createEl("p", {
-      text: "Your comment will be added as a footnote at the bottom of the activeDocument.",
+      text: "Your comment will be added as a footnote at the bottom of the document.",
       cls: "annotation-description"
     });
     const textArea = new import_obsidian3.TextAreaComponent(contentEl);
@@ -2523,7 +2570,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
   }
   submit() {
     if (this.comment.trim()) {
-      this.onSubmit(this.comment.trim());
+      void this.onSubmit(this.comment.trim());
     }
     this.close();
   }
@@ -2533,11 +2580,11 @@ var AnnotationModal = class extends import_obsidian3.Modal {
   }
 };
 
-// src/views/HighlightNavigator.js
+// src/views/HighlightNavigator.ts
 var import_obsidian6 = require("obsidian");
 init_export();
 
-// src/modals/HighlightEditModal.js
+// src/modals/HighlightEditModal.ts
 var import_obsidian4 = require("obsidian");
 init_highlights();
 var HighlightEditModal = class extends import_obsidian4.Modal {
@@ -2623,13 +2670,9 @@ var HighlightEditModal = class extends import_obsidian4.Modal {
     const cancelBtn = footer.createEl("button", { text: "Cancel" });
     cancelBtn.onclick = () => this.close();
     const removeBtn = footer.createEl("button", { text: "Remove Highlight" });
-    removeBtn.onclick = async () => {
-      await this.applyEdits({ remove: true });
-    };
+    removeBtn.onclick = () => void this.applyEdits({ remove: true });
     const applyBtn = footer.createEl("button", { text: "Apply", cls: "mod-cta" });
-    applyBtn.onclick = async () => {
-      await this.applyEdits({ remove: false });
-    };
+    applyBtn.onclick = () => void this.applyEdits({ remove: false });
     this.updateColorControls();
   }
   renderColorControls() {
@@ -2729,7 +2772,7 @@ var HighlightEditModal = class extends import_obsidian4.Modal {
       new import_obsidian4.Notice(remove ? "Highlight removed." : "Highlight updated.");
     } catch (err) {
       console.error(err);
-      new import_obsidian4.Notice((err == null ? void 0 : err.message) || "Failed to update highlight.");
+      new import_obsidian4.Notice(err instanceof Error ? err.message : "Failed to update highlight.");
     }
   }
   onClose() {
@@ -2737,7 +2780,7 @@ var HighlightEditModal = class extends import_obsidian4.Modal {
   }
 };
 
-// src/modals/BulkRecolorModal.js
+// src/modals/BulkRecolorModal.ts
 var import_obsidian5 = require("obsidian");
 var BulkRecolorModal = class extends import_obsidian5.Modal {
   constructor(plugin, file, onApplied = () => {
@@ -2783,8 +2826,9 @@ var BulkRecolorModal = class extends import_obsidian5.Modal {
     this.fromColorInput = fromControl.createEl("input", { type: "color" });
     this.fromColorInput.value = this.state.fromColor;
     this.fromColorInput.oninput = (e) => {
+      var _a;
       this.state.fromColor = e.target.value;
-      const textInput = this.fromSetting.controlEl.querySelector("input[type='text']");
+      const textInput = (_a = this.fromSetting) == null ? void 0 : _a.controlEl.querySelector("input[type='text']");
       if (textInput) textInput.value = this.state.fromColor;
     };
     this.toSetting = new import_obsidian5.Setting(contentEl).setName("To color").setDesc("Target color to apply.").addText((text) => {
@@ -2801,27 +2845,28 @@ var BulkRecolorModal = class extends import_obsidian5.Modal {
     this.toColorInput = toControl.createEl("input", { type: "color" });
     this.toColorInput.value = this.state.toColor;
     this.toColorInput.oninput = (e) => {
+      var _a;
       this.state.toColor = e.target.value;
-      const textInput = this.toSetting.controlEl.querySelector("input[type='text']");
+      const textInput = (_a = this.toSetting) == null ? void 0 : _a.controlEl.querySelector("input[type='text']");
       if (textInput) textInput.value = this.state.toColor;
     };
     const footer = contentEl.createDiv({ cls: "modal-footer" });
     const cancelBtn = footer.createEl("button", { text: "Cancel" });
     cancelBtn.onclick = () => this.close();
     const applyBtn = footer.createEl("button", { text: "Apply", cls: "mod-cta" });
-    applyBtn.onclick = async () => {
+    applyBtn.onclick = () => void (async () => {
       const from = this.state.limitFrom ? this.state.fromColor : "";
       await this.plugin.recolorMarkHighlightsInFile(this.file, from, this.state.toColor);
       this.onApplied();
       this.close();
-    };
+    })();
     this.updateEnabledState();
   }
   updateEnabledState() {
     const enabled = !!this.state.limitFrom;
     const fromColor = this.fromColorInput;
     if (fromColor) fromColor.disabled = !enabled;
-    if (this.fromSetting) {
+    if (this.fromSetting !== void 0) {
       const textInput = this.fromSetting.controlEl.querySelector("input[type='text']");
       if (textInput) textInput.disabled = !enabled;
     }
@@ -2831,7 +2876,7 @@ var BulkRecolorModal = class extends import_obsidian5.Modal {
   }
 };
 
-// src/views/HighlightNavigator.js
+// src/views/HighlightNavigator.ts
 var HIGHLIGHT_NAVIGATOR_VIEW = "highlight-navigator";
 var HighlightNavigatorView = class extends import_obsidian6.ItemView {
   constructor(leaf, plugin) {
@@ -2887,31 +2932,31 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     const footer = container.createDiv({ cls: "highlight-navigator-footer" });
     const footerBtnGroup = footer.createDiv({ cls: "highlight-navigator-footer-buttons" });
     const exportBtn = footerBtnGroup.createEl("button", { text: "Export MD", cls: "mod-cta" });
-    exportBtn.onclick = () => this.exportHighlights();
+    exportBtn.onclick = () => void this.exportHighlights();
     exportBtn.oncontextmenu = (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.openExportMenu(e);
     };
     const canvasBtn = footerBtnGroup.createEl("button", { text: "Canvas", cls: "mod-cta" });
-    canvasBtn.onclick = () => this.exportCurrentFileToCanvas();
+    canvasBtn.onclick = () => void this.exportCurrentFileToCanvas();
     const scanBtn = footerBtnGroup.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
-    scanBtn.onclick = () => this.plugin.activateResearchView();
+    scanBtn.onclick = () => void this.plugin.activateResearchView();
     const bulkBtn = footerBtnGroup.createEl("button", { text: "Bulk", cls: "mod-cta" });
     bulkBtn.onclick = (e) => this.openBulkMenu(e);
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
-        this.refresh();
+        void this.refresh();
       })
     );
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
         if (this.currentFile && file.path === this.currentFile.path) {
-          this.refresh(true);
+          void this.refresh(true);
         }
       })
     );
-    this.refresh();
+    void this.refresh();
   }
   async refresh(force = false) {
     var _a;
@@ -3032,10 +3077,11 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
       const el = activeDocument.createElement("div");
       el.addClass("highlight-navigator-item");
       if (type === "highlights") {
-        if (item.color) {
+        const highlight = item;
+        if (highlight.color) {
           const colorDot = activeDocument.createElement("span");
           colorDot.addClass("highlight-color-dot");
-          colorDot.setCssStyles({ backgroundColor: item.color });
+          colorDot.setCssStyles({ backgroundColor: highlight.color });
           el.appendChild(colorDot);
         } else {
           const colorDot = activeDocument.createElement("span");
@@ -3043,10 +3089,11 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
           el.appendChild(colorDot);
         }
       } else {
+        const footnote = item;
         const idSpan = activeDocument.createElement("span");
         idSpan.addClass("footnote-id");
-        idSpan.textContent = item.displayNumber != null ? `${item.displayNumber} ` : `[^${item.id}] `;
-        idSpan.setAttribute("title", `[^${item.id}]`);
+        idSpan.textContent = footnote.displayNumber != null ? `${footnote.displayNumber} ` : `[^${footnote.id}] `;
+        idSpan.setAttribute("title", `[^${footnote.id}]`);
         idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
         el.appendChild(idSpan);
       }
@@ -3086,9 +3133,9 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
         e.preventDefault();
         e.stopPropagation();
         if (type === "footnotes") {
-          this.jumpToFootnote(item);
+          void this.jumpToFootnote(item);
         } else {
-          this.jumpToLine(item.line);
+          void this.jumpToLine(item.line);
         }
       };
       fragment.appendChild(el);
@@ -3106,15 +3153,16 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     new import_obsidian6.Notice(ok ? "Copied to clipboard." : "Failed to copy.");
   }
   openHighlightActionsMenu(item, event) {
-    if (!this.currentFile) return;
+    const currentFile = this.currentFile;
+    if (!currentFile) return;
     const menu = new import_obsidian6.Menu();
     menu.addItem((mi) => {
-      mi.setTitle("Copy").setIcon("copy").onClick(() => this.copyItemText(item));
+      mi.setTitle("Copy").setIcon("copy").onClick(() => void this.copyItemText(item));
     });
     menu.addItem((mi) => {
       mi.setTitle("Edit\u2026").setIcon("pencil").onClick(() => {
-        new HighlightEditModal(this.plugin, this.currentFile, item.id, () => {
-          this.refresh(true);
+        new HighlightEditModal(this.plugin, currentFile, item.id, () => {
+          void this.refresh(true);
         }).open();
       });
     });
@@ -3122,12 +3170,12 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     menu.addItem((mi) => {
       mi.setTitle("Remove all highlights (note)").setIcon("eraser").setWarning(true).onClick(async () => {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
-        if (!view || !view.file || view.file.path !== this.currentFile.path) {
-          await this.plugin.saveUndoState(this.currentFile);
-          let raw = await this.app.vault.read(this.currentFile);
+        if (!view || !view.file || view.file.path !== currentFile.path) {
+          await this.plugin.saveUndoState(currentFile);
+          let raw = await this.app.vault.read(currentFile);
           raw = raw.replace(/==(.*?)==/gs, "$1");
           raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/gs, "$1");
-          await this.app.vault.modify(this.currentFile, raw);
+          await this.app.vault.modify(currentFile, raw);
           await this.refresh(true);
           return;
         }
@@ -3138,48 +3186,50 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     menu.showAtMouseEvent(event);
   }
   openFootnoteActionsMenu(item, event) {
-    if (!this.currentFile) return;
+    const currentFile = this.currentFile;
+    if (!currentFile) return;
     const menu = new import_obsidian6.Menu();
     menu.addItem((mi) => {
-      mi.setTitle("Copy").setIcon("copy").onClick(() => this.copyItemText(item));
+      mi.setTitle("Copy").setIcon("copy").onClick(() => void this.copyItemText(item));
     });
     menu.addSeparator();
     menu.addItem((mi) => {
       mi.setTitle("Remove annotation").setIcon("trash-2").setWarning(true).onClick(async () => {
-        await this.plugin.removeAnnotationById(this.currentFile, item.id);
+        await this.plugin.removeAnnotationById(currentFile, item.id);
         await this.refresh(true);
       });
     });
     menu.addSeparator();
     menu.addItem((mi) => {
       mi.setTitle("Remove all annotations (note)").setIcon("eraser").setWarning(true).onClick(async () => {
-        await this.plugin.removeAllAnnotations(this.currentFile);
+        await this.plugin.removeAllAnnotations(currentFile);
         await this.refresh(true);
       });
     });
     menu.showAtMouseEvent(event);
   }
   openBulkMenu(event) {
-    if (!this.currentFile) return;
+    const currentFile = this.currentFile;
+    if (!currentFile) return;
     const menu = new import_obsidian6.Menu();
     menu.addItem((mi) => {
       mi.setTitle("Merge adjacent highlights (note)").setIcon("git-merge").onClick(async () => {
-        await this.plugin.mergeAdjacentHighlightsInFile(this.currentFile);
-        this.refresh(true);
+        await this.plugin.mergeAdjacentHighlightsInFile(currentFile);
+        void this.refresh(true);
       });
     });
     menu.addItem((mi) => {
       mi.setTitle("Recolor <mark> highlights (note)\u2026").setIcon("palette").onClick(() => {
-        new BulkRecolorModal(this.plugin, this.currentFile, () => {
-          this.refresh(true);
+        new BulkRecolorModal(this.plugin, currentFile, () => {
+          void this.refresh(true);
         }).open();
       });
     });
     menu.addSeparator();
     menu.addItem((mi) => {
       mi.setTitle("Migrate <span> highlights to <mark> (note)").setIcon("wand").onClick(async () => {
-        await this.plugin.migrateSpanHighlightsInFile(this.currentFile);
-        this.refresh(true);
+        await this.plugin.migrateSpanHighlightsInFile(currentFile);
+        void this.refresh(true);
       });
     });
     menu.showAtMouseEvent(event);
@@ -3208,7 +3258,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     var _a;
     const leaf = this.app.workspace.getMostRecentLeaf();
     const view = leaf && leaf.view instanceof import_obsidian6.MarkdownView ? leaf.view : null;
-    if (!view) {
+    if (!leaf || !view) {
       this.collapseSidebarOnMobile();
       return;
     }
@@ -3228,10 +3278,12 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
   }
   findFootnoteRefAnchor(root, item) {
     if (!root) return null;
-    const anchors = root.querySelectorAll("sup.footnote-ref a, a.footnote-ref, sup[id^='fnref'] a");
+    const anchors = root.querySelectorAll(
+      "sup.footnote-ref a, a.footnote-ref, sup[id^='fnref'] a"
+    );
     const wanted = item.displayNumber != null ? String(item.displayNumber) : null;
     if (wanted) {
-      for (const a of anchors) {
+      for (const a of Array.from(anchors)) {
         if ((a.textContent || "").replace(/\D/g, "") === wanted) {
           return a;
         }
@@ -3249,12 +3301,13 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     }
   }
   async exportHighlights() {
-    if (!this.currentFile) return;
+    const currentFile = this.currentFile;
+    if (!currentFile) return;
     try {
       const { exportHighlightsToMD: exportHighlightsToMD2 } = await Promise.resolve().then(() => (init_export(), export_exports));
-      const exportPath = await exportHighlightsToMD2(this.app, this.currentFile);
+      const exportPath = await exportHighlightsToMD2(this.app, currentFile);
       const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
-      if (exportFile) {
+      if (exportFile instanceof import_obsidian6.TFile) {
         await this.app.workspace.getLeaf("tab").openFile(exportFile);
       }
     } catch (err) {
@@ -3265,23 +3318,24 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     if (!this.currentFile) return;
     const menu = new import_obsidian6.Menu();
     menu.addItem((mi) => {
-      mi.setTitle("Export MD").setIcon("file-text").onClick(() => this.exportHighlights());
+      mi.setTitle("Export MD").setIcon("file-text").onClick(() => void this.exportHighlights());
     });
     menu.addItem((mi) => {
-      mi.setTitle("Export JSON").setIcon("code").onClick(() => this.exportHighlightsJSON());
+      mi.setTitle("Export JSON").setIcon("code").onClick(() => void this.exportHighlightsJSON());
     });
     menu.addItem((mi) => {
-      mi.setTitle("Export CSV").setIcon("table").onClick(() => this.exportHighlightsCSV());
+      mi.setTitle("Export CSV").setIcon("table").onClick(() => void this.exportHighlightsCSV());
     });
     menu.showAtMouseEvent(event);
   }
   async exportHighlightsJSON() {
-    if (!this.currentFile) return;
+    const currentFile = this.currentFile;
+    if (!currentFile) return;
     try {
       const { exportHighlightsToJSON: exportHighlightsToJSON2 } = await Promise.resolve().then(() => (init_export(), export_exports));
-      const exportPath = await exportHighlightsToJSON2(this.app, this.currentFile);
+      const exportPath = await exportHighlightsToJSON2(this.app, currentFile);
       const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
-      if (exportFile) {
+      if (exportFile instanceof import_obsidian6.TFile) {
         await this.app.workspace.getLeaf("tab").openFile(exportFile);
       }
     } catch (err) {
@@ -3289,12 +3343,13 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     }
   }
   async exportHighlightsCSV() {
-    if (!this.currentFile) return;
+    const currentFile = this.currentFile;
+    if (!currentFile) return;
     try {
       const { exportHighlightsToCSV: exportHighlightsToCSV2 } = await Promise.resolve().then(() => (init_export(), export_exports));
-      const exportPath = await exportHighlightsToCSV2(this.app, this.currentFile);
+      const exportPath = await exportHighlightsToCSV2(this.app, currentFile);
       const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
-      if (exportFile) {
+      if (exportFile instanceof import_obsidian6.TFile) {
         await this.app.workspace.getLeaf("tab").openFile(exportFile);
       }
     } catch (err) {
@@ -3302,12 +3357,13 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     }
   }
   async exportCurrentFileToCanvas() {
-    if (!this.currentFile) return;
+    const currentFile = this.currentFile;
+    if (!currentFile) return;
     try {
       const { exportHighlightsToCanvas: exportHighlightsToCanvas2 } = await Promise.resolve().then(() => (init_canvas(), canvas_exports));
       const highlights = this.highlights.map((h) => ({
         ...h,
-        file: this.currentFile
+        file: currentFile
       }));
       if (highlights.length === 0) {
         new import_obsidian6.Notice("No highlights to export.");
@@ -3316,7 +3372,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
       new import_obsidian6.Notice("Generating Canvas...");
       const exportPath = await exportHighlightsToCanvas2(this.app, highlights);
       const file = this.app.vault.getAbstractFileByPath(exportPath);
-      if (file) {
+      if (file instanceof import_obsidian6.TFile) {
         await this.app.workspace.getLeaf("tab").openFile(file);
       }
     } catch (err) {
@@ -3327,10 +3383,10 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
   }
 };
 
-// src/views/ResearchView.js
+// src/views/ResearchView.ts
 var import_obsidian7 = require("obsidian");
 
-// src/core/VaultScanner.js
+// src/core/VaultScanner.ts
 init_export();
 var VaultScanner = class {
   constructor(app) {
@@ -3339,8 +3395,6 @@ var VaultScanner = class {
   }
   /**
    * Scans the entire vault for highlights asynchronously.
-   * @param {function} onProgress - Callback with signatures (current, total, filename)
-   * @returns {Promise<Array>} Array of { file: TFile, highlights: Array }
    */
   async scanVault(onProgress = () => {
   }) {
@@ -3389,7 +3443,7 @@ var VaultScanner = class {
   }
 };
 
-// src/views/ResearchView.js
+// src/views/ResearchView.ts
 init_canvas();
 var RESEARCH_VIEW = "reader-research-view";
 var ResearchView = class extends import_obsidian7.ItemView {
@@ -3425,9 +3479,9 @@ var ResearchView = class extends import_obsidian7.ItemView {
     const titleRow = header.createDiv({ cls: "research-view-title-row" });
     titleRow.createEl("h3", { text: "Research View" });
     const scanBtn = titleRow.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
-    scanBtn.onclick = () => this.startScan();
+    scanBtn.onclick = () => void this.startScan();
     const canvasBtn = titleRow.createEl("button", { text: "Export Canvas" });
-    canvasBtn.onclick = () => this.exportToCanvas();
+    canvasBtn.onclick = () => void this.exportToCanvas();
     const searchContainer = header.createDiv({ cls: "research-view-search" });
     const searchInput = searchContainer.createEl("input", {
       type: "text",
@@ -3487,7 +3541,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
     const progressTrack = this.progressContainer.createDiv({ cls: "research-progress-track" });
     this.progressEl = progressTrack.createDiv({ cls: "research-progress-bar" });
     this.contentEl = container.createDiv({ cls: "research-view-content" });
-    this.startScan();
+    void this.startScan();
   }
   async startScan() {
     if (this.isScanning) return;
@@ -3496,9 +3550,12 @@ var ResearchView = class extends import_obsidian7.ItemView {
     this.contentEl.empty();
     try {
       this.scanResults = await this.scanner.scanVault((current, total, lastFile) => {
+        var _a;
         const percent = Math.round(current / total * 100);
-        this.progressEl.setCssStyles({ width: `${percent}%` });
-        this.progressTextEl.textContent = `Scanning: ${current}/${total} (${percent}%) - ${lastFile}...`;
+        (_a = this.progressEl) == null ? void 0 : _a.setCssStyles({ width: `${percent}%` });
+        if (this.progressTextEl) {
+          this.progressTextEl.textContent = `Scanning: ${current}/${total} (${percent}%) - ${lastFile}...`;
+        }
       });
       this.allPropertyKeys.clear();
       this.allPropertyKeys.add("All Properties");
@@ -3513,7 +3570,10 @@ var ResearchView = class extends import_obsidian7.ItemView {
       }
     } catch (err) {
       console.error(err);
-      this.contentEl.createDiv({ text: "Error during scan: " + err.message, cls: "research-error" });
+      this.contentEl.createDiv({
+        text: "Error during scan: " + (err instanceof Error ? err.message : String(err)),
+        cls: "research-error"
+      });
     } finally {
       this.isScanning = false;
       this.progressContainer.setCssStyles({ display: "none" });
@@ -3534,6 +3594,38 @@ var ResearchView = class extends import_obsidian7.ItemView {
       if (key === currentVal) opt.selected = true;
     });
   }
+  collectHighlights() {
+    const allHighlights = [];
+    for (const res of this.scanResults) {
+      for (const h of res.highlights) {
+        allHighlights.push({ ...h, file: res.file, frontmatter: res.frontmatter });
+      }
+    }
+    return allHighlights;
+  }
+  applyPropertyFilter(highlights) {
+    if (!(this.filterKey && this.filterKey !== "All Properties" && this.filterValue)) {
+      return highlights;
+    }
+    const filterVal = this.filterValue.toLowerCase().replace(/^#/, "");
+    return highlights.filter((h) => {
+      var _a;
+      const val = (_a = h.frontmatter) == null ? void 0 : _a[this.filterKey];
+      if (val === void 0 || val === null) return false;
+      if (this.filterKey === "tags" || this.filterKey === "tag") {
+        if (Array.isArray(val)) {
+          return val.some(
+            (t) => String(t).toLowerCase().replace(/^#/, "").includes(filterVal)
+          );
+        }
+        return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
+      }
+      if (Array.isArray(val)) {
+        return val.some((v) => String(v).toLowerCase().includes(filterVal));
+      }
+      return String(val).toLowerCase().includes(filterVal);
+    });
+  }
   renderContent() {
     if (this.isScanning) return;
     this.contentEl.empty();
@@ -3544,31 +3636,9 @@ var ResearchView = class extends import_obsidian7.ItemView {
       });
       return;
     }
-    let allHighlights = [];
-    for (const res of this.scanResults) {
-      for (const h of res.highlights) {
-        allHighlights.push({ ...h, file: res.file, frontmatter: res.frontmatter });
-      }
-    }
+    let allHighlights = this.collectHighlights();
     const totalHighlights = allHighlights.length;
-    if (this.filterKey && this.filterKey !== "All Properties" && this.filterValue) {
-      const filterVal = this.filterValue.toLowerCase().replace(/^#/, "");
-      allHighlights = allHighlights.filter((h) => {
-        var _a;
-        const val = (_a = h.frontmatter) == null ? void 0 : _a[this.filterKey];
-        if (val === void 0 || val === null) return false;
-        if (this.filterKey === "tags" || this.filterKey === "tag") {
-          if (Array.isArray(val)) {
-            return val.some((t) => String(t).toLowerCase().replace(/^#/, "").includes(filterVal));
-          }
-          return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
-        }
-        if (Array.isArray(val)) {
-          return val.some((v) => String(v).toLowerCase().includes(filterVal));
-        }
-        return String(val).toLowerCase().includes(filterVal);
-      });
-    }
+    allHighlights = this.applyPropertyFilter(allHighlights);
     if (this.searchQuery) {
       allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
     }
@@ -3607,7 +3677,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
           itemEl.createSpan({ cls: "research-item-text", text: h.text });
           itemEl.onclick = (e) => {
             e.stopPropagation();
-            this.jumpToHighlight(group.file, h.line);
+            void this.jumpToHighlight(group.file, h.line);
           };
         });
       }
@@ -3626,7 +3696,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
         itemEl.createSpan({ cls: "research-source-badge", text: h.file.basename });
         itemEl.onclick = (e) => {
           e.stopPropagation();
-          this.jumpToHighlight(h.file, h.line);
+          void this.jumpToHighlight(h.file, h.line);
         };
       }
     }
@@ -3643,30 +3713,8 @@ var ResearchView = class extends import_obsidian7.ItemView {
   }
   async exportToCanvas() {
     if (this.isScanning) return;
-    let allHighlights = [];
-    for (const res of this.scanResults) {
-      for (const h of res.highlights) {
-        allHighlights.push({ ...h, file: res.file, frontmatter: res.frontmatter });
-      }
-    }
-    if (this.filterKey && this.filterKey !== "All Properties" && this.filterValue) {
-      const filterVal = this.filterValue.toLowerCase().replace(/^#/, "");
-      allHighlights = allHighlights.filter((h) => {
-        var _a;
-        const val = (_a = h.frontmatter) == null ? void 0 : _a[this.filterKey];
-        if (val === void 0 || val === null) return false;
-        if (this.filterKey === "tags" || this.filterKey === "tag") {
-          if (Array.isArray(val)) {
-            return val.some((t) => String(t).toLowerCase().replace(/^#/, "").includes(filterVal));
-          }
-          return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
-        }
-        if (Array.isArray(val)) {
-          return val.some((v) => String(v).toLowerCase().includes(filterVal));
-        }
-        return String(val).toLowerCase().includes(filterVal);
-      });
-    }
+    let allHighlights = this.collectHighlights();
+    allHighlights = this.applyPropertyFilter(allHighlights);
     if (this.searchQuery) {
       allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
     }
@@ -3684,7 +3732,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
       new import_obsidian7.Notice("Generating Canvas...");
       const exportPath = await exportHighlightsToCanvas(this.app, allHighlights);
       const file = this.app.vault.getAbstractFileByPath(exportPath);
-      if (file) {
+      if (file instanceof import_obsidian7.TFile) {
         const leaf = this.app.workspace.getLeaf("tab");
         await leaf.openFile(file);
       }
@@ -3694,15 +3742,18 @@ var ResearchView = class extends import_obsidian7.ItemView {
   }
 };
 
-// src/utils/dom.js
+// src/utils/dom.ts
+function getPreview(view) {
+  return view.previewMode;
+}
 function getScroll(view) {
-  var _a;
-  return typeof ((_a = view.previewMode) == null ? void 0 : _a.getScroll) === "function" ? view.previewMode.getScroll() : getFallbackScroll(view);
+  const preview = getPreview(view);
+  return typeof (preview == null ? void 0 : preview.getScroll) === "function" ? preview.getScroll() : getFallbackScroll(view);
 }
 function applyScroll(view, pos) {
-  var _a;
-  if (typeof ((_a = view.previewMode) == null ? void 0 : _a.applyScroll) === "function") {
-    view.previewMode.applyScroll(pos);
+  const preview = getPreview(view);
+  if (typeof (preview == null ? void 0 : preview.applyScroll) === "function") {
+    preview.applyScroll(pos);
   } else {
     setFallbackScroll(view, pos);
   }
@@ -3721,7 +3772,7 @@ function setFallbackScroll(view, { y }) {
 // src/main.ts
 init_export();
 
-// src/ui/FailureRecoveryModal.js
+// src/ui/FailureRecoveryModal.ts
 var import_obsidian8 = require("obsidian");
 var FailureRecoveryModal = class extends import_obsidian8.Modal {
   constructor(app, report, onSubmit) {
@@ -3774,7 +3825,7 @@ var FailureRecoveryModal = class extends import_obsidian8.Modal {
         if (markerMatch) {
           finalTarget = markerMatch[1].trim();
         }
-        this.onSubmit(finalTarget, null);
+        void this.onSubmit(finalTarget, null);
         this.close();
       })
     ).addButton(
@@ -3789,7 +3840,7 @@ var FailureRecoveryModal = class extends import_obsidian8.Modal {
           finalTarget = markerMatch[1].trim();
         }
         const rule = this.deriveRule(this.report.rawSnippet, finalTarget);
-        this.onSubmit(finalTarget, rule.error ? null : rule);
+        void this.onSubmit(finalTarget, rule.error ? null : rule);
         this.close();
       })
     );
@@ -3877,6 +3928,12 @@ var DEFAULT_SETTINGS = {
   enableSmartParagraphSelection: false,
   learnedNormRules: []
 };
+function toDisplayString(value) {
+  if (typeof value === "string") return value;
+  if (!value) return "";
+  const primitive = value;
+  return String(primitive);
+}
 var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
   constructor() {
     super(...arguments);
@@ -3907,14 +3964,14 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       })
     );
     if (import_obsidian9.Platform.isMobile) {
-      const btn = this.addRibbonIcon("highlighter", "Highlight Selection", () => {
+      const btn = this.addRibbonIcon("highlighter", "Highlight selection", () => {
         const view = this.getActiveReadingView();
         if (view) void this.highlightSelection(view);
-        else new import_obsidian9.Notice("Open a note in Reading View first.");
+        else new import_obsidian9.Notice("Open a note in reading view first.");
       });
       this.register(() => btn.remove());
     }
-    this.addRibbonIcon("lamp", "Highlight Navigator", () => {
+    this.addRibbonIcon("lamp", "Highlight navigator", () => {
       void this.activateNavigatorView();
     });
     this.floatingManager.load();
@@ -3922,8 +3979,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
   registerCommands() {
     this.addCommand({
       id: "highlight-selection-reading",
-      name: "Highlight selection (Reading View)",
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "h" }],
+      name: "Highlight selection (reading view)",
       checkCallback: (checking) => {
         const view = this.getActiveReadingView();
         if (!view) return false;
@@ -3934,7 +3990,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     });
     this.addCommand({
       id: "tag-selection",
-      name: "Tag selection (Reading View)",
+      name: "Tag selection (reading view)",
       checkCallback: (checking) => {
         const view = this.getActiveReadingView();
         if (!view) return false;
@@ -3945,7 +4001,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     });
     this.addCommand({
       id: "extract-all-pdf-text",
-      name: "Extract All Text from Current PDF",
+      name: "Extract all text from current PDF",
       checkCallback: (checking) => {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian9.View);
         if (view && view.getViewType() === "pdf") {
@@ -3959,8 +4015,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     });
     this.addCommand({
       id: "annotate-selection",
-      name: "Add annotation to selection (Reading View)",
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "n" }],
+      name: "Add annotation to selection (reading view)",
       checkCallback: (checking) => {
         const view = this.getActiveReadingView();
         if (!view) return false;
@@ -3971,7 +4026,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     });
     this.addCommand({
       id: "copy-as-quote",
-      name: "Copy selection as quote (Reading View)",
+      name: "Copy selection as quote (reading view)",
       checkCallback: (checking) => {
         const view = this.getActiveReadingView();
         if (!view) return false;
@@ -3982,7 +4037,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     });
     this.addCommand({
       id: "remove-highlight",
-      name: "Remove highlight from selection (Reading View)",
+      name: "Remove highlight from selection (reading view)",
       checkCallback: (checking) => {
         const view = this.getActiveReadingView();
         if (!view) return false;
@@ -4115,7 +4170,6 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       this.addCommand({
         id: `apply-color-${i + 1}`,
         name: `Apply highlight color ${i + 1}`,
-        hotkeys: [{ modifiers: ["Mod", "Shift"], key: String(i + 1) }],
         checkCallback: (checking) => {
           if (!this.settings.enableColorPalette) return false;
           const view = this.getActiveReadingView();
@@ -4202,9 +4256,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         return false;
       }
     });
-    return blocks.filter(
-      (element) => !blocks.some((other) => other !== element && other.contains(element))
-    );
+    return blocks.filter((element) => !blocks.some((other) => other !== element && other.contains(element)));
   }
   getClosestAllowedBlock(node, root) {
     let current = (node == null ? void 0 : node.nodeType) === Node.ELEMENT_NODE ? node : node == null ? void 0 : node.parentElement;
@@ -4315,7 +4367,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     await this.applyColorHighlight(view, palette.color, "", selectionSnapshot);
   }
   async savePdfHighlight(view, selectionSnapshot, mode, payload) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     if (!view.file) return;
     let snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || ((_a = window.getSelection()) == null ? void 0 : _a.toString()) || "";
     if (!snippet.trim()) {
@@ -4324,7 +4376,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     }
     snippet = this.sanitizePdfText(snippet);
     const pdfName = view.file.basename;
-    const companionFile = `${view.file.parent.path}/${pdfName} - Highlights.md`;
+    const companionFile = `${(_b = view.file.parent) == null ? void 0 : _b.path}/${pdfName} - Highlights.md`;
     const fileExists = this.app.vault.getAbstractFileByPath(companionFile);
     let highlightOutput = snippet.trim();
     if (mode === "color") {
@@ -4360,9 +4412,9 @@ ${appendString}`;
         await this.app.vault.create(companionFile, fileContent);
       }
       new import_obsidian9.Notice("Saved to " + pdfName + " - Highlights");
-      (_b = window.getSelection()) == null ? void 0 : _b.removeAllRanges();
+      (_c = window.getSelection()) == null ? void 0 : _c.removeAllRanges();
       if (this.settings.enableHaptics && import_obsidian9.Platform.isMobile) {
-        (_c = navigator.vibrate) == null ? void 0 : _c.call(navigator, 10);
+        (_d = navigator.vibrate) == null ? void 0 : _d.call(navigator, 10);
       }
     } catch (e) {
       console.error("Failed to save PDF highlight", e);
@@ -4719,7 +4771,7 @@ ${appendString}`;
   async resumeReading(view) {
     const pos = this.settings.readingPositions[view.file.path];
     if (pos) {
-      applyScroll(view, { y: pos });
+      applyScroll(view, { x: 0, y: pos });
       new import_obsidian9.Notice("Resumed reading position.");
     } else {
       new import_obsidian9.Notice("No saved position for this file.");
@@ -4740,7 +4792,7 @@ ${appendString}`;
     void this.app.workspace.revealLeaf(leaf);
   }
   expandQuoteTemplate(file, quotedText, frontmatter = {}) {
-    const sourceUrl = String(frontmatter.url || frontmatter.source || frontmatter.link || "").replace(
+    const sourceUrl = toDisplayString(frontmatter.url || frontmatter.source || frontmatter.link).replace(
       /#:~:text=[^&]+(&|$)/,
       ""
     );
@@ -4758,7 +4810,7 @@ ${appendString}`;
     };
     return this.settings.quoteTemplate.replace(
       /{{(text|file|path|date|time|domain|author)}}/g,
-      (_, key) => variables[key] || ""
+      (_match, key) => variables[key] || ""
     );
   }
   async writeClipboardText(text) {
@@ -4766,20 +4818,8 @@ ${appendString}`;
       await navigator.clipboard.writeText(text);
       return true;
     } catch (e) {
-      const textArea = activeDocument.createElement("textarea");
-      textArea.value = text;
-      textArea.setCssStyles({ position: "fixed", opacity: "0" });
-      activeDocument.body.appendChild(textArea);
-      textArea.focus();
-      textArea.select();
-      let copied = false;
-      try {
-        copied = activeDocument.execCommand("copy");
-      } catch (e2) {
-        copied = false;
-      }
-      textArea.remove();
-      return copied;
+      console.error("Failed to write to clipboard", e);
+      return false;
     }
   }
   formatTimestamp(date) {
@@ -4814,7 +4854,7 @@ ${appendString}`;
     if (Array.isArray(value)) {
       return value.map((item) => String(item).trim()).filter(Boolean).join(", ");
     }
-    return String(value || "").trim();
+    return toDisplayString(value).trim();
   }
   splitMarkdownLine(line) {
     const indentMatch = line.match(/^\s*/);
@@ -5012,7 +5052,9 @@ ${appendString}`;
               return;
             }
             if (Array.isArray(frontmatter.tags)) {
-              const existingTags = frontmatter.tags.map((tag) => this.normalizeTagForComparison(tag));
+              const existingTags = frontmatter.tags.map(
+                (tag) => this.normalizeTagForComparison(String(tag))
+              );
               if (!existingTags.includes(this.normalizeTagForComparison(targetTag))) {
                 frontmatter.tags.push(targetTag);
               }
@@ -5049,14 +5091,14 @@ ${appendString}`;
           (r) => r.stripPattern === learnedRule.stripPattern
         );
         if (!existing) {
-          this.settings.learnedNormRules.push(learnedRule);
+          this.settings.learnedNormRules.push({ stripPattern: learnedRule.stripPattern });
           await this.saveSettings();
           new import_obsidian9.Notice("Normalization rule learned for future selections!");
         }
       }
       const mockSnapshot = { text: correctedText, range: null };
       if (actionType === "applyColorHighlight") {
-        await this.applyColorHighlight(view, payload, "", mockSnapshot);
+        await this.applyColorHighlight(view, payload != null ? payload : "", "", mockSnapshot);
       } else if (actionType === "highlightSelection") {
         await this.highlightSelection(view, mockSnapshot);
       } else if (actionType === "tagSelection") {
@@ -5086,14 +5128,14 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
     const { containerEl } = this;
     containerEl.empty();
     this.sectionHeading("Reader Highlighter Tags Settings", "h2");
-    new import_obsidian9.Setting(containerEl).setName("Toolbar Position").setDesc("Choose where the floating toolbar should appear.").addDropdown(
-      (dropdown) => dropdown.addOption("text", "Next to text").addOption("top", "Fixed at Top Center").addOption("bottom", "Fixed at Bottom Center").addOption("left", "Fixed Left Side").addOption("right", "Fixed Right Side (Default)").setValue(this.plugin.settings.toolbarPosition).onChange(async (value) => {
+    new import_obsidian9.Setting(containerEl).setName("Toolbar position").setDesc("Choose where the floating toolbar should appear.").addDropdown(
+      (dropdown) => dropdown.addOption("text", "Next to text").addOption("top", "Fixed at top center").addOption("bottom", "Fixed at bottom center").addOption("left", "Fixed left side").addOption("right", "Fixed right side (default)").setValue(this.plugin.settings.toolbarPosition).onChange(async (value) => {
         this.plugin.settings.toolbarPosition = value;
         await this.plugin.saveSettings();
       })
     );
     this.sectionHeading("Highlighting", "h3");
-    new import_obsidian9.Setting(containerEl).setName("Enable Color Highlighting").setDesc("Use HTML <mark> tags with specific colors instead of == syntax.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Enable color highlighting").setDesc("Use HTML <mark> tags with specific colors instead of == syntax.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
         this.plugin.settings.enableColorHighlighting = value;
         await this.plugin.saveSettings();
@@ -5101,14 +5143,14 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       })
     );
     if (this.plugin.settings.enableColorHighlighting) {
-      new import_obsidian9.Setting(containerEl).setName("Highlight Color").setDesc("Hex code for the default highlight color.").addColorPicker(
+      new import_obsidian9.Setting(containerEl).setName("Highlight color").setDesc("Hex code for the default highlight color.").addColorPicker(
         (color) => color.setValue(this.plugin.settings.highlightColor || "#FFEE58").onChange(async (value) => {
           this.plugin.settings.highlightColor = value;
           await this.plugin.saveSettings();
         })
       );
     }
-    new import_obsidian9.Setting(containerEl).setName("Enable Color Palette").setDesc("Show a palette of 5 colors in the toolbar for quick selection.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Enable color palette").setDesc("Show a palette of 5 colors in the toolbar for quick selection.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
         this.plugin.settings.enableColorPalette = value;
         await this.plugin.saveSettings();
@@ -5137,26 +5179,26 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       });
     }
     this.sectionHeading("Tags", "h3");
-    new import_obsidian9.Setting(containerEl).setName("Default Tag Prefix").setDesc("Automatically add this tag to every highlight (e.g., 'book').").addText(
-      (text) => text.setPlaceholder("book").setValue(this.plugin.settings.defaultTagPrefix).onChange(async (value) => {
+    new import_obsidian9.Setting(containerEl).setName("Default tag prefix").setDesc("Automatically add this tag to every highlight (e.g., 'book').").addText(
+      (text) => text.setPlaceholder("Book").setValue(this.plugin.settings.defaultTagPrefix).onChange(async (value) => {
         this.plugin.settings.defaultTagPrefix = value.replace(/\s+/g, "_").replace(/^#/, "");
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian9.Setting(containerEl).setName("Smart Tag Suggestions").setDesc("Suggest tags based on recent usage, folder, and frontmatter.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Smart tag suggestions").setDesc("Suggest tags based on recent usage, folder, and frontmatter.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableSmartTagSuggestions).onChange(async (value) => {
         this.plugin.settings.enableSmartTagSuggestions = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian9.Setting(containerEl).setName("Enable Smart Paragraph Selection").setDesc("Snap selections inside a paragraph, list item, heading, or blockquote to the entire block.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Enable smart paragraph selection").setDesc("Snap selections inside a paragraph, list item, heading, or blockquote to the entire block.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableSmartParagraphSelection).onChange(async (value) => {
         this.plugin.settings.enableSmartParagraphSelection = value;
         await this.plugin.saveSettings();
       })
     );
     this.sectionHeading("Quote Template", "h3");
-    new import_obsidian9.Setting(containerEl).setName("Quote Format").setDesc(
+    new import_obsidian9.Setting(containerEl).setName("Quote format").setDesc(
       "Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}, {{time}}, {{domain}}, {{author}}"
     ).addTextArea(
       (text) => text.setValue(this.plugin.settings.quoteTemplate).onChange(async (value) => {
@@ -5165,27 +5207,27 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       })
     );
     this.sectionHeading("Annotations", "h3");
-    new import_obsidian9.Setting(containerEl).setName("Enable Annotations").setDesc("Add comments to selections as footnotes.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Enable annotations").setDesc("Add comments to selections as footnotes.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableAnnotations).onChange(async (value) => {
         this.plugin.settings.enableAnnotations = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian9.Setting(containerEl).setName("Show Annotation Button").setDesc("Show the annotation button in the toolbar.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Show annotation button").setDesc("Show the annotation button in the toolbar.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.showAnnotationButton).onChange(async (value) => {
         this.plugin.settings.showAnnotationButton = value;
         await this.plugin.saveSettings();
       })
     );
     this.sectionHeading("Reading Progress", "h3");
-    new import_obsidian9.Setting(containerEl).setName("Track Reading Progress").setDesc("Remember scroll position when leaving a file.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Track reading progress").setDesc("Remember scroll position when leaving a file.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableReadingProgress).onChange(async (value) => {
         this.plugin.settings.enableReadingProgress = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian9.Setting(containerEl).setName("Clear Reading Positions").setDesc(`Currently tracking ${Object.keys(this.plugin.settings.readingPositions).length} file(s).`).addButton(
-      (button) => button.setButtonText("Clear All").onClick(async () => {
+    new import_obsidian9.Setting(containerEl).setName("Clear reading positions").setDesc(`Currently tracking ${Object.keys(this.plugin.settings.readingPositions).length} file(s).`).addButton(
+      (button) => button.setButtonText("Clear all").onClick(async () => {
         this.plugin.settings.readingPositions = {};
         await this.plugin.saveSettings();
         new import_obsidian9.Notice("Reading positions cleared.");
@@ -5193,32 +5235,32 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       })
     );
     this.sectionHeading("Toolbar Buttons", "h3");
-    new import_obsidian9.Setting(containerEl).setName("Show Tag Button").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Show tag button").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
         this.plugin.settings.showTagButton = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian9.Setting(containerEl).setName("Show Quote Button").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Show quote button").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.showQuoteButton).onChange(async (value) => {
         this.plugin.settings.showQuoteButton = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian9.Setting(containerEl).setName("Show Remove Button").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Show remove button").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.showRemoveButton).onChange(async (value) => {
         this.plugin.settings.showRemoveButton = value;
         await this.plugin.saveSettings();
       })
     );
     this.sectionHeading("Mobile & UX", "h3");
-    new import_obsidian9.Setting(containerEl).setName("Haptic Feedback").setDesc("Vibrate slightly on success (Mobile only).").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Haptic feedback").setDesc("Vibrate slightly on success (mobile only).").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableHaptics).onChange(async (value) => {
         this.plugin.settings.enableHaptics = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian9.Setting(containerEl).setName("Show Button Tooltips").setDesc("Show tooltips when hovering over toolbar buttons.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Show button tooltips").setDesc("Show tooltips when hovering over toolbar buttons.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.showTooltips).onChange(async (value) => {
         this.plugin.settings.showTooltips = value;
         await this.plugin.saveSettings();
@@ -5226,7 +5268,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
     );
     this.sectionHeading("Frontmatter Integration", "h3");
     let tagSetting;
-    new import_obsidian9.Setting(containerEl).setName("Auto-tag highlight in Frontmatter").setDesc("Automatically inject a specific tag into the note's frontmatter whenever you highlight text.").addToggle(
+    new import_obsidian9.Setting(containerEl).setName("Auto-tag highlight in frontmatter").setDesc("Automatically inject a specific tag into the note's frontmatter whenever you highlight text.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableFrontmatterTag).onChange(async (value) => {
         this.plugin.settings.enableFrontmatterTag = value;
         await this.plugin.saveSettings();
@@ -5236,7 +5278,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       })
     );
     tagSetting = new import_obsidian9.Setting(containerEl).setName("Frontmatter highlight tag").setDesc("The tag to add (e.g. 'resaltados'). Do not include the # symbol.").addText(
-      (text) => text.setPlaceholder("resaltados").setValue(this.plugin.settings.frontmatterTag).onChange(async (value) => {
+      (text) => text.setPlaceholder("Resaltados").setValue(this.plugin.settings.frontmatterTag).onChange(async (value) => {
         this.plugin.settings.frontmatterTag = value.replace(/^#/, "");
         await this.plugin.saveSettings();
       })
@@ -5257,7 +5299,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         );
       });
       new import_obsidian9.Setting(containerEl).addButton(
-        (btn) => btn.setButtonText("Clear All Rules").setWarning().onClick(async () => {
+        (btn) => btn.setButtonText("Clear all rules").setWarning().onClick(async () => {
           this.plugin.settings.learnedNormRules = [];
           await this.plugin.saveSettings();
           this.display();

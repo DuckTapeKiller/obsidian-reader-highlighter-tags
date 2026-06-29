@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { removeFootnoteFromRaw, removeAllFootnotesFromRaw } from "../src/utils/highlights.js";
+import { removeFootnoteFromRaw, removeAllFootnotesFromRaw } from "../src/utils/highlights";
 
 describe("removeFootnoteFromRaw", () => {
     it("removes both the inline reference and the definition", () => {

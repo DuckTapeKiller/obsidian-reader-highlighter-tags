@@ -1,11 +1,30 @@
-import { ItemView, MarkdownView, Notice } from "obsidian";
-import { VaultScanner } from "../core/VaultScanner";
+import { ItemView, MarkdownView, Notice, WorkspaceLeaf, TFile } from "obsidian";
+import type ReadingHighlighterPlugin from "../main";
+import { VaultScanner, type ScanResult } from "../core/VaultScanner";
 import { exportHighlightsToCanvas } from "../utils/canvas";
+import type { Highlight } from "../utils/highlights";
 
 export const RESEARCH_VIEW = "reader-research-view";
 
+type ResearchHighlight = Highlight & { file: TFile; frontmatter: Record<string, unknown> };
+
 export class ResearchView extends ItemView {
-    constructor(leaf, plugin) {
+    plugin: ReadingHighlighterPlugin;
+    scanner: VaultScanner;
+    scanResults: ScanResult[];
+    searchQuery: string;
+    filterKey: string;
+    filterValue: string;
+    allPropertyKeys: Set<string>;
+    activeColors: Set<string>;
+    isScanning: boolean;
+    expandedFiles: Set<string>;
+    progressEl: HTMLElement | null;
+    progressTextEl: HTMLElement | null;
+    progressContainer!: HTMLElement;
+    propertySelect!: HTMLSelectElement;
+
+    constructor(leaf: WorkspaceLeaf, plugin: ReadingHighlighterPlugin) {
         super(leaf);
         this.plugin = plugin;
         this.scanner = new VaultScanner(plugin.app);
@@ -36,7 +55,7 @@ export class ResearchView extends ItemView {
     }
 
     async onOpen() {
-        const container = this.containerEl.children[1];
+        const container = this.containerEl.children[1] as HTMLElement;
         container.empty();
         container.addClass("research-view-container");
 
@@ -47,10 +66,10 @@ export class ResearchView extends ItemView {
         titleRow.createEl("h3", { text: "Research View" });
 
         const scanBtn = titleRow.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
-        scanBtn.onclick = () => this.startScan();
+        scanBtn.onclick = () => void this.startScan();
 
         const canvasBtn = titleRow.createEl("button", { text: "Export Canvas" });
-        canvasBtn.onclick = () => this.exportToCanvas();
+        canvasBtn.onclick = () => void this.exportToCanvas();
 
         // Search Bar & Date Filter
         const searchContainer = header.createDiv({ cls: "research-view-search" });
@@ -62,7 +81,7 @@ export class ResearchView extends ItemView {
         });
 
         searchInput.oninput = (e) => {
-            this.searchQuery = e.target.value.toLowerCase();
+            this.searchQuery = (e.target as HTMLInputElement).value.toLowerCase();
             this.renderContent();
         };
 
@@ -75,7 +94,7 @@ export class ResearchView extends ItemView {
         this.updatePropertySelector();
 
         this.propertySelect.onchange = (e) => {
-            this.filterKey = e.target.value;
+            this.filterKey = (e.target as HTMLSelectElement).value;
             this.renderContent();
         };
 
@@ -86,7 +105,7 @@ export class ResearchView extends ItemView {
         });
 
         propertyInput.oninput = (e) => {
-            this.filterValue = e.target.value.toLowerCase();
+            this.filterValue = (e.target as HTMLInputElement).value.toLowerCase();
             this.renderContent();
         };
 
@@ -133,7 +152,7 @@ export class ResearchView extends ItemView {
         this.contentEl = container.createDiv({ cls: "research-view-content" });
 
         // Auto-scan on open so all highlights display by default
-        this.startScan();
+        void this.startScan();
     }
 
     async startScan() {
@@ -146,8 +165,10 @@ export class ResearchView extends ItemView {
         try {
             this.scanResults = await this.scanner.scanVault((current, total, lastFile) => {
                 const percent = Math.round((current / total) * 100);
-                this.progressEl.setCssStyles({ width: `${percent}%` });
-                this.progressTextEl.textContent = `Scanning: ${current}/${total} (${percent}%) - ${lastFile}...`;
+                this.progressEl?.setCssStyles({ width: `${percent}%` });
+                if (this.progressTextEl) {
+                    this.progressTextEl.textContent = `Scanning: ${current}/${total} (${percent}%) - ${lastFile}...`;
+                }
             });
 
             // Collect all property keys
@@ -166,7 +187,10 @@ export class ResearchView extends ItemView {
             }
         } catch (err) {
             console.error(err);
-            this.contentEl.createDiv({ text: "Error during scan: " + err.message, cls: "research-error" });
+            this.contentEl.createDiv({
+                text: "Error during scan: " + (err instanceof Error ? err.message : String(err)),
+                cls: "research-error",
+            });
         } finally {
             this.isScanning = false;
             this.progressContainer.setCssStyles({ display: "none" });
@@ -191,6 +215,45 @@ export class ResearchView extends ItemView {
         });
     }
 
+    private collectHighlights(): ResearchHighlight[] {
+        const allHighlights: ResearchHighlight[] = [];
+        for (const res of this.scanResults) {
+            for (const h of res.highlights) {
+                allHighlights.push({ ...h, file: res.file, frontmatter: res.frontmatter });
+            }
+        }
+        return allHighlights;
+    }
+
+    private applyPropertyFilter(highlights: ResearchHighlight[]): ResearchHighlight[] {
+        if (!(this.filterKey && this.filterKey !== "All Properties" && this.filterValue)) {
+            return highlights;
+        }
+        const filterVal = this.filterValue.toLowerCase().replace(/^#/, "");
+        return highlights.filter((h) => {
+            const val = h.frontmatter?.[this.filterKey];
+            if (val === undefined || val === null) return false;
+
+            // Handle Tags specifically
+            if (this.filterKey === "tags" || this.filterKey === "tag") {
+                if (Array.isArray(val)) {
+                    return (val as unknown[]).some((t) =>
+                        String(t).toLowerCase().replace(/^#/, "").includes(filterVal)
+                    );
+                }
+                return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
+            }
+
+            // Handle Arrays
+            if (Array.isArray(val)) {
+                return (val as unknown[]).some((v) => String(v).toLowerCase().includes(filterVal));
+            }
+
+            // Default string match
+            return String(val).toLowerCase().includes(filterVal);
+        });
+    }
+
     renderContent() {
         if (this.isScanning) return;
 
@@ -205,39 +268,11 @@ export class ResearchView extends ItemView {
         }
 
         // Collect all highlights with file reference
-        let allHighlights = [];
-        for (const res of this.scanResults) {
-            for (const h of res.highlights) {
-                allHighlights.push({ ...h, file: res.file, frontmatter: res.frontmatter });
-            }
-        }
-
+        let allHighlights = this.collectHighlights();
         const totalHighlights = allHighlights.length;
 
         // Apply property filter
-        if (this.filterKey && this.filterKey !== "All Properties" && this.filterValue) {
-            const filterVal = this.filterValue.toLowerCase().replace(/^#/, "");
-            allHighlights = allHighlights.filter((h) => {
-                const val = h.frontmatter?.[this.filterKey];
-                if (val === undefined || val === null) return false;
-
-                // Handle Tags specifically
-                if (this.filterKey === "tags" || this.filterKey === "tag") {
-                    if (Array.isArray(val)) {
-                        return val.some((t) => String(t).toLowerCase().replace(/^#/, "").includes(filterVal));
-                    }
-                    return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
-                }
-
-                // Handle Arrays
-                if (Array.isArray(val)) {
-                    return val.some((v) => String(v).toLowerCase().includes(filterVal));
-                }
-
-                // Default string match
-                return String(val).toLowerCase().includes(filterVal);
-            });
-        }
+        allHighlights = this.applyPropertyFilter(allHighlights);
 
         // Apply search filter
         if (this.searchQuery) {
@@ -257,12 +292,12 @@ export class ResearchView extends ItemView {
 
         if (this.searchQuery) {
             // Group filtered results by file for the detailed view
-            const fileMap = new Map();
+            const fileMap = new Map<string, { file: TFile; highlights: ResearchHighlight[] }>();
             for (const h of allHighlights) {
                 if (!fileMap.has(h.file.path)) {
                     fileMap.set(h.file.path, { file: h.file, highlights: [] });
                 }
-                fileMap.get(h.file.path).highlights.push(h);
+                fileMap.get(h.file.path)!.highlights.push(h);
             }
             const filteredGroups = [...fileMap.values()];
             const fileCount = filteredGroups.length;
@@ -295,7 +330,7 @@ export class ResearchView extends ItemView {
 
                     itemEl.onclick = (e) => {
                         e.stopPropagation();
-                        this.jumpToHighlight(group.file, h.line);
+                        void this.jumpToHighlight(group.file, h.line);
                     };
                 });
             }
@@ -325,13 +360,13 @@ export class ResearchView extends ItemView {
                 // Click to jump
                 itemEl.onclick = (e) => {
                     e.stopPropagation();
-                    this.jumpToHighlight(h.file, h.line);
+                    void this.jumpToHighlight(h.file, h.line);
                 };
             }
         }
     }
 
-    async jumpToHighlight(file, line) {
+    async jumpToHighlight(file: TFile, line: number) {
         // Open file in new leaf/tab OR current active
         const leaf = this.app.workspace.getLeaf("tab");
         await leaf.openFile(file);
@@ -347,33 +382,8 @@ export class ResearchView extends ItemView {
     async exportToCanvas() {
         if (this.isScanning) return;
 
-        let allHighlights = [];
-        for (const res of this.scanResults) {
-            for (const h of res.highlights) {
-                allHighlights.push({ ...h, file: res.file, frontmatter: res.frontmatter });
-            }
-        }
-
-        if (this.filterKey && this.filterKey !== "All Properties" && this.filterValue) {
-            const filterVal = this.filterValue.toLowerCase().replace(/^#/, "");
-            allHighlights = allHighlights.filter((h) => {
-                const val = h.frontmatter?.[this.filterKey];
-                if (val === undefined || val === null) return false;
-
-                if (this.filterKey === "tags" || this.filterKey === "tag") {
-                    if (Array.isArray(val)) {
-                        return val.some((t) => String(t).toLowerCase().replace(/^#/, "").includes(filterVal));
-                    }
-                    return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
-                }
-
-                if (Array.isArray(val)) {
-                    return val.some((v) => String(v).toLowerCase().includes(filterVal));
-                }
-
-                return String(val).toLowerCase().includes(filterVal);
-            });
-        }
+        let allHighlights = this.collectHighlights();
+        allHighlights = this.applyPropertyFilter(allHighlights);
 
         if (this.searchQuery) {
             allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
@@ -387,7 +397,6 @@ export class ResearchView extends ItemView {
         }
 
         if (allHighlights.length === 0) {
-            // Notice requires plugin context but we can just use native Obsidian Notice
             new Notice("No highlights to export to Canvas.");
             return;
         }
@@ -396,7 +405,7 @@ export class ResearchView extends ItemView {
             new Notice("Generating Canvas...");
             const exportPath = await exportHighlightsToCanvas(this.app, allHighlights);
             const file = this.app.vault.getAbstractFileByPath(exportPath);
-            if (file) {
+            if (file instanceof TFile) {
                 const leaf = this.app.workspace.getLeaf("tab");
                 await leaf.openFile(file);
             }

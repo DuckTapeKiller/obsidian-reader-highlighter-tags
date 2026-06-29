@@ -1,10 +1,25 @@
 import { Modal } from "obsidian";
+import type ReadingHighlighterPlugin from "../main";
+
+interface MetadataCacheWithTags {
+    getTags(): Record<string, number>;
+}
 
 /**
  * Multi-select tag modal with fuzzy search and smart suggestions.
  */
 export class TagSuggestModal extends Modal {
-    constructor(plugin, onChoose) {
+    plugin: ReadingHighlighterPlugin;
+    onChoose: (result: string) => void | Promise<void>;
+    selectedTags: Set<string>;
+    suggestions: string[];
+    query: string;
+    suggestionEl: HTMLElement | null;
+    selectedContainer: HTMLElement | null;
+    smartSuggestionEl: HTMLElement | null;
+    allTags: string[] = [];
+
+    constructor(plugin: ReadingHighlighterPlugin, onChoose: (result: string) => void | Promise<void>) {
         super(plugin.app);
         this.plugin = plugin;
         this.onChoose = onChoose;
@@ -65,13 +80,13 @@ export class TagSuggestModal extends Modal {
 
         doneBtn.onclick = () => this.submit();
 
-        // Load correct tags
-        const tagCounts = this.app.metadataCache.getTags();
+        // Load correct tags (getTags is not in the public typings)
+        const tagCounts = (this.app.metadataCache as unknown as MetadataCacheWithTags).getTags();
         this.allTags = Object.keys(tagCounts).map((t) => t.substring(1)); // strip #
 
         // Handlers
         input.addEventListener("input", (e) => {
-            this.query = e.target.value;
+            this.query = (e.target as HTMLInputElement).value;
             this.renderSuggestions(this.query);
         });
 
@@ -97,8 +112,8 @@ export class TagSuggestModal extends Modal {
      * 2. Current folder name
      * 3. Frontmatter tags
      */
-    getSuggestedTags() {
-        const suggestions = [];
+    getSuggestedTags(): string[] {
+        const suggestions: string[] = [];
 
         // 1. Folder-based suggestion
         const activeFile = this.app.workspace.getActiveFile();
@@ -115,10 +130,10 @@ export class TagSuggestModal extends Modal {
         // 2. Frontmatter tags
         if (activeFile) {
             const cache = this.app.metadataCache.getFileCache(activeFile);
-            if (cache?.frontmatter?.tags) {
-                const fmTags = Array.isArray(cache.frontmatter.tags)
-                    ? cache.frontmatter.tags
-                    : [cache.frontmatter.tags];
+            const frontmatter = cache?.frontmatter as Record<string, unknown> | undefined;
+            const tagsValue = frontmatter?.tags;
+            if (tagsValue) {
+                const fmTags: unknown[] = Array.isArray(tagsValue) ? tagsValue : [tagsValue];
                 fmTags.forEach((tag) => {
                     const cleanTag = String(tag).replace(/^#/, "");
                     if (cleanTag && !suggestions.includes(cleanTag)) {
@@ -132,12 +147,12 @@ export class TagSuggestModal extends Modal {
         return [...new Set(suggestions)].slice(0, 8);
     }
 
-    renderSuggestions(query) {
-        this.suggestionEl.empty();
+    renderSuggestions(query: string) {
+        this.suggestionEl!.empty();
         const cleanQuery = query.toLowerCase().replace(/\s+/g, "_");
 
         // Filter tags
-        let matches = this.allTags.filter((t) => t.toLowerCase().includes(cleanQuery));
+        const matches = this.allTags.filter((t) => t.toLowerCase().includes(cleanQuery));
 
         // Exact Match / Create Logic
         const isExact = matches.some((t) => t.toLowerCase() === cleanQuery);
@@ -155,8 +170,8 @@ export class TagSuggestModal extends Modal {
         });
     }
 
-    renderItem(tag, isNew) {
-        const el = this.suggestionEl.createDiv({ cls: "suggestion-item" });
+    renderItem(tag: string, isNew: boolean) {
+        const el = this.suggestionEl!.createDiv({ cls: "suggestion-item" });
         el.createSpan({ text: isNew ? `#${tag}` : `#${tag}` });
         if (isNew) {
             el.createSpan({ text: " (Create new)", cls: "suggestion-note" });
@@ -165,13 +180,16 @@ export class TagSuggestModal extends Modal {
         el.addEventListener("click", () => {
             this.toggleTag(tag);
             this.query = "";
-            this.contentEl.querySelector(".tag-search-input").value = "";
-            this.contentEl.querySelector(".tag-search-input").focus();
+            const searchInput = this.contentEl.querySelector<HTMLInputElement>(".tag-search-input");
+            if (searchInput) {
+                searchInput.value = "";
+                searchInput.focus();
+            }
             this.renderSuggestions("");
         });
     }
 
-    toggleTag(tag) {
+    toggleTag(tag: string) {
         // Tag format logic: replace spaces with _, remove #
         const cleanTag = tag.replace(/^#/, "").replace(/\s+/g, "_");
 
@@ -184,10 +202,10 @@ export class TagSuggestModal extends Modal {
     }
 
     updateSelectedView() {
-        this.selectedContainer.empty();
+        this.selectedContainer!.empty();
 
         if (this.selectedTags.size === 0) {
-            this.selectedContainer.createSpan({
+            this.selectedContainer!.createSpan({
                 text: "No tags selected",
                 cls: "no-tags-hint",
             });
@@ -195,7 +213,7 @@ export class TagSuggestModal extends Modal {
         }
 
         this.selectedTags.forEach((tag) => {
-            const chip = this.selectedContainer.createDiv({ cls: "tag-chip" });
+            const chip = this.selectedContainer!.createDiv({ cls: "tag-chip" });
             chip.createSpan({ text: `#${tag}` });
             const close = chip.createSpan({ cls: "tag-chip-close", text: "×" });
             close.onclick = (e) => {
@@ -210,7 +228,7 @@ export class TagSuggestModal extends Modal {
         const result = Array.from(this.selectedTags)
             .map((t) => `#${t}`)
             .join(" ");
-        this.onChoose(result);
+        void this.onChoose(result);
         this.close();
     }
 

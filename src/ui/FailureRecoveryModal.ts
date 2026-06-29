@@ -1,7 +1,30 @@
-import { Modal, Setting, Notice } from "obsidian";
+import { App, Modal, Setting, Notice } from "obsidian";
+
+export interface FailureReport {
+    type: string;
+    reason: string;
+    hint: string;
+    rawSnippet: string;
+    cleanedSnippet: string;
+    bestGuessContext: string;
+    diagnostics?: unknown;
+}
+
+export interface DerivedRule {
+    stripPattern?: string;
+    error?: string;
+}
 
 export class FailureRecoveryModal extends Modal {
-    constructor(app, report, onSubmit) {
+    report: FailureReport;
+    onSubmit: (correctedText: string, learnedRule: DerivedRule | null) => void | Promise<void>;
+    correction: string;
+
+    constructor(
+        app: App,
+        report: FailureReport,
+        onSubmit: (correctedText: string, learnedRule: DerivedRule | null) => void | Promise<void>
+    ) {
         super(app);
         this.report = report;
         this.onSubmit = onSubmit;
@@ -69,7 +92,7 @@ export class FailureRecoveryModal extends Modal {
                     if (markerMatch) {
                         finalTarget = markerMatch[1].trim();
                     }
-                    this.onSubmit(finalTarget, null);
+                    void this.onSubmit(finalTarget, null);
                     this.close();
                 })
             )
@@ -93,13 +116,13 @@ export class FailureRecoveryModal extends Modal {
 
                         const rule = this.deriveRule(this.report.rawSnippet, finalTarget);
                         // Pass the target even if rule.error exists (non-blocking)
-                        this.onSubmit(finalTarget, rule.error ? null : rule);
+                        void this.onSubmit(finalTarget, rule.error ? null : rule);
                         this.close();
                     })
             );
     }
 
-    updatePreview(container) {
+    updatePreview(container: HTMLElement) {
         if (!this.correction || this.correction.length < 10) {
             container.setText("");
             return;
@@ -114,7 +137,7 @@ export class FailureRecoveryModal extends Modal {
         }
     }
 
-    deriveRule(rawSnippet, corrected) {
+    deriveRule(rawSnippet: string, corrected: string): DerivedRule {
         // Find longest common prefix
         let prefixLen = 0;
         const a = rawSnippet,

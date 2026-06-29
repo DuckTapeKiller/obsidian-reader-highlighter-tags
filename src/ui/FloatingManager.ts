@@ -1,7 +1,36 @@
-import { setIcon, MarkdownView, Platform, View } from "obsidian";
+import { setIcon, MarkdownView, Platform, View, App } from "obsidian";
+import type ReadingHighlighterPlugin from "../main";
+
+type ActionName =
+    | "highlightSelection"
+    | "tagSelection"
+    | "copyAsQuote"
+    | "annotateSelection"
+    | "removeHighlightSelection";
+
+export interface SelectionSnapshot {
+    text: string;
+    range: Range | null;
+}
 
 export class FloatingManager {
-    constructor(plugin) {
+    plugin: ReadingHighlighterPlugin;
+    app: App;
+    containerEl: HTMLDivElement | null;
+    highlightBtn: HTMLButtonElement | null;
+    tagBtn: HTMLButtonElement | null;
+    removeBtn: HTMLButtonElement | null;
+    quoteBtn: HTMLButtonElement | null;
+    annotateBtn: HTMLButtonElement | null;
+    extractAllBtn: HTMLButtonElement | null;
+    colorButtons: HTMLButtonElement[];
+    paletteContainer: HTMLDivElement | null;
+    _handlers: (() => void)[];
+    longPressTimer: number | null;
+    _selectionDebounceTimer: number | null;
+    _selectionSnapshot: SelectionSnapshot | null;
+
+    constructor(plugin: ReadingHighlighterPlugin) {
         this.plugin = plugin;
         this.app = plugin.app;
         this.containerEl = null;
@@ -117,7 +146,7 @@ export class FloatingManager {
         activeDocument.body.appendChild(this.containerEl);
     }
 
-    createButton(iconName, label) {
+    createButton(iconName: string, label: string): HTMLButtonElement {
         const btn = activeDocument.createElement("button");
         setIcon(btn, iconName);
         // Only add tooltip if enabled in settings
@@ -129,20 +158,20 @@ export class FloatingManager {
     }
 
     registerEvents() {
-        const preventFocus = (evt) => {
+        const preventFocus = (evt: Event) => {
             evt.preventDefault();
             evt.stopPropagation();
         };
 
-        const attachAction = (btn, actionName) => {
+        const attachAction = (btn: HTMLButtonElement | null, actionName: ActionName) => {
             if (!btn) return;
 
-            const handler = (evt) => {
+            const handler = (evt: Event) => {
                 preventFocus(evt);
-                let view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                let view: MarkdownView | View | null = this.app.workspace.getActiveViewOfType(MarkdownView);
                 let isPdf = false;
 
-                if (!view || view.getMode() !== "preview") {
+                if (!view || (view as MarkdownView).getMode() !== "preview") {
                     view = this.app.workspace.getActiveViewOfType(View);
                     if (view && view.getViewType() === "pdf") {
                         isPdf = true;
@@ -153,9 +182,9 @@ export class FloatingManager {
                 }
 
                 if (isPdf) {
-                    this.plugin.savePdfHighlight(view, this._selectionSnapshot, "action", actionName);
+                    void this.plugin.savePdfHighlight(view, this._selectionSnapshot, "action", actionName);
                 } else {
-                    this.plugin[actionName](view, this._selectionSnapshot);
+                    void this.plugin[actionName](view as MarkdownView, this._selectionSnapshot);
                 }
 
                 this.hide();
@@ -174,11 +203,11 @@ export class FloatingManager {
 
         // Special: Extract All PDF
         if (this.extractAllBtn) {
-            const handler = (evt) => {
+            const handler = (evt: Event) => {
                 preventFocus(evt);
                 const view = this.app.workspace.getActiveViewOfType(View);
                 if (view && view.getViewType() === "pdf") {
-                    this.plugin.extractAllPdfText(view);
+                    void this.plugin.extractAllPdfText(view);
                 }
                 this.hide();
             };
@@ -188,12 +217,12 @@ export class FloatingManager {
 
         // Color palette buttons
         this.colorButtons.forEach((btn, index) => {
-            const handler = (evt) => {
+            const handler = (evt: Event) => {
                 preventFocus(evt);
-                let view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                let view: MarkdownView | View | null = this.app.workspace.getActiveViewOfType(MarkdownView);
                 let isPdf = false;
 
-                if (!view || view.getMode() !== "preview") {
+                if (!view || (view as MarkdownView).getMode() !== "preview") {
                     view = this.app.workspace.getActiveViewOfType(View);
                     if (view && view.getViewType() === "pdf") {
                         isPdf = true;
@@ -204,9 +233,9 @@ export class FloatingManager {
                 }
 
                 if (isPdf) {
-                    this.plugin.savePdfHighlight(view, this._selectionSnapshot, "color", index);
+                    void this.plugin.savePdfHighlight(view, this._selectionSnapshot, "color", index);
                 } else {
-                    this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
+                    void this.plugin.applyColorByIndex(view as MarkdownView, index, this._selectionSnapshot);
                 }
 
                 this.hide();
@@ -225,13 +254,13 @@ export class FloatingManager {
 
         activeDocument.addEventListener(
             "touchstart",
-            (_e) => {
+            () => {
                 this.longPressTimer = window.setTimeout(() => {
                     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                     const sel = window.getSelection();
 
                     if (view && view.getMode() === "preview" && sel?.toString().trim()) {
-                        this.plugin.highlightSelection(view);
+                        void this.plugin.highlightSelection(view);
                         this.hide();
                     }
                 }, 600);
@@ -285,9 +314,9 @@ export class FloatingManager {
 
     /** Internal: actually process the current selection state. */
     _doHandleSelection() {
-        let view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        let view: MarkdownView | View | null = this.app.workspace.getActiveViewOfType(MarkdownView);
         let isPdf = false;
-        if (!view || view.getMode() !== "preview") {
+        if (!view || (view as MarkdownView).getMode() !== "preview") {
             view = this.app.workspace.getActiveViewOfType(View);
             if (!view || view.getViewType() !== "pdf") {
                 this.hide();
@@ -296,14 +325,14 @@ export class FloatingManager {
             isPdf = true;
         }
 
-        this.containerEl.toggleClass("is-pdf-view", isPdf);
+        this.containerEl?.toggleClass("is-pdf-view", isPdf);
 
         const sel = window.getSelection();
         const snippet = sel?.toString() ?? "";
 
         if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
             // Guard: Never show toolbar inside code blocks
-            let node = sel.anchorNode;
+            let node: Node | null = sel.anchorNode;
             while (node && node !== activeDocument.body) {
                 if (node.nodeName === "PRE" || node.nodeName === "CODE") {
                     this.hide();
@@ -329,7 +358,7 @@ export class FloatingManager {
         }
     }
 
-    show(rect) {
+    show(rect: DOMRect) {
         if (!this.containerEl || !rect) return;
 
         // Show + reset dynamic styles & classes

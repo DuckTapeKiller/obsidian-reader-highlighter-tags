@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { VaultScanner } from "../src/core/VaultScanner.js";
+import { VaultScanner } from "../src/core/VaultScanner";
 
 describe("VaultScanner", () => {
     let mockApp;

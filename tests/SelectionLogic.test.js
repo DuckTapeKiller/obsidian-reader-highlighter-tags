@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 
 // Import the SelectionLogic class
 // We need to handle the export format: `export var SelectionLogic = class { ... }`
-import { SelectionLogic } from "../src/core/SelectionLogic.js";
+import { SelectionLogic } from "../src/core/SelectionLogic";
 
 let logic;
 

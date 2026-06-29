@@ -417,6 +417,70 @@ export function updateHighlightAnnotationInRaw(raw, highlight, newAnnotationText
     return updatedRaw;
 }
 
+/**
+ * Remove a footnote-style annotation entirely: every inline reference `[^id]`
+ * in the body plus its `[^id]: ...` definition line. This is the counterpart to
+ * removing a highlight, but for standalone annotations that are not attached to
+ * a `==`/`<mark>` wrapper (those created via "Add annotation to selection").
+ */
+export function removeFootnoteFromRaw(raw, footnoteId) {
+    let updated = String(raw ?? "");
+    const id = String(footnoteId ?? "").trim();
+    if (!id) return { raw: updated, changed: false };
+
+    const newline = detectNewline(updated);
+    let changed = false;
+
+    // 1. Remove inline references `[^id]` (but never the definition's `[^id]:` token).
+    const refRe = new RegExp(`\\[\\^${escapeRegex(id)}\\](?!:)`, "g");
+    if (refRe.test(updated)) {
+        updated = updated.replace(refRe, "");
+        changed = true;
+    }
+
+    // 2. Remove the definition line `[^id]: ...` (re-parse: ref removal shifted offsets).
+    const def = parseFootnotes(updated).get(id);
+    if (def) {
+        let defStart = def.start;
+        let defEnd = def.end;
+        // Consume the definition's trailing newline.
+        if (updated.slice(defEnd, defEnd + newline.length) === newline) {
+            defEnd += newline.length;
+        }
+        // Collapse a preceding blank line if one was separating the definition.
+        if (
+            defStart >= newline.length * 2 &&
+            updated.slice(defStart - newline.length * 2, defStart) === newline + newline
+        ) {
+            defStart -= newline.length;
+        }
+        updated = updated.slice(0, defStart) + updated.slice(defEnd);
+        changed = true;
+    }
+
+    return { raw: updated, changed };
+}
+
+/**
+ * Remove every footnote annotation in the note (references + definitions).
+ * Returns the rewritten raw text and how many distinct footnotes were removed.
+ */
+export function removeAllFootnotesFromRaw(raw) {
+    let updated = String(raw ?? "");
+    const ids = [...parseFootnotes(updated).keys()];
+    let removedCount = 0;
+
+    for (const id of ids) {
+        const result = removeFootnoteFromRaw(updated, id);
+        if (result.changed) {
+            removedCount++;
+            updated = result.raw;
+        }
+    }
+
+    return { raw: updated, removedCount };
+}
+
 function applyDeletions(raw, deletions) {
     const ranges = (deletions || [])
         .filter((r) => r && Number.isInteger(r.start) && Number.isInteger(r.end) && r.end > r.start)

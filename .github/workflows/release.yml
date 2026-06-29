@@ -23,6 +23,15 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
+      - name: Check formatting (Prettier)
+        run: npm run format:check
+
+      - name: Lint (ESLint + Obsidian plugin rules)
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build --if-present
 

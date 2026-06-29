@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView, Menu, Platform } from "obsidian";
+import { ItemView, MarkdownView, Menu, Notice, Platform } from "obsidian";
 import { getHighlightsFromContent } from "../utils/export";
 import { HighlightEditModal } from "../modals/HighlightEditModal";
 import { BulkRecolorModal } from "../modals/BulkRecolorModal";
@@ -115,22 +115,38 @@ export class HighlightNavigatorView extends ItemView {
     }
 
     async refresh(force = false) {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        let targetFile;
 
-        // Prevent wiping list on brief focus loss
-        if (!view || !view.file) {
-            return;
+        if (force) {
+            // Forced refresh (after an edit/removal, or on a modify event):
+            // re-read the file we're already showing. Interacting with this
+            // sidebar makes it the active leaf, so there may be no active
+            // MarkdownView to read from — fall back to currentFile.
+            targetFile = this.currentFile || this.app.workspace.getActiveViewOfType(MarkdownView)?.file || null;
+            if (!targetFile) {
+                return;
+            }
+        } else {
+            // Following the active note (e.g. user switched files).
+            const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+
+            // Prevent wiping list on brief focus loss
+            if (!view || !view.file) {
+                return;
+            }
+
+            // Only re-parse if the file actually changed.
+            if (this.currentFile && view.file.path === this.currentFile.path) {
+                return;
+            }
+
+            targetFile = view.file;
         }
 
-        // Only re-parse if file changed or forced (on modify)
-        if (!force && this.currentFile && view.file.path === this.currentFile.path) {
-            return;
-        }
-
-        this.currentFile = view.file;
+        this.currentFile = targetFile;
 
         try {
-            const raw = await this.app.vault.read(view.file);
+            const raw = await this.app.vault.read(targetFile);
             this.highlights = getHighlightsFromContent(raw);
             this.footnotes = this.getFootnotesFromContent(raw);
             this.renderContent();
@@ -141,21 +157,69 @@ export class HighlightNavigatorView extends ItemView {
     }
 
     getFootnotesFromContent(raw) {
-        const footnotes = [];
         const lines = raw.split("\n");
-        // Matches [^id]: text
-        const pattern = /\[\^([^\]]+)\]:\s*([^\n]+)/g;
 
+        // Pass 1: collect definitions `[^id]: text` (one per line).
+        const definitions = [];
+        const definedIds = new Set();
         lines.forEach((line, lineIdx) => {
-            let match;
-            while ((match = pattern.exec(line)) !== null) {
-                footnotes.push({
-                    id: match[1],
-                    text: match[2].trim(),
-                    line: lineIdx,
-                });
+            const match = line.match(/^\s*\[\^([^\]]+)\]:\s*(.+)$/);
+            if (match) {
+                definitions.push({ id: match[1], text: match[2].trim(), line: lineIdx });
+                definedIds.add(match[1]);
             }
         });
+
+        // Pass 2: walk inline references `[^id]` (the `(?!:)` lookahead skips
+        // definitions) in document order. This reproduces Obsidian's Reading
+        // View numbering: each *defined* id gets the next sequential number on
+        // its first appearance; repeats reuse it; undefined refs (e.g. `[^foo]`
+        // with no definition) render as plain text and get no number. We also
+        // record the first reference line as the jump target, since the
+        // reference lives in the body and scrolls reliably (the definition
+        // section at the bottom is not line-addressable in Reading View).
+        const displayNumberById = new Map();
+        const refLineById = new Map();
+        let nextNumber = 1;
+        lines.forEach((line, lineIdx) => {
+            const refRe = /\[\^([^\]]+)\](?!:)/g;
+            let m;
+            while ((m = refRe.exec(line)) !== null) {
+                const id = m[1];
+                if (!definedIds.has(id)) continue;
+                if (!refLineById.has(id)) refLineById.set(id, lineIdx);
+                if (!displayNumberById.has(id)) displayNumberById.set(id, nextNumber++);
+            }
+        });
+
+        let footnotes = definitions.map((def) => ({
+            ...def,
+            displayNumber: displayNumberById.has(def.id) ? displayNumberById.get(def.id) : null,
+            refLine: refLineById.has(def.id) ? refLineById.get(def.id) : def.line,
+        }));
+
+        // Orphan handling is SCOPED, so normal notes are never affected.
+        // "Grouped-notes style" notes — i.e. the Obsidian Web Clipper output,
+        // which always defines a `[^0]` catch-all — produce many unreferenced
+        // definitions (references that only existed inside removed tables/
+        // figures/infoboxes). For those notes only, hide the orphans so every
+        // entry has a clean sequential number matching Reading View. A normal,
+        // hand-written note has no `[^0]` marker, so all of its definitions stay
+        // visible exactly as before (orphans show their `[^id]`).
+        const isGroupedNotesStyle = definedIds.has("0");
+        if (isGroupedNotesStyle) {
+            footnotes = footnotes.filter((f) => f.displayNumber != null);
+        }
+
+        // Order to match Reading View: referenced footnotes by rendered number;
+        // any retained orphans (normal notes only) sort to the end, in source order.
+        footnotes.sort((a, b) => {
+            if (a.displayNumber == null && b.displayNumber == null) return a.line - b.line;
+            if (a.displayNumber == null) return 1;
+            if (b.displayNumber == null) return -1;
+            return a.displayNumber - b.displayNumber;
+        });
+
         return footnotes;
     }
 
@@ -234,10 +298,15 @@ export class HighlightNavigatorView extends ItemView {
                     el.appendChild(colorDot);
                 }
             } else {
-                // Footnote ID indicator
+                // Footnote indicator: show the number Obsidian renders in
+                // Reading View (sequential by first appearance), not the literal
+                // id — those differ for out-of-order names (e.g. Wikipedia
+                // imports). The source id is kept in a tooltip. Unreferenced
+                // definitions have no rendered number, so fall back to `[^id]`.
                 const idSpan = document.createElement("span");
                 idSpan.addClass("footnote-id");
-                idSpan.textContent = `[${item.id}] `;
+                idSpan.textContent = item.displayNumber != null ? `${item.displayNumber} ` : `[^${item.id}] `;
+                idSpan.setAttribute("title", `[^${item.id}]`);
                 idSpan.style.marginRight = "5px";
                 idSpan.style.color = "var(--text-muted)";
                 el.appendChild(idSpan);
@@ -248,37 +317,52 @@ export class HighlightNavigatorView extends ItemView {
             textSpan.textContent = this.stripMarkdown(item.text);
             el.appendChild(textSpan);
 
-            if (type === "highlights") {
-                // Actions menu (hidden until hover on desktop; always available on mobile)
-                const menuBtn = document.createElement("button");
-                menuBtn.addClass("highlight-item-menu");
-                menuBtn.setAttribute("aria-label", "Highlight actions");
-                menuBtn.textContent = "⋯";
-                menuBtn.onclick = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+            // Actions menu (hidden until hover on desktop; always available on mobile).
+            // Available for both highlights and footnote annotations.
+            const openMenu = (e) => {
+                if (type === "highlights") {
                     this.openHighlightActionsMenu(item, e);
-                };
-                el.appendChild(menuBtn);
+                } else {
+                    this.openFootnoteActionsMenu(item, e);
+                }
+            };
 
-                // Number badge
+            const menuBtn = document.createElement("button");
+            menuBtn.addClass("highlight-item-menu");
+            menuBtn.setAttribute("aria-label", type === "highlights" ? "Highlight actions" : "Annotation actions");
+            menuBtn.textContent = "⋯";
+            menuBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openMenu(e);
+            };
+            el.appendChild(menuBtn);
+
+            // Trailing ordinal badge (highlights only). Footnotes already show
+            // their Reading-View number as the leading badge.
+            if (type === "highlights") {
                 const numberBadge = document.createElement("span");
                 numberBadge.addClass("highlight-number");
                 numberBadge.textContent = `${index + 1}`;
                 el.appendChild(numberBadge);
-
-                el.oncontextmenu = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.openHighlightActionsMenu(item, e);
-                };
             }
 
-            // Click to jump to line
+            el.oncontextmenu = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openMenu(e);
+            };
+
+            // Click to jump. Highlights scroll to their body line; footnotes
+            // scroll to the footnote definition at the bottom (see jumpToFootnote).
             el.onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                this.jumpToLine(item.line);
+                if (type === "footnotes") {
+                    this.jumpToFootnote(item);
+                } else {
+                    this.jumpToLine(item.line);
+                }
             };
 
             fragment.appendChild(el);
@@ -287,10 +371,26 @@ export class HighlightNavigatorView extends ItemView {
         list.appendChild(fragment);
     }
 
+    async copyItemText(item) {
+        const text = (item?.text ?? "").trim();
+        if (!text) {
+            new Notice("Nothing to copy.");
+            return;
+        }
+        const ok = await this.plugin.writeClipboardText(text);
+        new Notice(ok ? "Copied to clipboard." : "Failed to copy.");
+    }
+
     openHighlightActionsMenu(item, event) {
         if (!this.currentFile) return;
 
         const menu = new Menu();
+        menu.addItem((mi) => {
+            mi.setTitle("Copy")
+                .setIcon("copy")
+                .onClick(() => this.copyItemText(item));
+        });
+
         menu.addItem((mi) => {
             mi.setTitle("Edit…")
                 .setIcon("pencil")
@@ -307,21 +407,57 @@ export class HighlightNavigatorView extends ItemView {
             mi.setTitle("Remove all highlights (note)")
                 .setIcon("eraser")
                 .setWarning(true)
-                .onClick(() => {
+                .onClick(async () => {
                     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                     if (!view || !view.file || view.file.path !== this.currentFile.path) {
                         // Still allow removal even if user isn't in preview; operate on file directly.
-                        this.plugin.saveUndoState(this.currentFile).then(async () => {
-                            let raw = await this.app.vault.read(this.currentFile);
-                            raw = raw.replace(/==(.*?)==/gs, "$1");
-                            raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/gs, "$1");
-                            await this.app.vault.modify(this.currentFile, raw);
-                            this.refresh(true);
-                        });
+                        await this.plugin.saveUndoState(this.currentFile);
+                        let raw = await this.app.vault.read(this.currentFile);
+                        raw = raw.replace(/==(.*?)==/gs, "$1");
+                        raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/gs, "$1");
+                        await this.app.vault.modify(this.currentFile, raw);
+                        await this.refresh(true);
                         return;
                     }
-                    this.plugin.removeAllHighlights(view);
-                    this.refresh(true);
+                    await this.plugin.removeAllHighlights(view);
+                    await this.refresh(true);
+                });
+        });
+
+        menu.showAtMouseEvent(event);
+    }
+
+    openFootnoteActionsMenu(item, event) {
+        if (!this.currentFile) return;
+
+        const menu = new Menu();
+        menu.addItem((mi) => {
+            mi.setTitle("Copy")
+                .setIcon("copy")
+                .onClick(() => this.copyItemText(item));
+        });
+
+        menu.addSeparator();
+
+        menu.addItem((mi) => {
+            mi.setTitle("Remove annotation")
+                .setIcon("trash-2")
+                .setWarning(true)
+                .onClick(async () => {
+                    await this.plugin.removeAnnotationById(this.currentFile, item.id);
+                    await this.refresh(true);
+                });
+        });
+
+        menu.addSeparator();
+
+        menu.addItem((mi) => {
+            mi.setTitle("Remove all annotations (note)")
+                .setIcon("eraser")
+                .setWarning(true)
+                .onClick(async () => {
+                    await this.plugin.removeAllAnnotations(this.currentFile);
+                    await this.refresh(true);
                 });
         });
 
@@ -373,15 +509,72 @@ export class HighlightNavigatorView extends ItemView {
                 focus: true,
             });
         }
+        this.collapseSidebarOnMobile();
+    }
 
-        // Close the panel (collapse sidebar) on mobile only
-        if (Platform.isMobile) {
-            const root = this.leaf.getRoot();
-            if (root === this.app.workspace.leftSplit) {
-                this.app.workspace.leftSplit.collapse();
-            } else if (root === this.app.workspace.rightSplit) {
-                this.app.workspace.rightSplit.collapse();
+    /**
+     * Jump to a footnote's *definition* (the entry at the bottom), not its
+     * inline reference. In an editor (source/Live Preview) the definition line
+     * is directly scrollable. In Reading View the definition lives in an
+     * aggregated, virtualized section that is not line-addressable, so we bring
+     * the reference into view and then trigger Obsidian's own footnote
+     * navigation by clicking the rendered reference link — that scrolls to the
+     * definition and flashes it. If the link can't be found we fall back to the
+     * reference, so behavior never regresses below "show me where it's used".
+     */
+    async jumpToFootnote(item) {
+        const leaf = this.app.workspace.getMostRecentLeaf();
+        const view = leaf && leaf.view instanceof MarkdownView ? leaf.view : null;
+
+        if (!view) {
+            this.collapseSidebarOnMobile();
+            return;
+        }
+
+        if (view.getMode() !== "preview" || item.displayNumber == null) {
+            // Editor mode, or an unreferenced (orphan) footnote that has no
+            // rendered reference to click: scroll straight to the definition line.
+            leaf.setEphemeralState({ line: item.line, focus: true });
+            this.collapseSidebarOnMobile();
+            return;
+        }
+
+        // Reading View: surface the reference, then hand off to Obsidian's
+        // native footnote scroll/flash via the rendered reference link.
+        leaf.setEphemeralState({ line: item.refLine ?? item.line, focus: true });
+        window.setTimeout(() => {
+            const anchor = this.findFootnoteRefAnchor(view.contentEl, item);
+            if (anchor) {
+                anchor.click();
             }
+        }, 120);
+
+        this.collapseSidebarOnMobile();
+    }
+
+    findFootnoteRefAnchor(root, item) {
+        if (!root) return null;
+        const anchors = root.querySelectorAll("sup.footnote-ref a, a.footnote-ref, sup[id^='fnref'] a");
+        const wanted = item.displayNumber != null ? String(item.displayNumber) : null;
+
+        if (wanted) {
+            for (const a of anchors) {
+                // Reading View renders the sequential number as the link text.
+                if ((a.textContent || "").replace(/\D/g, "") === wanted) {
+                    return a;
+                }
+            }
+        }
+        return anchors.length ? anchors[0] : null;
+    }
+
+    collapseSidebarOnMobile() {
+        if (!Platform.isMobile) return;
+        const root = this.leaf.getRoot();
+        if (root === this.app.workspace.leftSplit) {
+            this.app.workspace.leftSplit.collapse();
+        } else if (root === this.app.workspace.rightSplit) {
+            this.app.workspace.rightSplit.collapse();
         }
     }
 

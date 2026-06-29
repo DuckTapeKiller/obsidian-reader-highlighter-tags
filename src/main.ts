@@ -12,6 +12,8 @@ import {
     mergeAdjacentHighlightsInRaw,
     migrateSpanHighlightsInRaw,
     recolorMarkHighlightsInRaw,
+    removeFootnoteFromRaw,
+    removeAllFootnotesFromRaw,
 } from "./utils/highlights";
 import { BulkRecolorModal } from "./modals/BulkRecolorModal";
 
@@ -299,6 +301,18 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 if (!view) return false;
                 if (checking) return true;
                 this.removeAllHighlights(view);
+                return true;
+            },
+        });
+
+        this.addCommand({
+            id: "remove-all-annotations",
+            name: "Remove all annotations from note",
+            checkCallback: (checking) => {
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (!view || !view.file) return false;
+                if (checking) return true;
+                this.removeAllAnnotations(view.file);
                 return true;
             },
         });
@@ -854,6 +868,30 @@ export default class ReadingHighlighterPlugin extends Plugin {
         raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/gs, "$1");
         await this.app.vault.modify(view.file, raw);
         new Notice("All highlights removed.");
+    }
+
+    async removeAnnotationById(file: TFile, footnoteId: string) {
+        await this.saveUndoState(file);
+        const raw = await this.app.vault.read(file);
+        const result = removeFootnoteFromRaw(raw, footnoteId);
+        if (!result.changed) {
+            new Notice("Annotation not found.");
+            return;
+        }
+        await this.app.vault.modify(file, result.raw);
+        new Notice("Annotation removed.");
+    }
+
+    async removeAllAnnotations(file: TFile) {
+        await this.saveUndoState(file);
+        const raw = await this.app.vault.read(file);
+        const result = removeAllFootnotesFromRaw(raw);
+        if (!result.removedCount) {
+            new Notice("No annotations to remove.");
+            return;
+        }
+        await this.app.vault.modify(file, result.raw);
+        new Notice(`Removed ${result.removedCount} annotation${result.removedCount === 1 ? "" : "s"}.`);
     }
 
     async mergeAdjacentHighlightsInFile(file: TFile) {

@@ -6,7 +6,7 @@ import { BulkRecolorModal } from "../modals/BulkRecolorModal";
 export const HIGHLIGHT_NAVIGATOR_VIEW = "highlight-navigator";
 
 /**
- * Enhanced Sidebar view that displays all highlights and footnotes in the current document.
+ * Enhanced Sidebar view that displays all highlights and footnotes in the current activeDocument.
  * Includes tabbed switching and split views for premium navigator experience.
  */
 export class HighlightNavigatorView extends ItemView {
@@ -279,21 +279,21 @@ export class HighlightNavigatorView extends ItemView {
         stats.createSpan({ text: statsText });
 
         const list = container.createDiv({ cls: "highlight-navigator-list" });
-        const fragment = document.createDocumentFragment();
+        const fragment = activeDocument.createDocumentFragment();
 
         filteredItems.forEach((item, index) => {
-            const el = document.createElement("div");
+            const el = activeDocument.createElement("div");
             el.addClass("highlight-navigator-item");
 
             if (type === "highlights") {
                 // Color indicator
                 if (item.color) {
-                    const colorDot = document.createElement("span");
+                    const colorDot = activeDocument.createElement("span");
                     colorDot.addClass("highlight-color-dot");
                     colorDot.setCssStyles({ backgroundColor: item.color });
                     el.appendChild(colorDot);
                 } else {
-                    const colorDot = document.createElement("span");
+                    const colorDot = activeDocument.createElement("span");
                     colorDot.addClass("highlight-color-dot", "highlight-default");
                     el.appendChild(colorDot);
                 }
@@ -303,7 +303,7 @@ export class HighlightNavigatorView extends ItemView {
                 // id — those differ for out-of-order names (e.g. Wikipedia
                 // imports). The source id is kept in a tooltip. Unreferenced
                 // definitions have no rendered number, so fall back to `[^id]`.
-                const idSpan = document.createElement("span");
+                const idSpan = activeDocument.createElement("span");
                 idSpan.addClass("footnote-id");
                 idSpan.textContent = item.displayNumber != null ? `${item.displayNumber} ` : `[^${item.id}] `;
                 idSpan.setAttribute("title", `[^${item.id}]`);
@@ -311,7 +311,7 @@ export class HighlightNavigatorView extends ItemView {
                 el.appendChild(idSpan);
             }
 
-            const textSpan = document.createElement("span");
+            const textSpan = activeDocument.createElement("span");
             textSpan.addClass("highlight-text");
             textSpan.textContent = this.stripMarkdown(item.text);
             el.appendChild(textSpan);
@@ -326,7 +326,7 @@ export class HighlightNavigatorView extends ItemView {
                 }
             };
 
-            const menuBtn = document.createElement("button");
+            const menuBtn = activeDocument.createElement("button");
             menuBtn.addClass("highlight-item-menu");
             menuBtn.setAttribute("aria-label", type === "highlights" ? "Highlight actions" : "Annotation actions");
             menuBtn.textContent = "⋯";
@@ -340,7 +340,7 @@ export class HighlightNavigatorView extends ItemView {
             // Trailing ordinal badge (highlights only). Footnotes already show
             // their Reading-View number as the leading badge.
             if (type === "highlights") {
-                const numberBadge = document.createElement("span");
+                const numberBadge = activeDocument.createElement("span");
                 numberBadge.addClass("highlight-number");
                 numberBadge.textContent = `${index + 1}`;
                 el.appendChild(numberBadge);
@@ -658,12 +658,10 @@ export class HighlightNavigatorView extends ItemView {
             }));
 
             if (highlights.length === 0) {
-                const { Notice } = require("obsidian");
                 new Notice("No highlights to export.");
                 return;
             }
 
-            const { Notice } = require("obsidian");
             new Notice("Generating Canvas...");
             const exportPath = await exportHighlightsToCanvas(this.app, highlights);
 

@@ -840,7 +840,7 @@ var FloatingManager = class {
     this._handlers.forEach((cleanup) => cleanup());
     this._handlers = [];
     if (this._selectionDebounceTimer) {
-      clearTimeout(this._selectionDebounceTimer);
+      window.clearTimeout(this._selectionDebounceTimer);
       this._selectionDebounceTimer = null;
     }
   }
@@ -855,15 +855,15 @@ var FloatingManager = class {
   }
   createElements() {
     if (this.containerEl) return;
-    this.containerEl = document.createElement("div");
+    this.containerEl = activeDocument.createElement("div");
     this.containerEl.addClass("reading-highlighter-float-container");
     this.highlightBtn = this.createButton("highlighter", "Highlight selection");
     this.containerEl.appendChild(this.highlightBtn);
     if (this.plugin.settings.enableColorPalette) {
-      this.paletteContainer = document.createElement("div");
+      this.paletteContainer = activeDocument.createElement("div");
       this.paletteContainer.addClass("reading-highlighter-palette");
       this.plugin.settings.semanticColors.forEach((item, index) => {
-        const colorBtn = document.createElement("button");
+        const colorBtn = activeDocument.createElement("button");
         colorBtn.addClass("reading-highlighter-color-btn");
         colorBtn.setCssStyles({ backgroundColor: item.color });
         colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
@@ -893,10 +893,10 @@ var FloatingManager = class {
     this.extractAllBtn = this.createButton("file-text", "Extract All PDF Text");
     this.extractAllBtn.addClass("pdf-only-btn");
     this.containerEl.appendChild(this.extractAllBtn);
-    document.body.appendChild(this.containerEl);
+    activeDocument.body.appendChild(this.containerEl);
   }
   createButton(iconName, label) {
-    const btn = document.createElement("button");
+    const btn = activeDocument.createElement("button");
     (0, import_obsidian.setIcon)(btn, iconName);
     if (this.plugin.settings.showTooltips) {
       btn.setAttribute("aria-label", label);
@@ -913,11 +913,10 @@ var FloatingManager = class {
       if (!btn) return;
       const handler = (evt) => {
         preventFocus(evt);
-        const { View: View2 } = require("obsidian");
         let view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
         let isPdf = false;
         if (!view || view.getMode() !== "preview") {
-          view = this.app.workspace.getActiveViewOfType(View2);
+          view = this.app.workspace.getActiveViewOfType(import_obsidian.View);
           if (view && view.getViewType() === "pdf") {
             isPdf = true;
           } else {
@@ -943,8 +942,7 @@ var FloatingManager = class {
     if (this.extractAllBtn) {
       const handler = (evt) => {
         preventFocus(evt);
-        const { View: View2 } = require("obsidian");
-        const view = this.app.workspace.getActiveViewOfType(View2);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian.View);
         if (view && view.getViewType() === "pdf") {
           this.plugin.extractAllPdfText(view);
         }
@@ -956,11 +954,10 @@ var FloatingManager = class {
     this.colorButtons.forEach((btn, index) => {
       const handler = (evt) => {
         preventFocus(evt);
-        const { View: View2 } = require("obsidian");
         let view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
         let isPdf = false;
         if (!view || view.getMode() !== "preview") {
-          view = this.app.workspace.getActiveViewOfType(View2);
+          view = this.app.workspace.getActiveViewOfType(import_obsidian.View);
           if (view && view.getViewType() === "pdf") {
             isPdf = true;
           } else {
@@ -981,10 +978,10 @@ var FloatingManager = class {
   }
   setupMobileGestures() {
     if (!import_obsidian.Platform.isIosApp) return;
-    document.addEventListener(
+    activeDocument.addEventListener(
       "touchstart",
       (_e) => {
-        this.longPressTimer = setTimeout(() => {
+        this.longPressTimer = window.setTimeout(() => {
           const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
           const sel = window.getSelection();
           if (view && view.getMode() === "preview" && (sel == null ? void 0 : sel.toString().trim())) {
@@ -995,21 +992,21 @@ var FloatingManager = class {
       },
       { passive: true }
     );
-    document.addEventListener(
+    activeDocument.addEventListener(
       "touchmove",
       () => {
         if (this.longPressTimer) {
-          clearTimeout(this.longPressTimer);
+          window.clearTimeout(this.longPressTimer);
           this.longPressTimer = null;
         }
       },
       { passive: true }
     );
-    document.addEventListener(
+    activeDocument.addEventListener(
       "touchend",
       () => {
         if (this.longPressTimer) {
-          clearTimeout(this.longPressTimer);
+          window.clearTimeout(this.longPressTimer);
           this.longPressTimer = null;
         }
       },
@@ -1025,9 +1022,9 @@ var FloatingManager = class {
   handleSelection() {
     if (import_obsidian.Platform.isAndroidApp) {
       if (this._selectionDebounceTimer) {
-        clearTimeout(this._selectionDebounceTimer);
+        window.clearTimeout(this._selectionDebounceTimer);
       }
-      this._selectionDebounceTimer = setTimeout(() => {
+      this._selectionDebounceTimer = window.setTimeout(() => {
         this._selectionDebounceTimer = null;
         this._doHandleSelection();
       }, 300);
@@ -1038,11 +1035,10 @@ var FloatingManager = class {
   /** Internal: actually process the current selection state. */
   _doHandleSelection() {
     var _a;
-    const { View: View2 } = require("obsidian");
     let view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
     let isPdf = false;
     if (!view || view.getMode() !== "preview") {
-      view = this.app.workspace.getActiveViewOfType(View2);
+      view = this.app.workspace.getActiveViewOfType(import_obsidian.View);
       if (!view || view.getViewType() !== "pdf") {
         this.hide();
         return;
@@ -1054,7 +1050,7 @@ var FloatingManager = class {
     const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
     if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
       let node = sel.anchorNode;
-      while (node && node !== document.body) {
+      while (node && node !== activeDocument.body) {
         if (node.nodeName === "PRE" || node.nodeName === "CODE") {
           this.hide();
           return;
@@ -2230,7 +2226,7 @@ var SelectionLogic = class {
   }
   /**
    * Word-Proximity Matching Strategy (Defined)
-   * Finds the densest cluster of words from the snippet within the document.
+   * Finds the densest cluster of words from the snippet within the activeDocument.
    */
   findProximityCandidates(text, snippet, bodyStart = 0) {
     const words = snippet.split(/\s+/).filter((w) => w.length > 2).map((w) => w.toLocaleLowerCase());
@@ -2365,7 +2361,7 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
       attr: { placeholder: "Search or create tag..." }
     });
     const doneBtn = inputContainer.createEl("button", { text: "Done", cls: "mod-cta tag-done-btn" });
-    setTimeout(() => input.focus(), 50);
+    window.setTimeout(() => input.focus(), 50);
     this.suggestionEl = contentEl.createDiv({ cls: "tag-suggestions-list" });
     doneBtn.onclick = () => this.submit();
     const tagCounts = this.app.metadataCache.getTags();
@@ -2503,7 +2499,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
     }
     contentEl.createEl("h2", { text: "Add Annotation" });
     contentEl.createEl("p", {
-      text: "Your comment will be added as a footnote at the bottom of the document.",
+      text: "Your comment will be added as a footnote at the bottom of the activeDocument.",
       cls: "annotation-description"
     });
     const textArea = new import_obsidian3.TextAreaComponent(contentEl);
@@ -2512,7 +2508,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
     textArea.onChange((value) => {
       this.comment = value;
     });
-    setTimeout(() => textArea.inputEl.focus(), 50);
+    window.setTimeout(() => textArea.inputEl.focus(), 50);
     textArea.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -3031,30 +3027,30 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     }
     stats.createSpan({ text: statsText });
     const list = container.createDiv({ cls: "highlight-navigator-list" });
-    const fragment = document.createDocumentFragment();
+    const fragment = activeDocument.createDocumentFragment();
     filteredItems.forEach((item, index) => {
-      const el = document.createElement("div");
+      const el = activeDocument.createElement("div");
       el.addClass("highlight-navigator-item");
       if (type === "highlights") {
         if (item.color) {
-          const colorDot = document.createElement("span");
+          const colorDot = activeDocument.createElement("span");
           colorDot.addClass("highlight-color-dot");
           colorDot.setCssStyles({ backgroundColor: item.color });
           el.appendChild(colorDot);
         } else {
-          const colorDot = document.createElement("span");
+          const colorDot = activeDocument.createElement("span");
           colorDot.addClass("highlight-color-dot", "highlight-default");
           el.appendChild(colorDot);
         }
       } else {
-        const idSpan = document.createElement("span");
+        const idSpan = activeDocument.createElement("span");
         idSpan.addClass("footnote-id");
         idSpan.textContent = item.displayNumber != null ? `${item.displayNumber} ` : `[^${item.id}] `;
         idSpan.setAttribute("title", `[^${item.id}]`);
         idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
         el.appendChild(idSpan);
       }
-      const textSpan = document.createElement("span");
+      const textSpan = activeDocument.createElement("span");
       textSpan.addClass("highlight-text");
       textSpan.textContent = this.stripMarkdown(item.text);
       el.appendChild(textSpan);
@@ -3065,7 +3061,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
           this.openFootnoteActionsMenu(item, e);
         }
       };
-      const menuBtn = document.createElement("button");
+      const menuBtn = activeDocument.createElement("button");
       menuBtn.addClass("highlight-item-menu");
       menuBtn.setAttribute("aria-label", type === "highlights" ? "Highlight actions" : "Annotation actions");
       menuBtn.textContent = "\u22EF";
@@ -3076,7 +3072,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
       };
       el.appendChild(menuBtn);
       if (type === "highlights") {
-        const numberBadge = document.createElement("span");
+        const numberBadge = activeDocument.createElement("span");
         numberBadge.addClass("highlight-number");
         numberBadge.textContent = `${index + 1}`;
         el.appendChild(numberBadge);
@@ -3314,12 +3310,10 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
         file: this.currentFile
       }));
       if (highlights.length === 0) {
-        const { Notice: Notice6 } = require("obsidian");
-        new Notice6("No highlights to export.");
+        new import_obsidian6.Notice("No highlights to export.");
         return;
       }
-      const { Notice: Notice5 } = require("obsidian");
-      new Notice5("Generating Canvas...");
+      new import_obsidian6.Notice("Generating Canvas...");
       const exportPath = await exportHighlightsToCanvas2(this.app, highlights);
       const file = this.app.vault.getAbstractFileByPath(exportPath);
       if (file) {
@@ -3382,7 +3376,7 @@ var VaultScanner = class {
       const current = Math.min(i + BATCH_SIZE, total);
       const lastFileName = batch[batch.length - 1].basename;
       onProgress(current, total, lastFileName);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
     }
     results.sort((a, b) => a.file.basename.localeCompare(b.file.basename));
     return results;
@@ -3683,13 +3677,11 @@ var ResearchView = class extends import_obsidian7.ItemView {
       });
     }
     if (allHighlights.length === 0) {
-      const { Notice: Notice5 } = require("obsidian");
-      new Notice5("No highlights to export to Canvas.");
+      new import_obsidian7.Notice("No highlights to export to Canvas.");
       return;
     }
     try {
-      const { Notice: Notice5 } = require("obsidian");
-      new Notice5("Generating Canvas...");
+      new import_obsidian7.Notice("Generating Canvas...");
       const exportPath = await exportHighlightsToCanvas(this.app, allHighlights);
       const file = this.app.vault.getAbstractFileByPath(exportPath);
       if (file) {
@@ -3769,7 +3761,7 @@ var FailureRecoveryModal = class extends import_obsidian8.Modal {
         this.correction = value;
         this.updatePreview(previewContainer);
       });
-      setTimeout(() => text.inputEl.focus(), 10);
+      window.setTimeout(() => text.inputEl.focus(), 10);
     });
     new import_obsidian8.Setting(contentEl).addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close())).addButton(
       (btn) => btn.setButtonText("Apply Once").onClick(() => {
@@ -3899,7 +3891,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     this.registerView(RESEARCH_VIEW, (leaf) => new ResearchView(leaf, this));
     this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
     this.registerCommands();
-    this.registerDomEvent(document, "selectionchange", () => {
+    this.registerDomEvent(activeDocument, "selectionchange", () => {
       this.floatingManager.handleSelection();
     });
     this.registerEvent(
@@ -3917,13 +3909,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     if (import_obsidian9.Platform.isMobile) {
       const btn = this.addRibbonIcon("highlighter", "Highlight Selection", () => {
         const view = this.getActiveReadingView();
-        if (view) this.highlightSelection(view);
+        if (view) void this.highlightSelection(view);
         else new import_obsidian9.Notice("Open a note in Reading View first.");
       });
       this.register(() => btn.remove());
     }
     this.addRibbonIcon("lamp", "Highlight Navigator", () => {
-      this.activateNavigatorView();
+      void this.activateNavigatorView();
     });
     this.floatingManager.load();
   }
@@ -3936,7 +3928,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.getActiveReadingView();
         if (!view) return false;
         if (checking) return true;
-        this.highlightSelection(view);
+        void this.highlightSelection(view);
         return true;
       }
     });
@@ -3947,7 +3939,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.getActiveReadingView();
         if (!view) return false;
         if (checking) return true;
-        this.tagSelection(view);
+        void this.tagSelection(view);
         return true;
       }
     });
@@ -3958,7 +3950,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian9.View);
         if (view && view.getViewType() === "pdf") {
           if (!checking) {
-            this.extractAllPdfText(view);
+            void this.extractAllPdfText(view);
           }
           return true;
         }
@@ -3973,7 +3965,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.getActiveReadingView();
         if (!view) return false;
         if (checking) return true;
-        this.annotateSelection(view);
+        void this.annotateSelection(view);
         return true;
       }
     });
@@ -3984,7 +3976,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.getActiveReadingView();
         if (!view) return false;
         if (checking) return true;
-        this.copyAsQuote(view);
+        void this.copyAsQuote(view);
         return true;
       }
     });
@@ -3995,7 +3987,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.getActiveReadingView();
         if (!view) return false;
         if (checking) return true;
-        this.removeHighlightSelection(view);
+        void this.removeHighlightSelection(view);
         return true;
       }
     });
@@ -4003,21 +3995,21 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       id: "undo-last-highlight",
       name: "Undo last highlight",
       callback: () => {
-        this.undoLastHighlight();
+        void this.undoLastHighlight();
       }
     });
     this.addCommand({
       id: "open-highlight-navigator",
       name: "Open highlight navigator",
       callback: () => {
-        this.activateNavigatorView();
+        void this.activateNavigatorView();
       }
     });
     this.addCommand({
       id: "open-research-view",
       name: "Open global research view",
       callback: () => {
-        this.activateResearchView();
+        void this.activateResearchView();
       }
     });
     this.addCommand({
@@ -4027,7 +4019,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.getActiveReadingView();
         if (!view) return false;
         if (checking) return true;
-        this.exportHighlights(view);
+        void this.exportHighlights(view);
         return true;
       }
     });
@@ -4038,7 +4030,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!view || !view.file) return false;
         if (checking) return true;
-        this.exportHighlightsJSON(view);
+        void this.exportHighlightsJSON(view);
         return true;
       }
     });
@@ -4049,7 +4041,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!view || !view.file) return false;
         if (checking) return true;
-        this.exportHighlightsCSV(view);
+        void this.exportHighlightsCSV(view);
         return true;
       }
     });
@@ -4060,7 +4052,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.getActiveReadingView();
         if (!view) return false;
         if (checking) return true;
-        this.removeAllHighlights(view);
+        void this.removeAllHighlights(view);
         return true;
       }
     });
@@ -4071,7 +4063,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!view || !view.file) return false;
         if (checking) return true;
-        this.removeAllAnnotations(view.file);
+        void this.removeAllAnnotations(view.file);
         return true;
       }
     });
@@ -4082,7 +4074,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!view || !view.file) return false;
         if (checking) return true;
-        this.mergeAdjacentHighlightsInFile(view.file);
+        void this.mergeAdjacentHighlightsInFile(view.file);
         return true;
       }
     });
@@ -4104,7 +4096,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!view || !view.file) return false;
         if (checking) return true;
-        this.migrateSpanHighlightsInFile(view.file);
+        void this.migrateSpanHighlightsInFile(view.file);
         return true;
       }
     });
@@ -4115,7 +4107,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
         const view = this.getActiveReadingView();
         if (!view) return false;
         if (checking) return true;
-        this.resumeReading(view);
+        void this.resumeReading(view);
         return true;
       }
     });
@@ -4129,7 +4121,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
           const view = this.getActiveReadingView();
           if (!view) return false;
           if (checking) return true;
-          this.applyColorByIndex(view, i);
+          void this.applyColorByIndex(view, i);
           return true;
         }
       });
@@ -4145,7 +4137,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       leaf = workspace.getLeaf("tab");
       await leaf.setViewState({ type: RESEARCH_VIEW, active: true });
     }
-    workspace.revealLeaf(leaf);
+    void workspace.revealLeaf(leaf);
   }
   onunload() {
     this.floatingManager.unload();
@@ -4206,7 +4198,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       if (!text) return false;
       try {
         return range.intersectsNode(element);
-      } catch (_error) {
+      } catch (e) {
         return false;
       }
     });
@@ -4345,7 +4337,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       if (payload === "highlightSelection") {
         highlightOutput = snippet.trim();
       } else if (payload === "copyAsQuote") {
-        this.copyAsQuote(view, { ...selectionSnapshot, text: snippet });
+        void this.copyAsQuote(view, { ...selectionSnapshot, text: snippet });
         return;
       } else {
         return;
@@ -4393,10 +4385,9 @@ ${appendString}`;
       new import_obsidian9.Notice("Please open a PDF file first.");
       return;
     }
-    const loadPdfJs = require("obsidian").loadPdfJs;
     const notice = new import_obsidian9.Notice("Extracting all PDF text...", 0);
     try {
-      const pdfjs = await loadPdfJs();
+      const pdfjs = await (0, import_obsidian9.loadPdfJs)();
       const buffer = await this.app.vault.readBinary(view.file);
       const loadingTask = pdfjs.getDocument({ data: buffer });
       const pdf = await loadingTask.promise;
@@ -4477,7 +4468,7 @@ ${appendString}`;
     if (this.settings.recentTags.length > this.settings.maxRecentTags) {
       this.settings.recentTags = this.settings.recentTags.slice(0, this.settings.maxRecentTags);
     }
-    this.saveData(this.settings);
+    void this.saveData(this.settings);
   }
   async annotateSelection(view, selectionSnapshot) {
     const request = this.buildSelectionRequest(view, selectionSnapshot);
@@ -4722,7 +4713,7 @@ ${appendString}`;
     const pos = getScroll(view);
     if (pos && pos.y > 0) {
       this.settings.readingPositions[view.file.path] = pos.y;
-      this.saveData(this.settings);
+      void this.saveData(this.settings);
     }
   }
   async resumeReading(view) {
@@ -4738,7 +4729,7 @@ ${appendString}`;
     var _a;
     const existing = this.app.workspace.getLeavesOfType(HIGHLIGHT_NAVIGATOR_VIEW);
     if (existing.length) {
-      this.app.workspace.revealLeaf(existing[0]);
+      void this.app.workspace.revealLeaf(existing[0]);
       return;
     }
     const leaf = (_a = this.app.workspace.getRightLeaf(false)) != null ? _a : this.app.workspace.getLeaf("tab");
@@ -4746,7 +4737,7 @@ ${appendString}`;
       type: HIGHLIGHT_NAVIGATOR_VIEW,
       active: true
     });
-    this.app.workspace.revealLeaf(leaf);
+    void this.app.workspace.revealLeaf(leaf);
   }
   expandQuoteTemplate(file, quotedText, frontmatter = {}) {
     const sourceUrl = String(frontmatter.url || frontmatter.source || frontmatter.link || "").replace(
@@ -4774,17 +4765,17 @@ ${appendString}`;
     try {
       await navigator.clipboard.writeText(text);
       return true;
-    } catch (_error) {
-      const textArea = document.createElement("textarea");
+    } catch (e) {
+      const textArea = activeDocument.createElement("textarea");
       textArea.value = text;
       textArea.setCssStyles({ position: "fixed", opacity: "0" });
-      document.body.appendChild(textArea);
+      activeDocument.body.appendChild(textArea);
       textArea.focus();
       textArea.select();
       let copied = false;
       try {
-        copied = document.execCommand("copy");
-      } catch (_fallbackError) {
+        copied = activeDocument.execCommand("copy");
+      } catch (e2) {
         copied = false;
       }
       textArea.remove();
@@ -4815,7 +4806,7 @@ ${appendString}`;
         }
       }
       return hostParts.slice(-2).join(".");
-    } catch (_error) {
+    } catch (e) {
       return "";
     }
   }
@@ -5042,7 +5033,7 @@ ${appendString}`;
     }
   }
   restoreScroll(view, pos) {
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       applyScroll(view, pos);
     });
   }
@@ -5128,7 +5119,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       this.sectionHeading("Semantic Color Meanings", "h4");
       this.plugin.settings.semanticColors.forEach((item, index) => {
         const setting = new import_obsidian9.Setting(containerEl).setName(`Color ${index + 1}`);
-        const colorPreview = document.createElement("div");
+        const colorPreview = activeDocument.createElement("div");
         colorPreview.setCssStyles({
           width: "24px",
           height: "24px",
@@ -5239,7 +5230,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       (toggle) => toggle.setValue(this.plugin.settings.enableFrontmatterTag).onChange(async (value) => {
         this.plugin.settings.enableFrontmatterTag = value;
         await this.plugin.saveSettings();
-        if (tagSetting) {
+        if (tagSetting !== void 0) {
           tagSetting.settingEl.setCssStyles({ display: value ? "" : "none" });
         }
       })

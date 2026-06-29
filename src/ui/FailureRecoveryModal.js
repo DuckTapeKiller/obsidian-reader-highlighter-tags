@@ -53,7 +53,7 @@ export class FailureRecoveryModal extends Modal {
                 });
 
             // Auto-focus the field so user can paste/edit immediately
-            setTimeout(() => text.inputEl.focus(), 10);
+            window.setTimeout(() => text.inputEl.focus(), 10);
         });
 
         new Setting(contentEl)

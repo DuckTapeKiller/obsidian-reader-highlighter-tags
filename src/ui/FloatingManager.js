@@ -1,4 +1,4 @@
-import { setIcon, MarkdownView, Platform } from "obsidian";
+import { setIcon, MarkdownView, Platform, View } from "obsidian";
 
 export class FloatingManager {
     constructor(plugin) {
@@ -40,7 +40,7 @@ export class FloatingManager {
         this._handlers.forEach((cleanup) => cleanup());
         this._handlers = [];
         if (this._selectionDebounceTimer) {
-            clearTimeout(this._selectionDebounceTimer);
+            window.clearTimeout(this._selectionDebounceTimer);
             this._selectionDebounceTimer = null;
         }
     }
@@ -59,7 +59,7 @@ export class FloatingManager {
     createElements() {
         if (this.containerEl) return;
 
-        this.containerEl = document.createElement("div");
+        this.containerEl = activeDocument.createElement("div");
         this.containerEl.addClass("reading-highlighter-float-container");
 
         // Main highlight button
@@ -68,11 +68,11 @@ export class FloatingManager {
 
         // Semantic Color palette (only if enabled)
         if (this.plugin.settings.enableColorPalette) {
-            this.paletteContainer = document.createElement("div");
+            this.paletteContainer = activeDocument.createElement("div");
             this.paletteContainer.addClass("reading-highlighter-palette");
 
             this.plugin.settings.semanticColors.forEach((item, index) => {
-                const colorBtn = document.createElement("button");
+                const colorBtn = activeDocument.createElement("button");
                 colorBtn.addClass("reading-highlighter-color-btn");
                 colorBtn.setCssStyles({ backgroundColor: item.color });
                 colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
@@ -114,11 +114,11 @@ export class FloatingManager {
         this.extractAllBtn.addClass("pdf-only-btn");
         this.containerEl.appendChild(this.extractAllBtn);
 
-        document.body.appendChild(this.containerEl);
+        activeDocument.body.appendChild(this.containerEl);
     }
 
     createButton(iconName, label) {
-        const btn = document.createElement("button");
+        const btn = activeDocument.createElement("button");
         setIcon(btn, iconName);
         // Only add tooltip if enabled in settings
         if (this.plugin.settings.showTooltips) {
@@ -139,7 +139,6 @@ export class FloatingManager {
 
             const handler = (evt) => {
                 preventFocus(evt);
-                const { View } = require("obsidian");
                 let view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 let isPdf = false;
 
@@ -177,7 +176,6 @@ export class FloatingManager {
         if (this.extractAllBtn) {
             const handler = (evt) => {
                 preventFocus(evt);
-                const { View } = require("obsidian");
                 const view = this.app.workspace.getActiveViewOfType(View);
                 if (view && view.getViewType() === "pdf") {
                     this.plugin.extractAllPdfText(view);
@@ -192,7 +190,6 @@ export class FloatingManager {
         this.colorButtons.forEach((btn, index) => {
             const handler = (evt) => {
                 preventFocus(evt);
-                const { View } = require("obsidian");
                 let view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 let isPdf = false;
 
@@ -226,10 +223,10 @@ export class FloatingManager {
         // behaviour and causes partial (single-word) highlights.
         if (!Platform.isIosApp) return;
 
-        document.addEventListener(
+        activeDocument.addEventListener(
             "touchstart",
             (_e) => {
-                this.longPressTimer = setTimeout(() => {
+                this.longPressTimer = window.setTimeout(() => {
                     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                     const sel = window.getSelection();
 
@@ -242,22 +239,22 @@ export class FloatingManager {
             { passive: true }
         );
 
-        document.addEventListener(
+        activeDocument.addEventListener(
             "touchmove",
             () => {
                 if (this.longPressTimer) {
-                    clearTimeout(this.longPressTimer);
+                    window.clearTimeout(this.longPressTimer);
                     this.longPressTimer = null;
                 }
             },
             { passive: true }
         );
 
-        document.addEventListener(
+        activeDocument.addEventListener(
             "touchend",
             () => {
                 if (this.longPressTimer) {
-                    clearTimeout(this.longPressTimer);
+                    window.clearTimeout(this.longPressTimer);
                     this.longPressTimer = null;
                 }
             },
@@ -275,9 +272,9 @@ export class FloatingManager {
         if (Platform.isAndroidApp) {
             // Debounce: wait for selection to stabilise
             if (this._selectionDebounceTimer) {
-                clearTimeout(this._selectionDebounceTimer);
+                window.clearTimeout(this._selectionDebounceTimer);
             }
-            this._selectionDebounceTimer = setTimeout(() => {
+            this._selectionDebounceTimer = window.setTimeout(() => {
                 this._selectionDebounceTimer = null;
                 this._doHandleSelection();
             }, 300);
@@ -288,7 +285,6 @@ export class FloatingManager {
 
     /** Internal: actually process the current selection state. */
     _doHandleSelection() {
-        const { View } = require("obsidian");
         let view = this.app.workspace.getActiveViewOfType(MarkdownView);
         let isPdf = false;
         if (!view || view.getMode() !== "preview") {
@@ -308,7 +304,7 @@ export class FloatingManager {
         if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
             // Guard: Never show toolbar inside code blocks
             let node = sel.anchorNode;
-            while (node && node !== document.body) {
+            while (node && node !== activeDocument.body) {
                 if (node.nodeName === "PRE" || node.nodeName === "CODE") {
                     this.hide();
                     return;

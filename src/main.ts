@@ -1,4 +1,4 @@
-import { Plugin, Notice, Platform, PluginSettingTab, Setting, MarkdownView, View, TFile } from "obsidian";
+import { Plugin, Notice, Platform, PluginSettingTab, Setting, MarkdownView, View, TFile, loadPdfJs } from "obsidian";
 import { FloatingManager } from "./ui/FloatingManager";
 import { SelectionLogic } from "./core/SelectionLogic";
 import { TagSuggestModal } from "./modals/TagSuggestModal";
@@ -121,7 +121,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
         this.registerCommands();
 
-        this.registerDomEvent(document, "selectionchange", () => {
+        this.registerDomEvent(activeDocument, "selectionchange", () => {
             this.floatingManager.handleSelection();
         });
 
@@ -142,14 +142,14 @@ export default class ReadingHighlighterPlugin extends Plugin {
         if (Platform.isMobile) {
             const btn = this.addRibbonIcon("highlighter", "Highlight Selection", () => {
                 const view = this.getActiveReadingView();
-                if (view) this.highlightSelection(view);
+                if (view) void this.highlightSelection(view);
                 else new Notice("Open a note in Reading View first.");
             });
             this.register(() => btn.remove());
         }
 
         this.addRibbonIcon("lamp", "Highlight Navigator", () => {
-            this.activateNavigatorView();
+            void this.activateNavigatorView();
         });
 
         this.floatingManager.load();
@@ -164,7 +164,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                this.highlightSelection(view);
+                void this.highlightSelection(view);
                 return true;
             },
         });
@@ -176,7 +176,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                this.tagSelection(view);
+                void this.tagSelection(view);
                 return true;
             },
         });
@@ -188,7 +188,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.app.workspace.getActiveViewOfType(View);
                 if (view && view.getViewType() === "pdf") {
                     if (!checking) {
-                        this.extractAllPdfText(view);
+                        void this.extractAllPdfText(view);
                     }
                     return true;
                 }
@@ -204,7 +204,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                this.annotateSelection(view);
+                void this.annotateSelection(view);
                 return true;
             },
         });
@@ -216,7 +216,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                this.copyAsQuote(view);
+                void this.copyAsQuote(view);
                 return true;
             },
         });
@@ -228,7 +228,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                this.removeHighlightSelection(view);
+                void this.removeHighlightSelection(view);
                 return true;
             },
         });
@@ -237,7 +237,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             id: "undo-last-highlight",
             name: "Undo last highlight",
             callback: () => {
-                this.undoLastHighlight();
+                void this.undoLastHighlight();
             },
         });
 
@@ -245,7 +245,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             id: "open-highlight-navigator",
             name: "Open highlight navigator",
             callback: () => {
-                this.activateNavigatorView();
+                void this.activateNavigatorView();
             },
         });
 
@@ -253,7 +253,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             id: "open-research-view",
             name: "Open global research view",
             callback: () => {
-                this.activateResearchView();
+                void this.activateResearchView();
             },
         });
 
@@ -264,7 +264,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                this.exportHighlights(view);
+                void this.exportHighlights(view);
                 return true;
             },
         });
@@ -276,7 +276,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (!view || !view.file) return false;
                 if (checking) return true;
-                this.exportHighlightsJSON(view);
+                void this.exportHighlightsJSON(view);
                 return true;
             },
         });
@@ -288,7 +288,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (!view || !view.file) return false;
                 if (checking) return true;
-                this.exportHighlightsCSV(view);
+                void this.exportHighlightsCSV(view);
                 return true;
             },
         });
@@ -300,7 +300,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                this.removeAllHighlights(view);
+                void this.removeAllHighlights(view);
                 return true;
             },
         });
@@ -312,7 +312,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (!view || !view.file) return false;
                 if (checking) return true;
-                this.removeAllAnnotations(view.file);
+                void this.removeAllAnnotations(view.file);
                 return true;
             },
         });
@@ -324,7 +324,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (!view || !view.file) return false;
                 if (checking) return true;
-                this.mergeAdjacentHighlightsInFile(view.file);
+                void this.mergeAdjacentHighlightsInFile(view.file);
                 return true;
             },
         });
@@ -348,7 +348,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (!view || !view.file) return false;
                 if (checking) return true;
-                this.migrateSpanHighlightsInFile(view.file);
+                void this.migrateSpanHighlightsInFile(view.file);
                 return true;
             },
         });
@@ -360,7 +360,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                this.resumeReading(view);
+                void this.resumeReading(view);
                 return true;
             },
         });
@@ -375,7 +375,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                     const view = this.getActiveReadingView();
                     if (!view) return false;
                     if (checking) return true;
-                    this.applyColorByIndex(view, i);
+                    void this.applyColorByIndex(view, i);
                     return true;
                 },
             });
@@ -392,7 +392,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             leaf = workspace.getLeaf("tab");
             await leaf.setViewState({ type: RESEARCH_VIEW, active: true });
         }
-        workspace.revealLeaf(leaf);
+        void workspace.revealLeaf(leaf);
     }
 
     onunload() {
@@ -463,7 +463,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             if (!text) return false;
             try {
                 return range.intersectsNode(element);
-            } catch (_error) {
+            } catch {
                 return false;
             }
         });
@@ -616,7 +616,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             if (payload === "highlightSelection") {
                 highlightOutput = snippet.trim();
             } else if (payload === "copyAsQuote") {
-                this.copyAsQuote(view as any, { ...selectionSnapshot, text: snippet });
+                void this.copyAsQuote(view as any, { ...selectionSnapshot, text: snippet });
                 return;
             } else {
                 return;
@@ -667,7 +667,6 @@ export default class ReadingHighlighterPlugin extends Plugin {
             return;
         }
 
-        const loadPdfJs = (require("obsidian") as any).loadPdfJs;
         const notice = new Notice("Extracting all PDF text...", 0);
 
         try {
@@ -761,7 +760,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         if (this.settings.recentTags.length > this.settings.maxRecentTags) {
             this.settings.recentTags = this.settings.recentTags.slice(0, this.settings.maxRecentTags);
         }
-        this.saveData(this.settings);
+        void this.saveData(this.settings);
     }
 
     async annotateSelection(view: MarkdownView, selectionSnapshot?: any) {
@@ -1037,7 +1036,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const pos = getScroll(view);
         if (pos && pos.y > 0) {
             this.settings.readingPositions[view.file.path] = pos.y;
-            this.saveData(this.settings);
+            void this.saveData(this.settings);
         }
     }
 
@@ -1054,7 +1053,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     async activateNavigatorView() {
         const existing = this.app.workspace.getLeavesOfType(HIGHLIGHT_NAVIGATOR_VIEW);
         if (existing.length) {
-            this.app.workspace.revealLeaf(existing[0]);
+            void this.app.workspace.revealLeaf(existing[0]);
             return;
         }
         const leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf("tab");
@@ -1062,7 +1061,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             type: HIGHLIGHT_NAVIGATOR_VIEW,
             active: true,
         });
-        this.app.workspace.revealLeaf(leaf);
+        void this.app.workspace.revealLeaf(leaf);
     }
 
     expandQuoteTemplate(file: TFile, quotedText: string, frontmatter: any = {}) {
@@ -1092,17 +1091,17 @@ export default class ReadingHighlighterPlugin extends Plugin {
         try {
             await navigator.clipboard.writeText(text);
             return true;
-        } catch (_error) {
-            const textArea = document.createElement("textarea");
+        } catch {
+            const textArea = activeDocument.createElement("textarea");
             textArea.value = text;
             textArea.setCssStyles({ position: "fixed", opacity: "0" });
-            document.body.appendChild(textArea);
+            activeDocument.body.appendChild(textArea);
             textArea.focus();
             textArea.select();
             let copied = false;
             try {
-                copied = document.execCommand("copy");
-            } catch (_fallbackError) {
+                copied = activeDocument.execCommand("copy");
+            } catch {
                 copied = false;
             }
             textArea.remove();
@@ -1135,7 +1134,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 }
             }
             return hostParts.slice(-2).join(".");
-        } catch (_error) {
+        } catch {
             return "";
         }
     }
@@ -1313,8 +1312,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
                     if (idx === 0 || idx === parts.length - 1) return cell;
                     const trimmedCell = cell.trim();
                     if (!trimmedCell) return cell;
-                    const leadWS = cell.match(/^(\s*)/)![1];
-                    const trailWS = cell.match(/(\s*)$/)![1];
+                    const leadWS = cell.match(/^(\s*)/)[1];
+                    const trailWS = cell.match(/(\s*)$/)[1];
                     let wrapped;
                     if (mode === "highlight" || mode === "tag") {
                         if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
@@ -1407,7 +1406,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     restoreScroll(view: MarkdownView, pos: any) {
-        requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
             applyScroll(view, pos);
         });
     }
@@ -1431,7 +1430,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             }
             const mockSnapshot = { text: correctedText, range: null };
             if (actionType === "applyColorHighlight") {
-                await this.applyColorHighlight(view, payload!, "", mockSnapshot);
+                await this.applyColorHighlight(view, payload, "", mockSnapshot);
             } else if (actionType === "highlightSelection") {
                 await this.highlightSelection(view, mockSnapshot);
             } else if (actionType === "tagSelection") {
@@ -1515,7 +1514,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
             this.sectionHeading("Semantic Color Meanings", "h4");
             this.plugin.settings.semanticColors.forEach((item, index) => {
                 const setting = new Setting(containerEl).setName(`Color ${index + 1}`);
-                const colorPreview = document.createElement("div");
+                const colorPreview = activeDocument.createElement("div");
                 colorPreview.setCssStyles({
                     width: "24px",
                     height: "24px",
@@ -1665,7 +1664,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 toggle.setValue(this.plugin.settings.enableFrontmatterTag).onChange(async (value) => {
                     this.plugin.settings.enableFrontmatterTag = value;
                     await this.plugin.saveSettings();
-                    if (tagSetting) {
+                    if (tagSetting !== undefined) {
                         tagSetting.settingEl.setCssStyles({ display: value ? "" : "none" });
                     }
                 })

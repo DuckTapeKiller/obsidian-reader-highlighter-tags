@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView } from "obsidian";
+import { ItemView, MarkdownView, Notice } from "obsidian";
 import { VaultScanner } from "../core/VaultScanner";
 import { exportHighlightsToCanvas } from "../utils/canvas";
 
@@ -388,13 +388,11 @@ export class ResearchView extends ItemView {
 
         if (allHighlights.length === 0) {
             // Notice requires plugin context but we can just use native Obsidian Notice
-            const { Notice } = require("obsidian");
             new Notice("No highlights to export to Canvas.");
             return;
         }
 
         try {
-            const { Notice } = require("obsidian");
             new Notice("Generating Canvas...");
             const exportPath = await exportHighlightsToCanvas(this.app, allHighlights);
             const file = this.app.vault.getAbstractFileByPath(exportPath);

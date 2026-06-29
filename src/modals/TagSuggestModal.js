@@ -58,7 +58,7 @@ export class TagSuggestModal extends Modal {
         const doneBtn = inputContainer.createEl("button", { text: "Done", cls: "mod-cta tag-done-btn" });
 
         // Focus input
-        setTimeout(() => input.focus(), 50);
+        window.setTimeout(() => input.focus(), 50);
 
         // Results List
         this.suggestionEl = contentEl.createDiv({ cls: "tag-suggestions-list" });

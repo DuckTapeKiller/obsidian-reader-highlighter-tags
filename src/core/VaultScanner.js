@@ -61,7 +61,7 @@ export class VaultScanner {
             onProgress(current, total, lastFileName);
 
             // Yield to main thread
-            await new Promise((resolve) => setTimeout(resolve, 0));
+            await new Promise((resolve) => window.setTimeout(resolve, 0));
         }
 
         // Sort results by file name

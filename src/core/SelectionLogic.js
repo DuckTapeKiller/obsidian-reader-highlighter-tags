@@ -1316,7 +1316,7 @@ export var SelectionLogic = class {
 
     /**
      * Word-Proximity Matching Strategy (Defined)
-     * Finds the densest cluster of words from the snippet within the document.
+     * Finds the densest cluster of words from the snippet within the activeDocument.
      */
     findProximityCandidates(text, snippet, bodyStart = 0) {
         const words = snippet

@@ -290,7 +290,7 @@ export class HighlightNavigatorView extends ItemView {
                 if (item.color) {
                     const colorDot = document.createElement("span");
                     colorDot.addClass("highlight-color-dot");
-                    colorDot.style.backgroundColor = item.color;
+                    colorDot.setCssStyles({ backgroundColor: item.color });
                     el.appendChild(colorDot);
                 } else {
                     const colorDot = document.createElement("span");
@@ -307,8 +307,7 @@ export class HighlightNavigatorView extends ItemView {
                 idSpan.addClass("footnote-id");
                 idSpan.textContent = item.displayNumber != null ? `${item.displayNumber} ` : `[^${item.id}] `;
                 idSpan.setAttribute("title", `[^${item.id}]`);
-                idSpan.style.marginRight = "5px";
-                idSpan.style.color = "var(--text-muted)";
+                idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
                 el.appendChild(idSpan);
             }
 

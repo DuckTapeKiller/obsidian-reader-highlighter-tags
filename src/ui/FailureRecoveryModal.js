@@ -107,10 +107,10 @@ export class FailureRecoveryModal extends Modal {
         const rule = this.deriveRule(this.report.rawSnippet, this.correction);
         if (rule.error) {
             container.setText(`📝 Note: Highlight will apply, but no rule learned (Reason: ${rule.error})`);
-            container.style.color = "var(--text-muted)";
+            container.setCssStyles({ color: "var(--text-muted)" });
         } else {
             container.setText(`✨ Diagnostic: Will learn to ignore "${rule.stripPattern}"`);
-            container.style.color = "var(--text-success)";
+            container.setCssStyles({ color: "var(--text-success)" });
         }
     }
 

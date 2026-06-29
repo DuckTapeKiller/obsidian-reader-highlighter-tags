@@ -397,7 +397,6 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     onunload() {
         this.floatingManager.unload();
-        this.app.workspace.detachLeavesOfType(HIGHLIGHT_NAVIGATOR_VIEW);
     }
 
     async loadSettings() {
@@ -1096,8 +1095,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         } catch (_error) {
             const textArea = document.createElement("textarea");
             textArea.value = text;
-            textArea.style.position = "fixed";
-            textArea.style.opacity = "0";
+            textArea.setCssStyles({ position: "fixed", opacity: "0" });
             document.body.appendChild(textArea);
             textArea.focus();
             textArea.select();
@@ -1453,10 +1451,18 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
         super(app, plugin);
         this.plugin = plugin;
     }
+    // Render a section heading without raw <h2>/<h3> tags. Styled via styles.css
+    // using the theme's own heading variables so it matches the previous look.
+    sectionHeading(text: string, variant: "h2" | "h3" | "h4") {
+        return this.containerEl.createEl("div", {
+            text,
+            cls: `rht-settings-heading rht-settings-heading--${variant}`,
+        });
+    }
     display() {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl("h2", { text: "Reader Highlighter Tags Settings" });
+        this.sectionHeading("Reader Highlighter Tags Settings", "h2");
         new Setting(containerEl)
             .setName("Toolbar Position")
             .setDesc("Choose where the floating toolbar should appear.")
@@ -1473,7 +1479,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     })
             );
-        containerEl.createEl("h3", { text: "Highlighting" });
+        this.sectionHeading("Highlighting", "h3");
         new Setting(containerEl)
             .setName("Enable Color Highlighting")
             .setDesc("Use HTML <mark> tags with specific colors instead of == syntax.")
@@ -1506,15 +1512,17 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 })
             );
         if (this.plugin.settings.enableColorPalette) {
-            containerEl.createEl("h4", { text: "Semantic Color Meanings" });
+            this.sectionHeading("Semantic Color Meanings", "h4");
             this.plugin.settings.semanticColors.forEach((item, index) => {
                 const setting = new Setting(containerEl).setName(`Color ${index + 1}`);
                 const colorPreview = document.createElement("div");
-                colorPreview.style.width = "24px";
-                colorPreview.style.height = "24px";
-                colorPreview.style.borderRadius = "4px";
-                colorPreview.style.backgroundColor = item.color;
-                colorPreview.style.marginRight = "10px";
+                colorPreview.setCssStyles({
+                    width: "24px",
+                    height: "24px",
+                    borderRadius: "4px",
+                    backgroundColor: item.color,
+                    marginRight: "10px",
+                });
                 setting.controlEl.appendChild(colorPreview);
                 setting.addText((text) =>
                     text
@@ -1527,7 +1535,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 );
             });
         }
-        containerEl.createEl("h3", { text: "Tags" });
+        this.sectionHeading("Tags", "h3");
         new Setting(containerEl)
             .setName("Default Tag Prefix")
             .setDesc("Automatically add this tag to every highlight (e.g., 'book').")
@@ -1558,7 +1566,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 })
             );
-        containerEl.createEl("h3", { text: "Quote Template" });
+        this.sectionHeading("Quote Template", "h3");
         new Setting(containerEl)
             .setName("Quote Format")
             .setDesc(
@@ -1570,7 +1578,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 })
             );
-        containerEl.createEl("h3", { text: "Annotations" });
+        this.sectionHeading("Annotations", "h3");
         new Setting(containerEl)
             .setName("Enable Annotations")
             .setDesc("Add comments to selections as footnotes.")
@@ -1589,7 +1597,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 })
             );
-        containerEl.createEl("h3", { text: "Reading Progress" });
+        this.sectionHeading("Reading Progress", "h3");
         new Setting(containerEl)
             .setName("Track Reading Progress")
             .setDesc("Remember scroll position when leaving a file.")
@@ -1610,7 +1618,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     this.display();
                 })
             );
-        containerEl.createEl("h3", { text: "Toolbar Buttons" });
+        this.sectionHeading("Toolbar Buttons", "h3");
         new Setting(containerEl).setName("Show Tag Button").addToggle((toggle) =>
             toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
                 this.plugin.settings.showTagButton = value;
@@ -1629,7 +1637,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 await this.plugin.saveSettings();
             })
         );
-        containerEl.createEl("h3", { text: "Mobile & UX" });
+        this.sectionHeading("Mobile & UX", "h3");
         new Setting(containerEl)
             .setName("Haptic Feedback")
             .setDesc("Vibrate slightly on success (Mobile only).")
@@ -1648,7 +1656,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 })
             );
-        containerEl.createEl("h3", { text: "Frontmatter Integration" });
+        this.sectionHeading("Frontmatter Integration", "h3");
         let tagSetting: Setting;
         new Setting(containerEl)
             .setName("Auto-tag highlight in Frontmatter")
@@ -1658,7 +1666,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     this.plugin.settings.enableFrontmatterTag = value;
                     await this.plugin.saveSettings();
                     if (tagSetting) {
-                        tagSetting.settingEl.style.display = value ? "" : "none";
+                        tagSetting.settingEl.setCssStyles({ display: value ? "" : "none" });
                     }
                 })
             );
@@ -1674,8 +1682,8 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     })
             );
-        tagSetting.settingEl.style.display = this.plugin.settings.enableFrontmatterTag ? "" : "none";
-        containerEl.createEl("h3", { text: "Learned Normalization Rules" });
+        tagSetting.settingEl.setCssStyles({ display: this.plugin.settings.enableFrontmatterTag ? "" : "none" });
+        this.sectionHeading("Learned Normalization Rules", "h3");
         if (this.plugin.settings.learnedNormRules.length === 0) {
             containerEl.createEl("p", { text: "No rules learned yet.", cls: "setting-item-description" });
         } else {

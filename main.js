@@ -865,7 +865,7 @@ var FloatingManager = class {
       this.plugin.settings.semanticColors.forEach((item, index) => {
         const colorBtn = document.createElement("button");
         colorBtn.addClass("reading-highlighter-color-btn");
-        colorBtn.style.backgroundColor = item.color;
+        colorBtn.setCssStyles({ backgroundColor: item.color });
         colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
         colorBtn.setAttribute("data-color-index", index.toString());
         this.colorButtons.push(colorBtn);
@@ -1075,12 +1075,7 @@ var FloatingManager = class {
   }
   show(rect) {
     if (!this.containerEl || !rect) return;
-    this.containerEl.style.display = "flex";
-    this.containerEl.style.top = "";
-    this.containerEl.style.bottom = "";
-    this.containerEl.style.left = "";
-    this.containerEl.style.right = "";
-    this.containerEl.style.transform = "";
+    this.containerEl.setCssStyles({ display: "flex", top: "", bottom: "", left: "", right: "", transform: "" });
     this.containerEl.removeClass("reading-highlighter-vertical");
     const pos = this.plugin.settings.toolbarPosition || "text";
     if (pos === "text") {
@@ -1098,40 +1093,30 @@ var FloatingManager = class {
         if (left + containerWidth > window.innerWidth - 10) {
           left = window.innerWidth - containerWidth - 10;
         }
-        this.containerEl.style.top = `${top}px`;
-        this.containerEl.style.left = `${left}px`;
+        this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
       } else {
         let top = rect.top - containerHeight - 10;
         let left = rect.left + rect.width / 2 - containerWidth / 2;
         if (top < 10) top = rect.bottom + 10;
         if (left < 10) left = 10;
         if (left + containerWidth > window.innerWidth - 10) left = window.innerWidth - containerWidth - 10;
-        this.containerEl.style.top = `${top}px`;
-        this.containerEl.style.left = `${left}px`;
+        this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
       }
     } else if (pos === "top") {
-      this.containerEl.style.top = "80px";
-      this.containerEl.style.left = "50%";
-      this.containerEl.style.transform = "translateX(-50%)";
+      this.containerEl.setCssStyles({ top: "80px", left: "50%", transform: "translateX(-50%)" });
     } else if (pos === "bottom") {
-      this.containerEl.style.bottom = "100px";
-      this.containerEl.style.left = "50%";
-      this.containerEl.style.transform = "translateX(-50%)";
+      this.containerEl.setCssStyles({ bottom: "100px", left: "50%", transform: "translateX(-50%)" });
     } else if (pos === "left") {
-      this.containerEl.style.top = "50%";
-      this.containerEl.style.left = "10px";
-      this.containerEl.style.transform = "translateY(-50%)";
+      this.containerEl.setCssStyles({ top: "50%", left: "10px", transform: "translateY(-50%)" });
       this.containerEl.addClass("reading-highlighter-vertical");
     } else if (pos === "right") {
-      this.containerEl.style.top = "50%";
-      this.containerEl.style.right = "10px";
-      this.containerEl.style.transform = "translateY(-50%)";
+      this.containerEl.setCssStyles({ top: "50%", right: "10px", transform: "translateY(-50%)" });
       this.containerEl.addClass("reading-highlighter-vertical");
     }
   }
   hide() {
     if (this.containerEl) {
-      this.containerEl.style.display = "none";
+      this.containerEl.setCssStyles({ display: "none" });
     }
   }
 };
@@ -2689,7 +2674,7 @@ var HighlightEditModal = class extends import_obsidian4.Modal {
           cls: "highlight-edit-palette-btn",
           attr: { "aria-label": item.meaning || item.color }
         });
-        btn.style.backgroundColor = item.color;
+        btn.setCssStyles({ backgroundColor: item.color });
         btn.onclick = (evt) => {
           evt.preventDefault();
           this.state.color = item.color;
@@ -2701,7 +2686,7 @@ var HighlightEditModal = class extends import_obsidian4.Modal {
   }
   updateColorControls() {
     const enabled = this.state.style === "color";
-    this.colorSettingEl.style.display = enabled ? "" : "none";
+    this.colorSettingEl.setCssStyles({ display: enabled ? "" : "none" });
     if (this.colorInput) this.colorInput.disabled = !enabled;
     if (this.colorTextInput) this.colorTextInput.disabled = !enabled;
   }
@@ -3054,7 +3039,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
         if (item.color) {
           const colorDot = document.createElement("span");
           colorDot.addClass("highlight-color-dot");
-          colorDot.style.backgroundColor = item.color;
+          colorDot.setCssStyles({ backgroundColor: item.color });
           el.appendChild(colorDot);
         } else {
           const colorDot = document.createElement("span");
@@ -3066,8 +3051,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
         idSpan.addClass("footnote-id");
         idSpan.textContent = item.displayNumber != null ? `${item.displayNumber} ` : `[^${item.id}] `;
         idSpan.setAttribute("title", `[^${item.id}]`);
-        idSpan.style.marginRight = "5px";
-        idSpan.style.color = "var(--text-muted)";
+        idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
         el.appendChild(idSpan);
       }
       const textSpan = document.createElement("span");
@@ -3486,7 +3470,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
           cls: "research-color-chip"
         });
         const dot = chip.createSpan({ cls: "research-color-dot" });
-        dot.style.backgroundColor = colorItem.color;
+        dot.setCssStyles({ backgroundColor: colorItem.color });
         chip.createSpan({ text: colorItem.meaning });
         chip.onclick = () => {
           const lcColor = colorItem.color.toLowerCase();
@@ -3514,12 +3498,12 @@ var ResearchView = class extends import_obsidian7.ItemView {
   async startScan() {
     if (this.isScanning) return;
     this.isScanning = true;
-    this.progressContainer.style.display = "block";
+    this.progressContainer.setCssStyles({ display: "block" });
     this.contentEl.empty();
     try {
       this.scanResults = await this.scanner.scanVault((current, total, lastFile) => {
         const percent = Math.round(current / total * 100);
-        this.progressEl.style.width = `${percent}%`;
+        this.progressEl.setCssStyles({ width: `${percent}%` });
         this.progressTextEl.textContent = `Scanning: ${current}/${total} (${percent}%) - ${lastFile}...`;
       });
       this.allPropertyKeys.clear();
@@ -3538,7 +3522,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
       this.contentEl.createDiv({ text: "Error during scan: " + err.message, cls: "research-error" });
     } finally {
       this.isScanning = false;
-      this.progressContainer.style.display = "none";
+      this.progressContainer.setCssStyles({ display: "none" });
       this.renderContent();
     }
   }
@@ -3616,7 +3600,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
         const groupEl = this.contentEl.createDiv({ cls: "research-group" });
         const headerEl = groupEl.createDiv({ cls: "research-group-header" });
         const expandIcon = headerEl.createSpan({ cls: "research-expand-icon" });
-        expandIcon.innerHTML = "\u25BC";
+        expandIcon.setText("\u25BC");
         headerEl.createSpan({ cls: "research-group-title", text: group.file.basename });
         headerEl.createSpan({ cls: "research-group-badge", text: `${group.highlights.length}` });
         const listEl = groupEl.createDiv({ cls: "research-highlight-list" });
@@ -3624,7 +3608,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
           const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
           if (h.color) {
             const dot = itemEl.createSpan({ cls: "research-color-dot" });
-            dot.style.backgroundColor = h.color;
+            dot.setCssStyles({ backgroundColor: h.color });
           }
           itemEl.createSpan({ cls: "research-item-text", text: h.text });
           itemEl.onclick = (e) => {
@@ -3641,7 +3625,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
         const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
         if (h.color) {
           const dot = itemEl.createSpan({ cls: "research-color-dot" });
-          dot.style.backgroundColor = h.color;
+          dot.setCssStyles({ backgroundColor: h.color });
         }
         const displayText = h.text.length > 120 ? h.text.substring(0, 120) + "..." : h.text;
         itemEl.createSpan({ cls: "research-item-text", text: displayText });
@@ -3826,10 +3810,10 @@ var FailureRecoveryModal = class extends import_obsidian8.Modal {
     const rule = this.deriveRule(this.report.rawSnippet, this.correction);
     if (rule.error) {
       container.setText(`\u{1F4DD} Note: Highlight will apply, but no rule learned (Reason: ${rule.error})`);
-      container.style.color = "var(--text-muted)";
+      container.setCssStyles({ color: "var(--text-muted)" });
     } else {
       container.setText(`\u2728 Diagnostic: Will learn to ignore "${rule.stripPattern}"`);
-      container.style.color = "var(--text-success)";
+      container.setCssStyles({ color: "var(--text-success)" });
     }
   }
   deriveRule(rawSnippet, corrected) {
@@ -4165,7 +4149,6 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
   }
   onunload() {
     this.floatingManager.unload();
-    this.app.workspace.detachLeavesOfType(HIGHLIGHT_NAVIGATOR_VIEW);
   }
   async loadSettings() {
     var _a;
@@ -4794,8 +4777,7 @@ ${appendString}`;
     } catch (_error) {
       const textArea = document.createElement("textarea");
       textArea.value = text;
-      textArea.style.position = "fixed";
-      textArea.style.opacity = "0";
+      textArea.setCssStyles({ position: "fixed", opacity: "0" });
       document.body.appendChild(textArea);
       textArea.focus();
       textArea.select();
@@ -5101,17 +5083,25 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
     super(app, plugin);
     this.plugin = plugin;
   }
+  // Render a section heading without raw <h2>/<h3> tags. Styled via styles.css
+  // using the theme's own heading variables so it matches the previous look.
+  sectionHeading(text, variant) {
+    return this.containerEl.createEl("div", {
+      text,
+      cls: `rht-settings-heading rht-settings-heading--${variant}`
+    });
+  }
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Reader Highlighter Tags Settings" });
+    this.sectionHeading("Reader Highlighter Tags Settings", "h2");
     new import_obsidian9.Setting(containerEl).setName("Toolbar Position").setDesc("Choose where the floating toolbar should appear.").addDropdown(
       (dropdown) => dropdown.addOption("text", "Next to text").addOption("top", "Fixed at Top Center").addOption("bottom", "Fixed at Bottom Center").addOption("left", "Fixed Left Side").addOption("right", "Fixed Right Side (Default)").setValue(this.plugin.settings.toolbarPosition).onChange(async (value) => {
         this.plugin.settings.toolbarPosition = value;
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Highlighting" });
+    this.sectionHeading("Highlighting", "h3");
     new import_obsidian9.Setting(containerEl).setName("Enable Color Highlighting").setDesc("Use HTML <mark> tags with specific colors instead of == syntax.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
         this.plugin.settings.enableColorHighlighting = value;
@@ -5135,15 +5125,17 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       })
     );
     if (this.plugin.settings.enableColorPalette) {
-      containerEl.createEl("h4", { text: "Semantic Color Meanings" });
+      this.sectionHeading("Semantic Color Meanings", "h4");
       this.plugin.settings.semanticColors.forEach((item, index) => {
         const setting = new import_obsidian9.Setting(containerEl).setName(`Color ${index + 1}`);
         const colorPreview = document.createElement("div");
-        colorPreview.style.width = "24px";
-        colorPreview.style.height = "24px";
-        colorPreview.style.borderRadius = "4px";
-        colorPreview.style.backgroundColor = item.color;
-        colorPreview.style.marginRight = "10px";
+        colorPreview.setCssStyles({
+          width: "24px",
+          height: "24px",
+          borderRadius: "4px",
+          backgroundColor: item.color,
+          marginRight: "10px"
+        });
         setting.controlEl.appendChild(colorPreview);
         setting.addText(
           (text) => text.setPlaceholder("Meaning (e.g. Disagree)").setValue(item.meaning).onChange(async (value) => {
@@ -5153,7 +5145,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         );
       });
     }
-    containerEl.createEl("h3", { text: "Tags" });
+    this.sectionHeading("Tags", "h3");
     new import_obsidian9.Setting(containerEl).setName("Default Tag Prefix").setDesc("Automatically add this tag to every highlight (e.g., 'book').").addText(
       (text) => text.setPlaceholder("book").setValue(this.plugin.settings.defaultTagPrefix).onChange(async (value) => {
         this.plugin.settings.defaultTagPrefix = value.replace(/\s+/g, "_").replace(/^#/, "");
@@ -5172,7 +5164,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Quote Template" });
+    this.sectionHeading("Quote Template", "h3");
     new import_obsidian9.Setting(containerEl).setName("Quote Format").setDesc(
       "Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}, {{time}}, {{domain}}, {{author}}"
     ).addTextArea(
@@ -5181,7 +5173,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Annotations" });
+    this.sectionHeading("Annotations", "h3");
     new import_obsidian9.Setting(containerEl).setName("Enable Annotations").setDesc("Add comments to selections as footnotes.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableAnnotations).onChange(async (value) => {
         this.plugin.settings.enableAnnotations = value;
@@ -5194,7 +5186,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Reading Progress" });
+    this.sectionHeading("Reading Progress", "h3");
     new import_obsidian9.Setting(containerEl).setName("Track Reading Progress").setDesc("Remember scroll position when leaving a file.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableReadingProgress).onChange(async (value) => {
         this.plugin.settings.enableReadingProgress = value;
@@ -5209,7 +5201,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         this.display();
       })
     );
-    containerEl.createEl("h3", { text: "Toolbar Buttons" });
+    this.sectionHeading("Toolbar Buttons", "h3");
     new import_obsidian9.Setting(containerEl).setName("Show Tag Button").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.showTagButton).onChange(async (value) => {
         this.plugin.settings.showTagButton = value;
@@ -5228,7 +5220,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Mobile & UX" });
+    this.sectionHeading("Mobile & UX", "h3");
     new import_obsidian9.Setting(containerEl).setName("Haptic Feedback").setDesc("Vibrate slightly on success (Mobile only).").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableHaptics).onChange(async (value) => {
         this.plugin.settings.enableHaptics = value;
@@ -5241,14 +5233,14 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Frontmatter Integration" });
+    this.sectionHeading("Frontmatter Integration", "h3");
     let tagSetting;
     new import_obsidian9.Setting(containerEl).setName("Auto-tag highlight in Frontmatter").setDesc("Automatically inject a specific tag into the note's frontmatter whenever you highlight text.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableFrontmatterTag).onChange(async (value) => {
         this.plugin.settings.enableFrontmatterTag = value;
         await this.plugin.saveSettings();
         if (tagSetting) {
-          tagSetting.settingEl.style.display = value ? "" : "none";
+          tagSetting.settingEl.setCssStyles({ display: value ? "" : "none" });
         }
       })
     );
@@ -5258,8 +5250,8 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         await this.plugin.saveSettings();
       })
     );
-    tagSetting.settingEl.style.display = this.plugin.settings.enableFrontmatterTag ? "" : "none";
-    containerEl.createEl("h3", { text: "Learned Normalization Rules" });
+    tagSetting.settingEl.setCssStyles({ display: this.plugin.settings.enableFrontmatterTag ? "" : "none" });
+    this.sectionHeading("Learned Normalization Rules", "h3");
     if (this.plugin.settings.learnedNormRules.length === 0) {
       containerEl.createEl("p", { text: "No rules learned yet.", cls: "setting-item-description" });
     } else {

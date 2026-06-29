@@ -98,12 +98,22 @@ export default defineConfig(
             // the rendered DOM, or runtime behavior — which must stay identical.
             // (Re-enable these if/when doing a dedicated community-store pass.)
             "obsidianmd/ui/sentence-case": "off", // would rewrite visible setting/command labels
-            "obsidianmd/settings-tab/no-manual-html-headings": "off", // setHeading() renders differently
-            "obsidianmd/no-static-styles-assignment": "off", // moving inline styles to CSS risks visual drift
             "obsidianmd/commands/no-default-hotkeys": "off", // removing them drops shipped hotkeys
-            "obsidianmd/detach-leaves": "off", // changes onunload leaf behavior
             "obsidianmd/prefer-active-doc": "off", // document -> activeDocument alters popout behavior
             "obsidianmd/prefer-window-timers": "off", // requestAnimationFrame swap is behaviorally moot here
+        },
+    },
+    {
+        // The official Obsidian review flags these three as Errors and they are
+        // now fixed in the code, so enforce them everywhere (incl. JS files,
+        // which the JS override above otherwise silences). They are AST-based and
+        // need no type information, so they run safely on plain JS too. This keeps
+        // the local gate in sync with the official review.
+        files: ["**/*.{js,mjs,cjs,jsx,ts,tsx,cts,mts}"],
+        rules: {
+            "obsidianmd/no-static-styles-assignment": "error",
+            "obsidianmd/settings-tab/no-manual-html-headings": "error",
+            "obsidianmd/detach-leaves": "error",
         },
     },
     eslintConfigPrettier

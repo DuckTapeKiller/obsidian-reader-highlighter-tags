@@ -102,7 +102,7 @@ export class ResearchView extends ItemView {
 
                 // Dot indicator
                 const dot = chip.createSpan({ cls: "research-color-dot" });
-                dot.style.backgroundColor = colorItem.color;
+                dot.setCssStyles({ backgroundColor: colorItem.color });
 
                 chip.createSpan({ text: colorItem.meaning });
 
@@ -140,13 +140,13 @@ export class ResearchView extends ItemView {
         if (this.isScanning) return;
 
         this.isScanning = true;
-        this.progressContainer.style.display = "block";
+        this.progressContainer.setCssStyles({ display: "block" });
         this.contentEl.empty();
 
         try {
             this.scanResults = await this.scanner.scanVault((current, total, lastFile) => {
                 const percent = Math.round((current / total) * 100);
-                this.progressEl.style.width = `${percent}%`;
+                this.progressEl.setCssStyles({ width: `${percent}%` });
                 this.progressTextEl.textContent = `Scanning: ${current}/${total} (${percent}%) - ${lastFile}...`;
             });
 
@@ -169,7 +169,7 @@ export class ResearchView extends ItemView {
             this.contentEl.createDiv({ text: "Error during scan: " + err.message, cls: "research-error" });
         } finally {
             this.isScanning = false;
-            this.progressContainer.style.display = "none";
+            this.progressContainer.setCssStyles({ display: "none" });
             this.renderContent();
         }
     }
@@ -276,7 +276,7 @@ export class ResearchView extends ItemView {
                 const headerEl = groupEl.createDiv({ cls: "research-group-header" });
 
                 const expandIcon = headerEl.createSpan({ cls: "research-expand-icon" });
-                expandIcon.innerHTML = "▼";
+                expandIcon.setText("▼");
 
                 headerEl.createSpan({ cls: "research-group-title", text: group.file.basename });
                 headerEl.createSpan({ cls: "research-group-badge", text: `${group.highlights.length}` });
@@ -288,7 +288,7 @@ export class ResearchView extends ItemView {
 
                     if (h.color) {
                         const dot = itemEl.createSpan({ cls: "research-color-dot" });
-                        dot.style.backgroundColor = h.color;
+                        dot.setCssStyles({ backgroundColor: h.color });
                     }
 
                     itemEl.createSpan({ cls: "research-item-text", text: h.text });
@@ -312,7 +312,7 @@ export class ResearchView extends ItemView {
                 // Color dot
                 if (h.color) {
                     const dot = itemEl.createSpan({ cls: "research-color-dot" });
-                    dot.style.backgroundColor = h.color;
+                    dot.setCssStyles({ backgroundColor: h.color });
                 }
 
                 // Highlight text (truncated for readability)

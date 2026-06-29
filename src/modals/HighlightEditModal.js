@@ -170,7 +170,7 @@ export class HighlightEditModal extends Modal {
                     cls: "highlight-edit-palette-btn",
                     attr: { "aria-label": item.meaning || item.color },
                 });
-                btn.style.backgroundColor = item.color;
+                btn.setCssStyles({ backgroundColor: item.color });
                 btn.onclick = (evt) => {
                     evt.preventDefault();
                     this.state.color = item.color;
@@ -183,7 +183,7 @@ export class HighlightEditModal extends Modal {
 
     updateColorControls() {
         const enabled = this.state.style === "color";
-        this.colorSettingEl.style.display = enabled ? "" : "none";
+        this.colorSettingEl.setCssStyles({ display: enabled ? "" : "none" });
         if (this.colorInput) this.colorInput.disabled = !enabled;
         if (this.colorTextInput) this.colorTextInput.disabled = !enabled;
     }

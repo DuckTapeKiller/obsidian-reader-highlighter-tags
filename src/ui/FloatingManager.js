@@ -74,7 +74,7 @@ export class FloatingManager {
             this.plugin.settings.semanticColors.forEach((item, index) => {
                 const colorBtn = document.createElement("button");
                 colorBtn.addClass("reading-highlighter-color-btn");
-                colorBtn.style.backgroundColor = item.color;
+                colorBtn.setCssStyles({ backgroundColor: item.color });
                 colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
                 colorBtn.setAttribute("data-color-index", index.toString());
                 this.colorButtons.push(colorBtn);
@@ -336,14 +336,8 @@ export class FloatingManager {
     show(rect) {
         if (!this.containerEl || !rect) return;
 
-        this.containerEl.style.display = "flex";
-
-        // Reset dynamic styles & classes
-        this.containerEl.style.top = "";
-        this.containerEl.style.bottom = "";
-        this.containerEl.style.left = "";
-        this.containerEl.style.right = "";
-        this.containerEl.style.transform = "";
+        // Show + reset dynamic styles & classes
+        this.containerEl.setCssStyles({ display: "flex", top: "", bottom: "", left: "", right: "", transform: "" });
         this.containerEl.removeClass("reading-highlighter-vertical");
 
         const pos = this.plugin.settings.toolbarPosition || "text";
@@ -372,8 +366,7 @@ export class FloatingManager {
                     left = window.innerWidth - containerWidth - 10;
                 }
 
-                this.containerEl.style.top = `${top}px`;
-                this.containerEl.style.left = `${left}px`;
+                this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
             } else {
                 // ── iOS / Desktop: place toolbar ABOVE the selection (original) ──
                 let top = rect.top - containerHeight - 10;
@@ -383,33 +376,24 @@ export class FloatingManager {
                 if (left < 10) left = 10;
                 if (left + containerWidth > window.innerWidth - 10) left = window.innerWidth - containerWidth - 10;
 
-                this.containerEl.style.top = `${top}px`;
-                this.containerEl.style.left = `${left}px`;
+                this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
             }
         } else if (pos === "top") {
-            this.containerEl.style.top = "80px";
-            this.containerEl.style.left = "50%";
-            this.containerEl.style.transform = "translateX(-50%)";
+            this.containerEl.setCssStyles({ top: "80px", left: "50%", transform: "translateX(-50%)" });
         } else if (pos === "bottom") {
-            this.containerEl.style.bottom = "100px";
-            this.containerEl.style.left = "50%";
-            this.containerEl.style.transform = "translateX(-50%)";
+            this.containerEl.setCssStyles({ bottom: "100px", left: "50%", transform: "translateX(-50%)" });
         } else if (pos === "left") {
-            this.containerEl.style.top = "50%";
-            this.containerEl.style.left = "10px";
-            this.containerEl.style.transform = "translateY(-50%)";
+            this.containerEl.setCssStyles({ top: "50%", left: "10px", transform: "translateY(-50%)" });
             this.containerEl.addClass("reading-highlighter-vertical");
         } else if (pos === "right") {
-            this.containerEl.style.top = "50%";
-            this.containerEl.style.right = "10px";
-            this.containerEl.style.transform = "translateY(-50%)";
+            this.containerEl.setCssStyles({ top: "50%", right: "10px", transform: "translateY(-50%)" });
             this.containerEl.addClass("reading-highlighter-vertical");
         }
     }
 
     hide() {
         if (this.containerEl) {
-            this.containerEl.style.display = "none";
+            this.containerEl.setCssStyles({ display: "none" });
         }
     }
 }

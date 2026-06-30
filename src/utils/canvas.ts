@@ -43,7 +43,7 @@ export async function exportHighlightsToCanvas(app: App, allHighlights: Highligh
         if (!groups.has(h.file.path)) {
             groups.set(h.file.path, { file: h.file, highlights: [] });
         }
-        groups.get(h.file.path)!.highlights.push(h);
+        groups.get(h.file.path).highlights.push(h);
     }
 
     const nodes: CanvasNode[] = [];

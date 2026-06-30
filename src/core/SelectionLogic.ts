@@ -347,7 +347,7 @@ export class SelectionLogic {
         const fragmentKey = fragment ? String(fragment) : "";
         const cacheKey = fragmentKey ? `${file.path}#${fragmentKey}` : file.path;
         if (opContext.cache.has(cacheKey)) {
-            return opContext.cache.get(cacheKey)!;
+            return opContext.cache.get(cacheKey);
         }
         if (opContext.visited.has(file.path)) {
             return { text: "", segments: [] };

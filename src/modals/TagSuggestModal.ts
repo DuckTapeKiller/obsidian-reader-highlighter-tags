@@ -148,7 +148,7 @@ export class TagSuggestModal extends Modal {
     }
 
     renderSuggestions(query: string) {
-        this.suggestionEl!.empty();
+        this.suggestionEl.empty();
         const cleanQuery = query.toLowerCase().replace(/\s+/g, "_");
 
         // Filter tags
@@ -171,7 +171,7 @@ export class TagSuggestModal extends Modal {
     }
 
     renderItem(tag: string, isNew: boolean) {
-        const el = this.suggestionEl!.createDiv({ cls: "suggestion-item" });
+        const el = this.suggestionEl.createDiv({ cls: "suggestion-item" });
         el.createSpan({ text: isNew ? `#${tag}` : `#${tag}` });
         if (isNew) {
             el.createSpan({ text: " (Create new)", cls: "suggestion-note" });
@@ -202,10 +202,10 @@ export class TagSuggestModal extends Modal {
     }
 
     updateSelectedView() {
-        this.selectedContainer!.empty();
+        this.selectedContainer.empty();
 
         if (this.selectedTags.size === 0) {
-            this.selectedContainer!.createSpan({
+            this.selectedContainer.createSpan({
                 text: "No tags selected",
                 cls: "no-tags-hint",
             });
@@ -213,7 +213,7 @@ export class TagSuggestModal extends Modal {
         }
 
         this.selectedTags.forEach((tag) => {
-            const chip = this.selectedContainer!.createDiv({ cls: "tag-chip" });
+            const chip = this.selectedContainer.createDiv({ cls: "tag-chip" });
             chip.createSpan({ text: `#${tag}` });
             const close = chip.createSpan({ cls: "tag-chip-close", text: "×" });
             close.onclick = (e) => {

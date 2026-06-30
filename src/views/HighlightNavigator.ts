@@ -225,8 +225,8 @@ export class HighlightNavigatorView extends ItemView {
 
         let footnotes: NavFootnote[] = definitions.map((def) => ({
             ...def,
-            displayNumber: displayNumberById.has(def.id) ? (displayNumberById.get(def.id) as number) : null,
-            refLine: refLineById.has(def.id) ? (refLineById.get(def.id) as number) : def.line,
+            displayNumber: displayNumberById.has(def.id) ? displayNumberById.get(def.id) : null,
+            refLine: refLineById.has(def.id) ? refLineById.get(def.id) : def.line,
         }));
 
         // Orphan handling is SCOPED, so normal notes are never affected.

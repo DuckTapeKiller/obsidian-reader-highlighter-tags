@@ -5125,6 +5125,9 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
     });
   }
   display() {
+    this.render();
+  }
+  render() {
     const { containerEl } = this;
     containerEl.empty();
     this.sectionHeading("Reader Highlighter Tags Settings", "h2");
@@ -5139,7 +5142,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       (toggle) => toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
         this.plugin.settings.enableColorHighlighting = value;
         await this.plugin.saveSettings();
-        this.display();
+        this.render();
       })
     );
     if (this.plugin.settings.enableColorHighlighting) {
@@ -5154,7 +5157,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       (toggle) => toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
         this.plugin.settings.enableColorPalette = value;
         await this.plugin.saveSettings();
-        this.display();
+        this.render();
       })
     );
     if (this.plugin.settings.enableColorPalette) {
@@ -5231,7 +5234,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
         this.plugin.settings.readingPositions = {};
         await this.plugin.saveSettings();
         new import_obsidian9.Notice("Reading positions cleared.");
-        this.display();
+        this.render();
       })
     );
     this.sectionHeading("Toolbar Buttons", "h3");
@@ -5289,23 +5292,25 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       containerEl.createEl("p", { text: "No rules learned yet.", cls: "setting-item-description" });
     } else {
       this.plugin.settings.learnedNormRules.forEach((rule, index) => {
-        new import_obsidian9.Setting(containerEl).setName(`Rule ${index + 1}`).setDesc(`Ignore: "${rule.stripPattern}"`).addButton(
-          (btn) => btn.setButtonText("Delete").setWarning().onClick(async () => {
+        new import_obsidian9.Setting(containerEl).setName(`Rule ${index + 1}`).setDesc(`Ignore: "${rule.stripPattern}"`).addButton((btn) => {
+          btn.setButtonText("Delete").onClick(async () => {
             this.plugin.settings.learnedNormRules.splice(index, 1);
             await this.plugin.saveSettings();
-            this.display();
+            this.render();
             new import_obsidian9.Notice("Rule deleted.");
-          })
-        );
+          });
+          btn.buttonEl.addClass("mod-warning");
+        });
       });
-      new import_obsidian9.Setting(containerEl).addButton(
-        (btn) => btn.setButtonText("Clear all rules").setWarning().onClick(async () => {
+      new import_obsidian9.Setting(containerEl).addButton((btn) => {
+        btn.setButtonText("Clear all rules").onClick(async () => {
           this.plugin.settings.learnedNormRules = [];
           await this.plugin.saveSettings();
-          this.display();
+          this.render();
           new import_obsidian9.Notice("All rules cleared.");
-        })
-      );
+        });
+        btn.buttonEl.addClass("mod-warning");
+      });
     }
   }
 };

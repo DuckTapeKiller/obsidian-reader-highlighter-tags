@@ -1506,6 +1506,10 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
         });
     }
     display() {
+        this.render();
+    }
+
+    render() {
         const { containerEl } = this;
         containerEl.empty();
         this.sectionHeading("Reader Highlighter Tags Settings", "h2");
@@ -1533,7 +1537,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
                     this.plugin.settings.enableColorHighlighting = value;
                     await this.plugin.saveSettings();
-                    this.display();
+                    this.render();
                 })
             );
         if (this.plugin.settings.enableColorHighlighting) {
@@ -1554,7 +1558,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
                     this.plugin.settings.enableColorPalette = value;
                     await this.plugin.saveSettings();
-                    this.display();
+                    this.render();
                 })
             );
         if (this.plugin.settings.enableColorPalette) {
@@ -1661,7 +1665,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     this.plugin.settings.readingPositions = {};
                     await this.plugin.saveSettings();
                     new Notice("Reading positions cleared.");
-                    this.display();
+                    this.render();
                 })
             );
         this.sectionHeading("Toolbar Buttons", "h3");
@@ -1737,29 +1741,25 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 new Setting(containerEl)
                     .setName(`Rule ${index + 1}`)
                     .setDesc(`Ignore: "${rule.stripPattern}"`)
-                    .addButton((btn) =>
-                        btn
-                            .setButtonText("Delete")
-                            .setWarning()
-                            .onClick(async () => {
-                                this.plugin.settings.learnedNormRules.splice(index, 1);
-                                await this.plugin.saveSettings();
-                                this.display();
-                                new Notice("Rule deleted.");
-                            })
-                    );
+                    .addButton((btn) => {
+                        btn.setButtonText("Delete").onClick(async () => {
+                            this.plugin.settings.learnedNormRules.splice(index, 1);
+                            await this.plugin.saveSettings();
+                            this.render();
+                            new Notice("Rule deleted.");
+                        });
+                        btn.buttonEl.addClass("mod-warning");
+                    });
             });
-            new Setting(containerEl).addButton((btn) =>
-                btn
-                    .setButtonText("Clear all rules")
-                    .setWarning()
-                    .onClick(async () => {
-                        this.plugin.settings.learnedNormRules = [];
-                        await this.plugin.saveSettings();
-                        this.display();
-                        new Notice("All rules cleared.");
-                    })
-            );
+            new Setting(containerEl).addButton((btn) => {
+                btn.setButtonText("Clear all rules").onClick(async () => {
+                    this.plugin.settings.learnedNormRules = [];
+                    await this.plugin.saveSettings();
+                    this.render();
+                    new Notice("All rules cleared.");
+                });
+                btn.buttonEl.addClass("mod-warning");
+            });
         }
     }
 }

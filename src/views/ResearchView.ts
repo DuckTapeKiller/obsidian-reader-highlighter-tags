@@ -297,7 +297,7 @@ export class ResearchView extends ItemView {
                 if (!fileMap.has(h.file.path)) {
                     fileMap.set(h.file.path, { file: h.file, highlights: [] });
                 }
-                fileMap.get(h.file.path)!.highlights.push(h);
+                fileMap.get(h.file.path).highlights.push(h);
             }
             const filteredGroups = [...fileMap.values()];
             const fileCount = filteredGroups.length;

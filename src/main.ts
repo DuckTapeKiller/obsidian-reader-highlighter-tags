@@ -28,6 +28,7 @@ import {
     removeAllFootnotesFromRaw,
 } from "./utils/highlights";
 import { extractInlineBoundaries } from "./utils/highlightWrap";
+import { autoExpandSelection } from "./utils/autoExpand";
 import { BulkRecolorModal } from "./modals/BulkRecolorModal";
 
 interface SemanticColor {
@@ -1310,8 +1311,6 @@ export default class ReadingHighlighterPlugin extends Plugin {
         if (!raw) {
             raw = await this.app.vault.read(file);
         }
-        let expandedStart = start;
-        let expandedEnd = end;
         let bodyStart = 0;
         if (raw.startsWith("---")) {
             const secondDash = raw.indexOf("---", 3);
@@ -1319,28 +1318,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 bodyStart = secondDash + 3;
             }
         }
-        let expanded = true;
-        while (expanded) {
-            expanded = false;
-            const preceding = raw.substring(0, expandedStart);
-            const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[\^[^\]]+\]:?\s?|[([{"'«“‘‹])$/);
-            if (matchBack && expandedStart > bodyStart) {
-                const newStart = expandedStart - matchBack[0].length;
-                if (newStart >= bodyStart) {
-                    expandedStart = newStart;
-                    expanded = true;
-                }
-            }
-            const following = raw.substring(expandedEnd);
-            // Expanded to include balanced punctuation, quotes (including « »), and footnotes
-            const matchForward = following.match(
-                /^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:]["']?|[)\]}"'»”’›.?!,;:](\s|$)?)/
-            );
-            if (matchForward) {
-                expandedEnd += matchForward[0].length;
-                expanded = true;
-            }
-        }
+        const auto = autoExpandSelection(raw, start, end, bodyStart);
+        let expandedStart = auto.start;
+        let expandedEnd = auto.end;
+        let expanded = expandedStart !== start || expandedEnd !== end;
         // Symmetric fallback for multi-word highlights: the loop above only
         // catches markers immediately adjacent to the selection. When the
         // highlight wraps more text (e.g. `==Cervical Cancer==` and the user

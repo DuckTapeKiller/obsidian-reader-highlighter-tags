@@ -4316,6 +4316,46 @@ function extractInlineBoundaries(content) {
   return { leading: "", core: text, trailing: "" };
 }
 
+// src/utils/autoExpand.ts
+var PAIRED_DELIMS = /* @__PURE__ */ new Set(["**", "==", "~~", "`", "*", "_"]);
+function autoExpandSelection(raw, start, end, bodyStart) {
+  let expandedStart = start;
+  let expandedEnd = end;
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    const preceding = raw.substring(0, expandedStart);
+    const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[\^[^\]]+\]:?\s?|[([{"'«“‘‹])$/);
+    if (matchBack && expandedStart > bodyStart) {
+      const hit = matchBack[0];
+      const after = raw.substring(expandedEnd);
+      const sameDelimOnOtherSide = PAIRED_DELIMS.has(hit) && after.includes(hit) && !after.startsWith(hit);
+      if (!sameDelimOnOtherSide) {
+        const newStart = expandedStart - hit.length;
+        if (newStart >= bodyStart) {
+          expandedStart = newStart;
+          expanded = true;
+        }
+      }
+    }
+    const following = raw.substring(expandedEnd);
+    const matchForward = following.match(
+      /^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:]["']?|[)\]}"'»”’›.?!,;:](\s|$)?)/
+    );
+    if (matchForward) {
+      const hit = matchForward[0];
+      const matchBackAbsorbedSameDelim = raw.substring(expandedStart, expandedStart + hit.length) === hit;
+      const before = raw.substring(bodyStart, expandedStart);
+      const sameDelimOnOtherSide = !matchBackAbsorbedSameDelim && PAIRED_DELIMS.has(hit) && before.includes(hit) && !before.endsWith(hit);
+      if (!sameDelimOnOtherSide) {
+        expandedEnd += hit.length;
+        expanded = true;
+      }
+    }
+  }
+  return { start: expandedStart, end: expandedEnd };
+}
+
 // src/main.ts
 var SMART_SELECTION_TAGS = /* @__PURE__ */ new Set(["P", "LI", "BLOCKQUOTE", "PRE", "H1", "H2", "H3", "H4", "H5", "H6", "TD", "TH"]);
 var FRONTMATTER_NEEDS_QUOTES_RE = new RegExp("[:\\s{}\\[\\],&*#?|<>=!%@\\\\-]");
@@ -5383,8 +5423,6 @@ ${appendString}`;
     if (!raw) {
       raw = await this.app.vault.read(file);
     }
-    let expandedStart = start;
-    let expandedEnd = end;
     let bodyStart = 0;
     if (raw.startsWith("---")) {
       const secondDash = raw.indexOf("---", 3);
@@ -5392,27 +5430,10 @@ ${appendString}`;
         bodyStart = secondDash + 3;
       }
     }
-    let expanded = true;
-    while (expanded) {
-      expanded = false;
-      const preceding = raw.substring(0, expandedStart);
-      const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[\^[^\]]+\]:?\s?|[([{"'«“‘‹])$/);
-      if (matchBack && expandedStart > bodyStart) {
-        const newStart = expandedStart - matchBack[0].length;
-        if (newStart >= bodyStart) {
-          expandedStart = newStart;
-          expanded = true;
-        }
-      }
-      const following = raw.substring(expandedEnd);
-      const matchForward = following.match(
-        /^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:]["']?|[)\]}"'»”’›.?!,;:](\s|$)?)/
-      );
-      if (matchForward) {
-        expandedEnd += matchForward[0].length;
-        expanded = true;
-      }
-    }
+    const auto = autoExpandSelection(raw, start, end, bodyStart);
+    let expandedStart = auto.start;
+    let expandedEnd = auto.end;
+    let expanded = expandedStart !== start || expandedEnd !== end;
     if (!expanded) {
       const openEq = SelectionLogic.findOpeningEqMarker(raw, expandedStart, bodyStart);
       if (openEq !== -1) {

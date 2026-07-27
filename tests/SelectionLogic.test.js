@@ -477,3 +477,305 @@ describe("Structural Integrity & Guardrails", () => {
         expect(actualText).toContain("Task one");
     });
 });
+
+
+// ====================================================================
+// pickBestCandidate — the pure disambiguation helper extracted in
+// fix-duplicate-snippet-selection-match. No DOM, no app, no this.
+// ====================================================================
+describe("pickBestCandidate", () => {
+    const { pickBestCandidate } = SelectionLogic;
+
+    it("returns null on empty input", () => {
+        expect(pickBestCandidate([], "x", "", "any context", 0, null, [])).toBeNull();
+    });
+
+    it("returns the only candidate when length is 1", () => {
+        const c = { start: 5, end: 9, text: "word" };
+        expect(pickBestCandidate([c], "x", "", "any context", 0, null, [])).toBe(c);
+    });
+
+    it("picks the 2nd candidate when withinBlockOffset points to it", () => {
+        const c1 = { start: 0, end: 3, text: "cat" };
+        const c2 = { start: 4, end: 7, text: "cat" };
+        const c3 = { start: 8, end: 11, text: "cat" };
+        const chosen = pickBestCandidate(
+            [c1, c2, c3],
+            "cat cat cat",
+            "cat",
+            "cat cat cat",
+            0,
+            4,
+            []
+        );
+        expect(chosen).toBe(c2);
+    });
+
+    it("picks the 3rd candidate when withinBlockOffset points to it", () => {
+        const c1 = { start: 0, end: 3, text: "yes" };
+        const c2 = { start: 4, end: 7, text: "yes" };
+        const c3 = { start: 8, end: 11, text: "yes" };
+        const chosen = pickBestCandidate(
+            [c1, c2, c3],
+            "yes yes yes",
+            "yes",
+            "yes yes yes",
+            0,
+            8,
+            []
+        );
+        expect(chosen).toBe(c3);
+    });
+
+    it("falls back to bodyBlocks/occurrenceIndex when no withinBlockOffset", () => {
+        const c1 = { start: 0, end: 3, text: "yes" };
+        const c2 = { start: 20, end: 23, text: "yes" };
+        const bodyBlocks = [
+            { start: 0, end: 10 },
+            { start: 10, end: 30 },
+        ];
+        const chosen = pickBestCandidate(
+            [c1, c2],
+            "yes no yes no",
+            "yes",
+            "yes no yes no",
+            1,
+            null,
+            bodyBlocks
+        );
+        expect(chosen).toBe(c2);
+    });
+
+    it("picks the right candidate even when a title candidate exists (the user's bug)", () => {
+        // The user's actual scenario: a note with a title containing the word
+        // and several body paragraphs also containing the word. The matcher
+        // must NOT pick the title candidate.
+        const body = "# Cervical cancer\n\nCervical cancer is a type of cancer that affects women.\n\nCervical screening is important.\n\nCervical cancer vaccine is recommended.";
+        const c1 = { start: 2, end: 10, text: "Cervical" };   // in title
+        const c2 = { start: 24, end: 32, text: "Cervical" };  // in body 1
+        const c3 = { start: 80, end: 88, text: "Cervical" };  // in body 2
+        const c4 = { start: 120, end: 128, text: "Cervical" }; // in body 3
+        const ctx3 = "Cervical cancer vaccine is recommended.";
+        const chosen = pickBestCandidate(
+            [c1, c2, c3, c4],
+            body,
+            "Cervical",
+            ctx3,
+            0,
+            0,
+            []
+        );
+        expect(chosen).toBe(c4);
+    });
+
+    it("picks the right candidate in body 2 when context is body 2", () => {
+        const body = "# Cervical cancer\n\nCervical cancer is a type of cancer.\n\nCervical screening is important.\n\nCervical cancer vaccine is recommended.";
+        const c1 = { start: 2, end: 10, text: "Cervical" };
+        const c2 = { start: 24, end: 32, text: "Cervical" };
+        const c3 = { start: 70, end: 78, text: "Cervical" };
+        const c4 = { start: 110, end: 118, text: "Cervical" };
+        const ctx2 = "Cervical screening is important.";
+        const chosen = pickBestCandidate(
+            [c1, c2, c3, c4],
+            body,
+            "Cervical",
+            ctx2,
+            0,
+            0,
+            []
+        );
+        expect(chosen).toBe(c3);
+    });
+
+    it("emits console.warn and returns first when tied candidates remain after all disambiguation", () => {
+        const c1 = { start: 0, end: 3, text: "cat" };
+        const c2 = { start: 0, end: 3, text: "cat" };
+        const warnings = [];
+        const origWarn = console.warn;
+        console.warn = (msg) => warnings.push(msg);
+        try {
+            const chosen = pickBestCandidate([c1, c2], "cat cat", "cat", "cat cat", 0, null, []);
+            expect(chosen).toBe(c1);
+            expect(warnings.length).toBeGreaterThan(0);
+            expect(warnings[0]).toMatch(/ambiguous occurrence/);
+        } finally {
+            console.warn = origWarn;
+        }
+    });
+
+    // ====================================================================
+    // Case-sensitive disambiguation: the user's real example.
+    // Line: "On 17 Nov 2025, the WHO/UN formally recognised
+    //        'World Cervical Cancer Elimination Day' — the first WHO Day
+    //        ever for a cancer — to galvanise the 2020 Global Strategy."
+    // "Cervical Cancer" (capital) and "cancer" (lowercase) coexist on the
+    // same line. User selects the capital one — matcher must NOT pick the
+    // lowercase one.
+    // ====================================================================
+    it("prefers the case-matching candidate when both cases exist on the same line", () => {
+        const body = "On 17 Nov 2025, the WHO/UN formally recognised 'World Cervical Cancer Elimination Day' — the first WHO Day ever for a cancer — to galvanise the 2020 Global Strategy.";
+        // findAllCandidates would return two "Cancer" matches at:
+        //   62 (in 'Cervical Cancer', capital C)
+        //  142 (lowercase 'cancer')
+        // The candidate.text includes the preceding space for the 2nd one.
+        const cCapital = { start: 62, end: 68, text: "Cancer" };
+        const cLower = { start: 142, end: 148, text: " cancer" };
+        const chosen = pickBestCandidate(
+            [cCapital, cLower],
+            body,
+            "Cancer",
+            body,
+            0,
+            62,
+            []
+        );
+        expect(chosen).toBe(cCapital);
+    });
+
+    it("prefers the lowercase candidate when the snippet is lowercase", () => {
+        const body = "On 17 Nov 2025, the WHO/UN formally recognised 'World Cervical Cancer Elimination Day' — the first WHO Day ever for a cancer — to galvanise the 2020 Global Strategy.";
+        const cCapital = { start: 62, end: 68, text: "Cancer" };
+        const cLower = { start: 142, end: 148, text: " cancer" };
+        const chosen = pickBestCandidate(
+            [cCapital, cLower],
+            body,
+            "cancer",
+            body,
+            0,
+            142,
+            []
+        );
+        expect(chosen).toBe(cLower);
+    });
+});
+
+// ====================================================================
+// findContextInBody — the coarse anchor search
+// ====================================================================
+describe("findContextInBody", () => {
+    const { findContextInBody } = SelectionLogic;
+
+    it("finds the context's block in a body that has no inline markers", () => {
+        const body = "alpha\n\nbeta gamma delta\n\nepsilon";
+        const starts = findContextInBody("beta gamma delta", body);
+        expect(starts.length).toBe(1);
+        // The match should start at the 'b' of "beta"
+        expect(body.substring(starts[0], starts[0] + 4)).toBe("beta");
+    });
+
+    it("finds the context when the body has bold markers between chars", () => {
+        const body = "alpha\n\n**beta** gamma delta\n\nepsilon";
+        const starts = findContextInBody("beta gamma delta", body);
+        expect(starts.length).toBe(1);
+        // The match should land on the 'b' of the bolded beta
+        expect(body.substring(starts[0], starts[0] + 1)).toBe("*");
+    });
+
+    it("returns multiple positions when the paragraph is duplicated", () => {
+        const body = "para one\n\nbeta gamma\n\nbeta gamma";
+        const starts = findContextInBody("beta gamma", body);
+        expect(starts.length).toBe(2);
+    });
+
+    it("returns empty array when the context is not in the body", () => {
+        const body = "completely different content here";
+        const starts = findContextInBody("missing paragraph", body);
+        expect(starts.length).toBe(0);
+    });
+});
+
+// ====================================================================
+// createDocumentBlockRecords
+// ====================================================================
+describe("createDocumentBlockRecords", () => {
+    it("splits a body on blank lines", () => {
+        const body = "alpha beta\n\ngamma delta\n\nepsilon";
+        const blocks = logic.createDocumentBlockRecords(body);
+        expect(blocks.length).toBeGreaterThan(0);
+        const covered = blocks.reduce((s, b) => s + (b.end - b.start), 0);
+        expect(covered).toBe(body.length);
+    });
+
+    it("returns a single block for body without blank lines", () => {
+        const body = "alpha\nbeta\ngamma";
+        const blocks = logic.createDocumentBlockRecords(body);
+        expect(blocks.length).toBe(1);
+        expect(blocks[0]).toEqual({ start: 0, end: body.length });
+    });
+
+    it("returns an empty array for an empty body", () => {
+        expect(logic.createDocumentBlockRecords("")).toEqual([]);
+    });
+});
+
+// ====================================================================
+// normalizeSnippetTextForContext
+// ====================================================================
+describe("normalizeSnippetTextForContext", () => {
+    const { normalizeSnippetTextForContext } = SelectionLogic;
+
+    it("strips bold markers", () => {
+        expect(normalizeSnippetTextForContext("**cat**")).toBe("cat");
+    });
+
+    it("strips italic markers", () => {
+        expect(normalizeSnippetTextForContext("*cat*")).toBe("cat");
+    });
+
+    it("strips strikethrough markers", () => {
+        expect(normalizeSnippetTextForContext("~~cat~~")).toBe("cat");
+    });
+
+    it("strips inline code markers", () => {
+        expect(normalizeSnippetTextForContext("`cat`")).toBe("cat");
+    });
+
+    it("collapses surrounding whitespace", () => {
+        expect(normalizeSnippetTextForContext("  cat  ")).toBe("cat");
+    });
+
+    it("returns empty string for empty input", () => {
+        expect(normalizeSnippetTextForContext("")).toBe("");
+    });
+});
+
+describe("findOpeningEqMarker", () => {
+    const { findOpeningEqMarker } = SelectionLogic;
+
+    it("finds the opening == that wraps a multi-word highlight", () => {
+        // The user's case: ==Cervical Cancer==, user selects "Cancer"
+        // "Cancer" starts at index 10 (in "==Cervical Cancer==").
+        const body = "==Cervical Cancer==";
+        const openEq = findOpeningEqMarker(body, 10, 0);
+        expect(openEq).toBe(0);
+    });
+
+    it("finds the opening == for a single-word highlight", () => {
+        const body = "before ==Cancer== after";
+        // "Cancer" starts at index 10
+        const openEq = findOpeningEqMarker(body, 10, 0);
+        expect(openEq).toBe(7);
+    });
+
+    it("returns -1 when the position is between two highlights (not inside one)", () => {
+        // pos = 12 ("word2" between two highlights)
+        const body = "==word1== word2 ==word3==";
+        const openEq = findOpeningEqMarker(body, 12, 0);
+        expect(openEq).toBe(-1);
+    });
+
+    it("finds the opening == for the second of two adjacent highlights", () => {
+        // ==word1== ==word2==, pos = 12 (start of "word2")
+        const body = "==word1== ==word2==";
+        const openEq = findOpeningEqMarker(body, 12, 0);
+        expect(openEq).toBe(10);
+    });
+
+    it("respects the bodyStart bound", () => {
+        // Body has a fake "frontmatter" we should skip
+        const raw = "---title: foo---\n==Cancer==";
+        const bodyStart = 17; // start of the second line
+        const openEq = findOpeningEqMarker(raw, 19, bodyStart);
+        expect(openEq).toBe(17);
+    });
+});

@@ -128,6 +128,7 @@ interface SelectionRequest {
     contextElement: HTMLElement | null;
     contextText: string | null;
     occurrenceIndex: number;
+    withinBlockOffset: number | null;
 }
 
 interface PdfTextItem {
@@ -537,12 +538,36 @@ export default class ReadingHighlighterPlugin extends Plugin {
             return null;
         }
         const contextElement = selectionContext?.element || null;
+        const range = this.getSelectionRange(selectionSnapshot);
         return {
             snippet,
             contextElement,
             contextText: contextElement ? this.getElementText(contextElement) : null,
             occurrenceIndex: this.getSelectionOccurrence(view, contextElement),
+            withinBlockOffset: this.computeWithinBlockOffset(contextElement, range),
         };
+    }
+
+    computeWithinBlockOffset(contextElement: HTMLElement | null, range: Range | null): number | null {
+        if (!contextElement || !range) return null;
+        const startContainer = range.startContainer;
+        if (!startContainer || startContainer.nodeType !== Node.TEXT_NODE) return null;
+        if (!contextElement.contains(startContainer)) return null;
+
+        const walker = (contextElement.ownerDocument || activeDocument).createTreeWalker(
+            contextElement,
+            NodeFilter.SHOW_TEXT
+        );
+        let offset = 0;
+        let current = walker.nextNode();
+        while (current) {
+            if (current === startContainer) {
+                return offset + range.startOffset;
+            }
+            offset += (current.nodeValue || "").length;
+            current = walker.nextNode();
+        }
+        return null;
     }
 
     getSelectionOccurrence(view: MarkdownView, contextElement: HTMLElement | null) {
@@ -601,7 +626,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+        request.withinBlockOffset
         );
 
         if (!result) {
@@ -765,7 +791,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+        request.withinBlockOffset
         );
 
         if (!result) {
@@ -782,7 +809,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 view,
                 request.snippet,
                 request.contextText,
-                request.occurrenceIndex
+                request.occurrenceIndex,
+            request.withinBlockOffset
             );
             if (!newResult) {
                 new Notice("Selection lost - file may have changed.");
@@ -823,7 +851,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+        request.withinBlockOffset
         );
 
         if (!result) {
@@ -840,7 +869,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 view,
                 request.snippet,
                 request.contextText,
-                request.occurrenceIndex
+                request.occurrenceIndex,
+            request.withinBlockOffset
             );
             if (!newResult) {
                 new Notice("Selection lost - file may have changed.");
@@ -890,7 +920,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+        request.withinBlockOffset
         );
 
         if (!result) {
@@ -1068,7 +1099,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+        request.withinBlockOffset
         );
         if (!result) {
             this.handleSelectionFailure(view, request, "applyColorHighlight", color);
@@ -1307,6 +1339,41 @@ export default class ReadingHighlighterPlugin extends Plugin {
             if (matchForward) {
                 expandedEnd += matchForward[0].length;
                 expanded = true;
+            }
+        }
+        // Symmetric fallback for multi-word highlights: the loop above only
+        // catches markers immediately adjacent to the selection. When the
+        // highlight wraps more text (e.g. `==Cervical Cancer==` and the user
+        // selects `Cancer`), the surrounding `==` aren't immediately next to
+        // the selection, so the loop never fires. Walk back to find the
+        // *opening* marker of the pair that contains the selection, then
+        // expand to the closing marker. Same logic, just sees further.
+        if (!expanded) {
+            // Try `==` highlight via the shared balanced-pair helper.
+            const openEq = SelectionLogic.findOpeningEqMarker(raw, expandedStart, bodyStart);
+            if (openEq !== -1) {
+                const closeEq = raw.indexOf("==", openEq + 2);
+                if (closeEq !== -1 && closeEq + 2 > expandedEnd) {
+                    expandedStart = openEq;
+                    expandedEnd = closeEq + 2;
+                    expanded = true;
+                }
+            }
+            // Try `<mark>` highlight
+            if (!expanded) {
+                const preceding = raw.substring(0, expandedStart);
+                const lastMark = preceding.lastIndexOf("<mark");
+                if (lastMark !== -1 && lastMark >= bodyStart) {
+                    const tagEnd = raw.indexOf(">", lastMark);
+                    if (tagEnd !== -1 && tagEnd < expandedStart) {
+                        const closeMark = raw.indexOf("</mark>", tagEnd);
+                        if (closeMark !== -1 && closeMark >= expandedEnd) {
+                            expandedStart = lastMark;
+                            expandedEnd = closeMark + "</mark>".length;
+                            expanded = true;
+                        }
+                    }
+                }
             }
         }
         const initiallySelectedText = raw.substring(expandedStart, expandedEnd);

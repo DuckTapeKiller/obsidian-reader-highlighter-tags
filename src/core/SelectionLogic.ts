@@ -169,7 +169,8 @@ export class SelectionLogic {
         view: MarkdownView,
         selectionSnippet: string,
         context: string | null = null,
-        occurrenceIndex = 0
+        occurrenceIndex = 0,
+        withinBlockOffset: number | null = null
     ): Promise<PhysicalResult | null> {
         this.lastFailureReport = null; // Note 2: Reset at top of call
 
@@ -265,7 +266,16 @@ export class SelectionLogic {
         // Apply Structural Snapping to all final candidates to protect footnotes/prefixes
         candidates = candidates.map((cand) => this.snapToStructuralBoundaries(fullRaw, cand));
 
-        const result = this.resolveCandidates(candidates, fullRaw, context, occurrenceIndex);
+        const bodyBlocks = this.createDocumentBlockRecords(bodyContent);
+        const result = this.resolveCandidates(
+            candidates,
+            fullRaw,
+            selectionSnippet,
+            context,
+            occurrenceIndex,
+            withinBlockOffset,
+            bodyBlocks
+        );
         if (!result) {
             return null;
         }
@@ -670,34 +680,380 @@ export class SelectionLogic {
     resolveCandidates(
         candidates: Candidate[],
         raw: string,
+        snippet: string,
         context: string | null,
-        occurrenceIndex: number
+        occurrenceIndex: number,
+        withinBlockOffset: number | null = null,
+        bodyBlocks: { start: number; end: number }[] = []
     ): { raw: string; start: number; end: number } | null {
         if (candidates.length === 0) return null;
 
         if (context) {
             const cleanContext = context.replace(/\s+/g, " ").trim();
-            candidates = candidates.map((cand) => {
+            const scored = candidates.map((cand) => {
                 const sourceBlock = (cand.text || raw.substring(cand.start, cand.end)).replace(/\s+/g, " ").trim();
                 const score = this.calculateSimilarity(sourceBlock, cleanContext);
                 return { ...cand, score };
             });
 
-            const bestScore = Math.max(...candidates.map((candidate) => candidate.score ?? 0));
+            const bestScore = Math.max(...scored.map((candidate) => candidate.score ?? 0));
             const threshold = bestScore * 0.85;
-            const validCandidates = candidates.filter((candidate) => (candidate.score ?? 0) >= threshold);
+            const validCandidates = scored.filter((candidate) => (candidate.score ?? 0) >= threshold);
 
-            if (occurrenceIndex >= 0 && occurrenceIndex < validCandidates.length) {
-                const chosen = validCandidates[occurrenceIndex];
+            const chosen = SelectionLogic.pickBestCandidate(
+                validCandidates,
+                raw,
+                snippet,
+                cleanContext,
+                occurrenceIndex,
+                withinBlockOffset,
+                bodyBlocks
+            );
+            if (chosen) {
                 return { raw, start: chosen.start, end: chosen.end };
-            }
-
-            if (validCandidates.length > 0) {
-                return { raw, start: validCandidates[0].start, end: validCandidates[0].end };
             }
         }
 
         return { raw, start: candidates[0].start, end: candidates[0].end };
+    }
+
+    /**
+     * Pure disambiguation helper. Returns the candidate that best matches the
+     * user's actual selection when the snippet appears more than once.
+     *
+     * Tries, in order:
+     *   1. If the snippet appears multiple times in `context`, pick the i-th
+     *      occurrence where i is the index whose start is closest to
+     *      `withinBlockOffset`. (Within-block disambiguation.)
+     *   2. Otherwise, if `bodyBlocks[occurrenceIndex]` is a valid block range,
+     *      filter candidates to that block and return the only one (or the
+     *      first). (Block-level disambiguation using the existing
+     *      `occurrenceIndex`.)
+     *   3. Otherwise, fall back to `candidates[occurrenceIndex]` or the first.
+     *
+     * Pure: no `this`, no DOM, no `app`. Safe to unit-test.
+     */
+    static pickBestCandidate(
+        candidates: Candidate[],
+        raw: string,
+        snippet: string,
+        context: string,
+        occurrenceIndex: number,
+        withinBlockOffset: number | null,
+        bodyBlocks: { start: number; end: number }[]
+    ): Candidate | null {
+        if (candidates.length === 0) return null;
+        if (candidates.length === 1) return candidates[0];
+
+        const sortedByStart = [...candidates].sort((a, b) => a.start - b.start);
+        const trimmedContext = context.trim();
+        const trimmedSnippet = snippet.trim();
+
+        // Strategy 1: coarse-to-fine anchor search.
+        //
+        // Idea (from user): pick the whole paragraph as the search anchor.
+        // Build a flexible regex that allows inline markers (`**`, `~~`, `` ` ``,
+        // etc.) between the chars of the context, then search `raw` for it.
+        // Each match is a candidate position of the user's block in the body.
+        //
+        // For each candidate block-start, filter the body-candidates to that
+        // block range, then prefer the case-matching candidate, then use
+        // `withinBlockOffset` as a final tie-breaker. If only one block
+        // matches, the answer is unambiguous. If multiple blocks match
+        // (duplicate paragraphs in the note), pick the block whose
+        // surrounding body text best matches the context.
+        if (trimmedContext) {
+            const blockStarts = SelectionLogic.findContextInBody(trimmedContext, raw);
+            if (blockStarts.length > 0) {
+                const rankedBlocks = SelectionLogic.rankBlocksByContext(
+                    blockStarts,
+                    trimmedContext,
+                    raw
+                );
+
+                // Try the highest-ranked block first; fall through to the next
+                // if it has zero candidates (shouldn't happen, but be safe).
+                for (const blockStart of rankedBlocks) {
+                    const approxBlockLen = Math.max(
+                        trimmedContext.length,
+                        40 // paranoia: short contexts
+                    );
+                    const blockEnd = blockStart + approxBlockLen + 32; // slack for inline markers
+                    const inBlock = sortedByStart.filter(
+                        (c) => c.start >= blockStart && c.start < blockEnd
+                    );
+                    if (inBlock.length === 0) continue;
+                    if (inBlock.length === 1) return inBlock[0];
+
+                    // Case-sensitive preference: if any candidate's normalised
+                    // text matches the snippet's case, prefer those. This is
+                    // the dominant signal when the same line has "Cancer" and
+                    // "cancer" — the user almost always wants the case they
+                    // clicked on.
+                    const caseMatched = inBlock.filter((c) => {
+                        const norm = SelectionLogic.normalizeSnippetTextForContext(
+                            c.text || ""
+                        );
+                        return norm === trimmedSnippet;
+                    });
+                    if (caseMatched.length === 1) return caseMatched[0];
+                    if (caseMatched.length > 1) {
+                        // Multiple case-matches in this block — fall through
+                        // to the position-based tie-breaker below with the
+                        // narrowed set.
+                        const refined = caseMatched;
+                        const result = SelectionLogic.pickByInBlockOffset(
+                            refined,
+                            blockStart,
+                            withinBlockOffset
+                        );
+                        if (result) return result;
+                        continue;
+                    }
+                    // 0 case-matches: fall through to position-based with
+                    // all inBlock candidates.
+                    if (withinBlockOffset === null) {
+                        // No tie-breaker available; warn and pick the first.
+                        console.warn(
+                            `[Highlighter] ambiguous occurrence: ${inBlock.length} candidates in matched block, no withinBlockOffset, picked first`
+                        );
+                        return inBlock[0];
+                    }
+                    const result = SelectionLogic.pickByInBlockOffset(
+                        inBlock,
+                        blockStart,
+                        withinBlockOffset
+                    );
+                    if (result) return result;
+                }
+            }
+        }
+
+        // Strategy 2: block-level disambiguation via bodyBlocks + occurrenceIndex
+        if (bodyBlocks.length > 0 && occurrenceIndex >= 0 && occurrenceIndex < bodyBlocks.length) {
+            const block = bodyBlocks[occurrenceIndex];
+            const inBlock = sortedByStart.filter((c) => c.start >= block.start && c.start < block.end);
+            if (inBlock.length === 1) return inBlock[0];
+            if (inBlock.length > 1) {
+                if (withinBlockOffset !== null) {
+                    let best = inBlock[0];
+                    let bestDist = Math.abs(inBlock[0].start - block.start - withinBlockOffset);
+                    for (let k = 1; k < inBlock.length; k++) {
+                        const dist = Math.abs(inBlock[k].start - block.start - withinBlockOffset);
+                        if (dist < bestDist) {
+                            best = inBlock[k];
+                            bestDist = dist;
+                        }
+                    }
+                    if (bestDist > 0) {
+                        console.warn(
+                            `[Highlighter] ambiguous occurrence: ${inBlock.length} candidates remaining at offset ${withinBlockOffset}`
+                        );
+                    }
+                    return best;
+                }
+                console.warn(
+                    `[Highlighter] ambiguous occurrence: ${inBlock.length} candidates remaining in block ${occurrenceIndex}`
+                );
+                return inBlock[0];
+            }
+        }
+
+        // Strategy 3: legacy fallback
+        if (occurrenceIndex >= 0 && occurrenceIndex < sortedByStart.length) {
+            const chosen = sortedByStart[occurrenceIndex];
+            const isAmbiguous = sortedByStart.some(
+                (c, i) => i !== occurrenceIndex && c.start === chosen.start
+            );
+            if (isAmbiguous) {
+                console.warn(
+                    `[Highlighter] ambiguous occurrence: ${sortedByStart.length} candidates remaining at offset ${chosen.start}`
+                );
+            }
+            return chosen;
+        }
+        return sortedByStart[0];
+    }
+
+    /**
+     * Find every body offset where the rendered context could live in `raw`.
+     * The body may have inline markers between the chars of the context, so
+     * we use a flexible regex that allows markers between every char.
+     *
+     * Returns positions sorted ascending. Empty array means the context
+     * could not be located (caller falls through to the next strategy).
+     */
+    static findContextInBody(context: string, raw: string): number[] {
+        // Coarse anchor: use up to the first 40 chars of the context. For a
+        // full paragraph this is still highly specific; for short contexts
+        // (a list item) it is the whole string.
+        const anchorLen = Math.min(context.length, 40);
+        const anchor = context.substring(0, anchorLen);
+        if (anchor.length < 1) return [];
+
+        const pattern = SelectionLogic.buildFlexibleContextPattern(anchor);
+        let regex: RegExp;
+        try {
+            regex = new RegExp(pattern, "gmu");
+        } catch {
+            return [];
+        }
+
+        const starts: number[] = [];
+        try {
+            let m: RegExpExecArray | null;
+            let guard = 0;
+            while ((m = regex.exec(raw)) !== null && guard++ < 100) {
+                starts.push(m.index);
+                if (m.index === regex.lastIndex) regex.lastIndex++; // avoid infinite loop
+            }
+        } catch {
+            // regex failure — return what we have
+        }
+        return starts;
+    }
+
+    /**
+     * Rank candidate block-starts by how well the surrounding body text
+     * matches the context. Higher = better. Returns the input sorted
+     * descending by score, ties broken by start ascending.
+     */
+    static rankBlocksByContext(blockStarts: number[], context: string, raw: string): number[] {
+        const ctxWords = new Set(context.toLowerCase().split(/\s+/).filter((w) => w.length > 1));
+        const scored = blockStarts.map((start) => {
+            const windowStart = Math.max(0, start - 20);
+            const windowEnd = Math.min(raw.length, start + context.length + 100);
+            const window = raw.substring(windowStart, windowEnd);
+            const normalizedWindow = SelectionLogic.normalizeSnippetTextForContext(window);
+            const winWords = new Set(normalizedWindow.toLowerCase().split(/\s+/).filter((w) => w.length > 1));
+            let intersection = 0;
+            for (const w of ctxWords) if (winWords.has(w)) intersection++;
+            const union = new Set([...ctxWords, ...winWords]).size;
+            const score = union === 0 ? 0 : intersection / union;
+            return { start, score };
+        });
+        scored.sort((a, b) => (b.score - a.score) || (a.start - b.start));
+        return scored.map((s) => s.start);
+    }
+
+    /**
+     * Build a flexible regex pattern from a string, allowing inline Markdown
+     * markers between every character. The body may intersperse `**`, `~~`,
+     * `` ` ``, `[`, `]`, etc. between the visible chars of the context.
+     */
+    static buildFlexibleContextPattern(text: string): string {
+        const parts: string[] = [];
+        for (const ch of text) {
+            if (/\s/.test(ch)) {
+                parts.push("\\s+");
+            } else {
+                parts.push(ch.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&"));
+            }
+        }
+        const joined = parts.join(`(?:${INLINE_DECORATION_PATTERN}){0,3}`);
+        return `(?:${INLINE_DECORATION_PATTERN}){0,3}${joined}(?:${INLINE_DECORATION_PATTERN}){0,3}`;
+    }
+
+    /**
+     * Pick the candidate in `cands` whose start is closest to
+     * `blockStart + withinBlockOffset`. Returns null if `withinBlockOffset`
+     * is null.
+     */
+    static pickByInBlockOffset(
+        cands: Candidate[],
+        blockStart: number,
+        withinBlockOffset: number | null
+    ): Candidate | null {
+        if (withinBlockOffset === null || cands.length === 0) return null;
+        const expected = blockStart + Math.max(0, withinBlockOffset);
+        let best = cands[0];
+        let bestDist = Math.abs(cands[0].start - expected);
+        for (let k = 1; k < cands.length; k++) {
+            const dist = Math.abs(cands[k].start - expected);
+            if (dist < bestDist) {
+                best = cands[k];
+                bestDist = dist;
+            }
+        }
+        const hasTie = cands.some((c) => c !== best && c.start === best.start);
+        if (hasTie) {
+            console.warn(
+                `[Highlighter] ambiguous occurrence: ${cands.length} candidates in matched block at offset ${best.start}, picked first`
+            );
+        }
+        return best;
+    }
+
+    /**
+     * Symmetric removal helper. Find the `==` highlight wrapper that
+     * CONTAINS the position `pos` (i.e. the opening `==` of the pair whose
+     * closing `==` is at or after `pos`). Returns the position of the
+     * opening `==`, or -1 if none.
+     *
+     * Unlike the inline expansion in main.ts, this walks back through the
+     * body counting `==` pairs to find the correct opening — it works for
+     * multi-word highlights like `==Cervical Cancer==` where the `==` is
+     * not immediately adjacent to the selection.
+     */
+    static findOpeningEqMarker(raw: string, pos: number, bodyStart: number): number {
+        let fromIdx = pos;
+        while (fromIdx > bodyStart) {
+            const idx = raw.lastIndexOf("==", fromIdx);
+            if (idx === -1 || idx < bodyStart) return -1;
+            // An opening marker has an even `==` count before it.
+            const beforeCount = (raw.substring(bodyStart, idx).match(/==/g) || []).length;
+            if (beforeCount % 2 === 0) {
+                // Verify pos is in the pair (idx, closeIdx)
+                const closeIdx = raw.indexOf("==", idx + 2);
+                if (closeIdx !== -1 && pos < closeIdx) {
+                    return idx;
+                }
+                // pos is after the pair; this highlight doesn't contain pos.
+                return -1;
+            }
+            fromIdx = idx - 1;
+        }
+        return -1;
+    }
+
+    /**
+     * Split a body string into contiguous paragraph blocks (separated by blank
+     * lines). Used to map the rendered block element back to a source range.
+     * Cheap, regex-based; no markdown parsing.
+     */
+    createDocumentBlockRecords(text: string): { start: number; end: number }[] {
+        const blocks: { start: number; end: number }[] = [];
+        let cursor = 0;
+        const re = /[^\n]+(?:\n[^\n]+)*/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(text)) !== null) {
+            const blockStart = m.index;
+            const blockEnd = m.index + m[0].length;
+            // Skip the block if it is just whitespace and the next char is a blank line
+            if (blockStart > cursor) {
+                blocks.push({ start: cursor, end: blockStart });
+            }
+            blocks.push({ start: blockStart, end: blockEnd });
+            cursor = blockEnd;
+        }
+        if (cursor < text.length) {
+            blocks.push({ start: cursor, end: text.length });
+        }
+        return blocks;
+    }
+
+    /**
+     * Strip inline Markdown formatting markers from a snippet's raw text so it
+     * can be found inside a rendered-DOM context string. Pure, stateless.
+     */
+    static normalizeSnippetTextForContext(raw: string): string {
+        if (!raw) return "";
+        return raw
+            .replace(INLINE_DECORATION_RE, "")
+            .replace(/\[\^[^\]]+\]/g, "")
+            .replace(/\^[a-zA-Z0-9-]+(?=\s|$)/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
     }
 
     createFlexiblePattern(snippet: string): string {

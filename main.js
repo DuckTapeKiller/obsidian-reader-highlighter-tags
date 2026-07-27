@@ -1173,7 +1173,7 @@ var FLEX_INTER_CHAR_GAP_PATTERN = "(?:[\\*_|~=`\\\\$]){0,3}";
 var OPTIONAL_MARKDOWN_LINE_PREFIX = `[ \\t]{0,3}(?:(?:>\\s*)*)(?:#{1,6}[ \\t]+|-\\s\\[[ xX]\\][ \\t]+|[-*+][ \\t]+|\\d{1,3}[.)][ \\t]+|\\[\\^[^\\]]+\\]:[ \\t]*|>\\[![^\\]]+\\][ \\t]*)?(?:(?:${INLINE_DECORATION_PATTERN})){0,3}[ \\t]*`;
 var MARKDOWN_PREFIX_ONLY_RE = /^[ \t]*(?:(?:>\s*)+|#{1,6}[ \t]*|-\s\[[ xX]\][ \t]*|[-*+][ \t]*|\d{1,3}[.)][ \t]*|\[\^[^\]]+\]:[ \t]*|>\s*\[![^\]]+\][ \t]*)+$/;
 var INLINE_DECORATION_RE = /<mark[^>]*>|<\/mark>|%%[^%]*%%|==|\*\*|~~|\*|_|`|\[\[|\]\]|\\\$|\\\^|\\\\|\\\{|\\\}|\\\|/g;
-var SelectionLogic = class {
+var SelectionLogic = class _SelectionLogic {
   constructor(app, getRules = () => []) {
     this.app = app;
     this.blockLevelTagsForSplit = BLOCK_LEVEL_TAGS_FOR_SPLIT;
@@ -1204,7 +1204,7 @@ var SelectionLogic = class {
     }
     return results;
   }
-  async locateSelection(processedFile, view, selectionSnippet, context = null, occurrenceIndex = 0) {
+  async locateSelection(processedFile, view, selectionSnippet, context = null, occurrenceIndex = 0, withinBlockOffset = null) {
     this.lastFailureReport = null;
     let snippet = this.stripBrowserJunk(selectionSnippet);
     if (!snippet) {
@@ -1275,7 +1275,16 @@ var SelectionLogic = class {
     }
     candidates = this.offsetCandidates(candidates, firstSegmentBodyStart);
     candidates = candidates.map((cand) => this.snapToStructuralBoundaries(fullRaw, cand));
-    const result = this.resolveCandidates(candidates, fullRaw, context, occurrenceIndex);
+    const bodyBlocks = this.createDocumentBlockRecords(bodyContent);
+    const result = this.resolveCandidates(
+      candidates,
+      fullRaw,
+      selectionSnippet,
+      context,
+      occurrenceIndex,
+      withinBlockOffset,
+      bodyBlocks
+    );
     if (!result) {
       return null;
     }
@@ -1607,33 +1616,309 @@ var SelectionLogic = class {
       raw: ""
     };
   }
-  resolveCandidates(candidates, raw, context, occurrenceIndex) {
+  resolveCandidates(candidates, raw, snippet, context, occurrenceIndex, withinBlockOffset = null, bodyBlocks = []) {
     if (candidates.length === 0) return null;
     if (context) {
       const cleanContext = context.replace(/\s+/g, " ").trim();
-      candidates = candidates.map((cand) => {
+      const scored = candidates.map((cand) => {
         const sourceBlock = (cand.text || raw.substring(cand.start, cand.end)).replace(/\s+/g, " ").trim();
         const score = this.calculateSimilarity(sourceBlock, cleanContext);
         return { ...cand, score };
       });
-      const bestScore = Math.max(...candidates.map((candidate) => {
+      const bestScore = Math.max(...scored.map((candidate) => {
         var _a;
         return (_a = candidate.score) != null ? _a : 0;
       }));
       const threshold = bestScore * 0.85;
-      const validCandidates = candidates.filter((candidate) => {
+      const validCandidates = scored.filter((candidate) => {
         var _a;
         return ((_a = candidate.score) != null ? _a : 0) >= threshold;
       });
-      if (occurrenceIndex >= 0 && occurrenceIndex < validCandidates.length) {
-        const chosen = validCandidates[occurrenceIndex];
+      const chosen = _SelectionLogic.pickBestCandidate(
+        validCandidates,
+        raw,
+        snippet,
+        cleanContext,
+        occurrenceIndex,
+        withinBlockOffset,
+        bodyBlocks
+      );
+      if (chosen) {
         return { raw, start: chosen.start, end: chosen.end };
-      }
-      if (validCandidates.length > 0) {
-        return { raw, start: validCandidates[0].start, end: validCandidates[0].end };
       }
     }
     return { raw, start: candidates[0].start, end: candidates[0].end };
+  }
+  /**
+   * Pure disambiguation helper. Returns the candidate that best matches the
+   * user's actual selection when the snippet appears more than once.
+   *
+   * Tries, in order:
+   *   1. If the snippet appears multiple times in `context`, pick the i-th
+   *      occurrence where i is the index whose start is closest to
+   *      `withinBlockOffset`. (Within-block disambiguation.)
+   *   2. Otherwise, if `bodyBlocks[occurrenceIndex]` is a valid block range,
+   *      filter candidates to that block and return the only one (or the
+   *      first). (Block-level disambiguation using the existing
+   *      `occurrenceIndex`.)
+   *   3. Otherwise, fall back to `candidates[occurrenceIndex]` or the first.
+   *
+   * Pure: no `this`, no DOM, no `app`. Safe to unit-test.
+   */
+  static pickBestCandidate(candidates, raw, snippet, context, occurrenceIndex, withinBlockOffset, bodyBlocks) {
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+    const sortedByStart = [...candidates].sort((a, b) => a.start - b.start);
+    const trimmedContext = context.trim();
+    const trimmedSnippet = snippet.trim();
+    if (trimmedContext) {
+      const blockStarts = _SelectionLogic.findContextInBody(trimmedContext, raw);
+      if (blockStarts.length > 0) {
+        const rankedBlocks = _SelectionLogic.rankBlocksByContext(
+          blockStarts,
+          trimmedContext,
+          raw
+        );
+        for (const blockStart of rankedBlocks) {
+          const approxBlockLen = Math.max(
+            trimmedContext.length,
+            40
+            // paranoia: short contexts
+          );
+          const blockEnd = blockStart + approxBlockLen + 32;
+          const inBlock = sortedByStart.filter(
+            (c) => c.start >= blockStart && c.start < blockEnd
+          );
+          if (inBlock.length === 0) continue;
+          if (inBlock.length === 1) return inBlock[0];
+          const caseMatched = inBlock.filter((c) => {
+            const norm = _SelectionLogic.normalizeSnippetTextForContext(
+              c.text || ""
+            );
+            return norm === trimmedSnippet;
+          });
+          if (caseMatched.length === 1) return caseMatched[0];
+          if (caseMatched.length > 1) {
+            const refined = caseMatched;
+            const result2 = _SelectionLogic.pickByInBlockOffset(
+              refined,
+              blockStart,
+              withinBlockOffset
+            );
+            if (result2) return result2;
+            continue;
+          }
+          if (withinBlockOffset === null) {
+            console.warn(
+              `[Highlighter] ambiguous occurrence: ${inBlock.length} candidates in matched block, no withinBlockOffset, picked first`
+            );
+            return inBlock[0];
+          }
+          const result = _SelectionLogic.pickByInBlockOffset(
+            inBlock,
+            blockStart,
+            withinBlockOffset
+          );
+          if (result) return result;
+        }
+      }
+    }
+    if (bodyBlocks.length > 0 && occurrenceIndex >= 0 && occurrenceIndex < bodyBlocks.length) {
+      const block = bodyBlocks[occurrenceIndex];
+      const inBlock = sortedByStart.filter((c) => c.start >= block.start && c.start < block.end);
+      if (inBlock.length === 1) return inBlock[0];
+      if (inBlock.length > 1) {
+        if (withinBlockOffset !== null) {
+          let best = inBlock[0];
+          let bestDist = Math.abs(inBlock[0].start - block.start - withinBlockOffset);
+          for (let k = 1; k < inBlock.length; k++) {
+            const dist = Math.abs(inBlock[k].start - block.start - withinBlockOffset);
+            if (dist < bestDist) {
+              best = inBlock[k];
+              bestDist = dist;
+            }
+          }
+          if (bestDist > 0) {
+            console.warn(
+              `[Highlighter] ambiguous occurrence: ${inBlock.length} candidates remaining at offset ${withinBlockOffset}`
+            );
+          }
+          return best;
+        }
+        console.warn(
+          `[Highlighter] ambiguous occurrence: ${inBlock.length} candidates remaining in block ${occurrenceIndex}`
+        );
+        return inBlock[0];
+      }
+    }
+    if (occurrenceIndex >= 0 && occurrenceIndex < sortedByStart.length) {
+      const chosen = sortedByStart[occurrenceIndex];
+      const isAmbiguous = sortedByStart.some(
+        (c, i) => i !== occurrenceIndex && c.start === chosen.start
+      );
+      if (isAmbiguous) {
+        console.warn(
+          `[Highlighter] ambiguous occurrence: ${sortedByStart.length} candidates remaining at offset ${chosen.start}`
+        );
+      }
+      return chosen;
+    }
+    return sortedByStart[0];
+  }
+  /**
+   * Find every body offset where the rendered context could live in `raw`.
+   * The body may have inline markers between the chars of the context, so
+   * we use a flexible regex that allows markers between every char.
+   *
+   * Returns positions sorted ascending. Empty array means the context
+   * could not be located (caller falls through to the next strategy).
+   */
+  static findContextInBody(context, raw) {
+    const anchorLen = Math.min(context.length, 40);
+    const anchor = context.substring(0, anchorLen);
+    if (anchor.length < 1) return [];
+    const pattern = _SelectionLogic.buildFlexibleContextPattern(anchor);
+    let regex;
+    try {
+      regex = new RegExp(pattern, "gmu");
+    } catch (e) {
+      return [];
+    }
+    const starts = [];
+    try {
+      let m;
+      let guard = 0;
+      while ((m = regex.exec(raw)) !== null && guard++ < 100) {
+        starts.push(m.index);
+        if (m.index === regex.lastIndex) regex.lastIndex++;
+      }
+    } catch (e) {
+    }
+    return starts;
+  }
+  /**
+   * Rank candidate block-starts by how well the surrounding body text
+   * matches the context. Higher = better. Returns the input sorted
+   * descending by score, ties broken by start ascending.
+   */
+  static rankBlocksByContext(blockStarts, context, raw) {
+    const ctxWords = new Set(context.toLowerCase().split(/\s+/).filter((w) => w.length > 1));
+    const scored = blockStarts.map((start) => {
+      const windowStart = Math.max(0, start - 20);
+      const windowEnd = Math.min(raw.length, start + context.length + 100);
+      const window2 = raw.substring(windowStart, windowEnd);
+      const normalizedWindow = _SelectionLogic.normalizeSnippetTextForContext(window2);
+      const winWords = new Set(normalizedWindow.toLowerCase().split(/\s+/).filter((w) => w.length > 1));
+      let intersection = 0;
+      for (const w of ctxWords) if (winWords.has(w)) intersection++;
+      const union = (/* @__PURE__ */ new Set([...ctxWords, ...winWords])).size;
+      const score = union === 0 ? 0 : intersection / union;
+      return { start, score };
+    });
+    scored.sort((a, b) => b.score - a.score || a.start - b.start);
+    return scored.map((s) => s.start);
+  }
+  /**
+   * Build a flexible regex pattern from a string, allowing inline Markdown
+   * markers between every character. The body may intersperse `**`, `~~`,
+   * `` ` ``, `[`, `]`, etc. between the visible chars of the context.
+   */
+  static buildFlexibleContextPattern(text) {
+    const parts = [];
+    for (const ch of text) {
+      if (/\s/.test(ch)) {
+        parts.push("\\s+");
+      } else {
+        parts.push(ch.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&"));
+      }
+    }
+    const joined = parts.join(`(?:${INLINE_DECORATION_PATTERN}){0,3}`);
+    return `(?:${INLINE_DECORATION_PATTERN}){0,3}${joined}(?:${INLINE_DECORATION_PATTERN}){0,3}`;
+  }
+  /**
+   * Pick the candidate in `cands` whose start is closest to
+   * `blockStart + withinBlockOffset`. Returns null if `withinBlockOffset`
+   * is null.
+   */
+  static pickByInBlockOffset(cands, blockStart, withinBlockOffset) {
+    if (withinBlockOffset === null || cands.length === 0) return null;
+    const expected = blockStart + Math.max(0, withinBlockOffset);
+    let best = cands[0];
+    let bestDist = Math.abs(cands[0].start - expected);
+    for (let k = 1; k < cands.length; k++) {
+      const dist = Math.abs(cands[k].start - expected);
+      if (dist < bestDist) {
+        best = cands[k];
+        bestDist = dist;
+      }
+    }
+    const hasTie = cands.some((c) => c !== best && c.start === best.start);
+    if (hasTie) {
+      console.warn(
+        `[Highlighter] ambiguous occurrence: ${cands.length} candidates in matched block at offset ${best.start}, picked first`
+      );
+    }
+    return best;
+  }
+  /**
+   * Symmetric removal helper. Find the `==` highlight wrapper that
+   * CONTAINS the position `pos` (i.e. the opening `==` of the pair whose
+   * closing `==` is at or after `pos`). Returns the position of the
+   * opening `==`, or -1 if none.
+   *
+   * Unlike the inline expansion in main.ts, this walks back through the
+   * body counting `==` pairs to find the correct opening — it works for
+   * multi-word highlights like `==Cervical Cancer==` where the `==` is
+   * not immediately adjacent to the selection.
+   */
+  static findOpeningEqMarker(raw, pos, bodyStart) {
+    let fromIdx = pos;
+    while (fromIdx > bodyStart) {
+      const idx = raw.lastIndexOf("==", fromIdx);
+      if (idx === -1 || idx < bodyStart) return -1;
+      const beforeCount = (raw.substring(bodyStart, idx).match(/==/g) || []).length;
+      if (beforeCount % 2 === 0) {
+        const closeIdx = raw.indexOf("==", idx + 2);
+        if (closeIdx !== -1 && pos < closeIdx) {
+          return idx;
+        }
+        return -1;
+      }
+      fromIdx = idx - 1;
+    }
+    return -1;
+  }
+  /**
+   * Split a body string into contiguous paragraph blocks (separated by blank
+   * lines). Used to map the rendered block element back to a source range.
+   * Cheap, regex-based; no markdown parsing.
+   */
+  createDocumentBlockRecords(text) {
+    const blocks = [];
+    let cursor = 0;
+    const re = /[^\n]+(?:\n[^\n]+)*/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const blockStart = m.index;
+      const blockEnd = m.index + m[0].length;
+      if (blockStart > cursor) {
+        blocks.push({ start: cursor, end: blockStart });
+      }
+      blocks.push({ start: blockStart, end: blockEnd });
+      cursor = blockEnd;
+    }
+    if (cursor < text.length) {
+      blocks.push({ start: cursor, end: text.length });
+    }
+    return blocks;
+  }
+  /**
+   * Strip inline Markdown formatting markers from a snippet's raw text so it
+   * can be found inside a rendered-DOM context string. Pure, stateless.
+   */
+  static normalizeSnippetTextForContext(raw) {
+    if (!raw) return "";
+    return raw.replace(INLINE_DECORATION_RE, "").replace(/\[\^[^\]]+\]/g, "").replace(/\^[a-zA-Z0-9-]+(?=\s|$)/g, "").replace(/\s+/g, " ").trim();
   }
   createFlexiblePattern(snippet) {
     const lines = this.splitSelectionBlocks(this.stripUrlsForPatternMatch(snippet), false);
@@ -4311,12 +4596,34 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       return null;
     }
     const contextElement = (selectionContext == null ? void 0 : selectionContext.element) || null;
+    const range = this.getSelectionRange(selectionSnapshot);
     return {
       snippet,
       contextElement,
       contextText: contextElement ? this.getElementText(contextElement) : null,
-      occurrenceIndex: this.getSelectionOccurrence(view, contextElement)
+      occurrenceIndex: this.getSelectionOccurrence(view, contextElement),
+      withinBlockOffset: this.computeWithinBlockOffset(contextElement, range)
     };
+  }
+  computeWithinBlockOffset(contextElement, range) {
+    if (!contextElement || !range) return null;
+    const startContainer = range.startContainer;
+    if (!startContainer || startContainer.nodeType !== Node.TEXT_NODE) return null;
+    if (!contextElement.contains(startContainer)) return null;
+    const walker = (contextElement.ownerDocument || activeDocument).createTreeWalker(
+      contextElement,
+      NodeFilter.SHOW_TEXT
+    );
+    let offset = 0;
+    let current = walker.nextNode();
+    while (current) {
+      if (current === startContainer) {
+        return offset + range.startOffset;
+      }
+      offset += (current.nodeValue || "").length;
+      current = walker.nextNode();
+    }
+    return null;
   }
   getSelectionOccurrence(view, contextElement) {
     if (!contextElement) return 0;
@@ -4371,7 +4678,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       view,
       request.snippet,
       request.contextText,
-      request.occurrenceIndex
+      request.occurrenceIndex,
+      request.withinBlockOffset
     );
     if (!result) {
       this.handleSelectionFailure(view, request, "highlightSelection");
@@ -4515,7 +4823,8 @@ ${appendString}`;
       view,
       request.snippet,
       request.contextText,
-      request.occurrenceIndex
+      request.occurrenceIndex,
+      request.withinBlockOffset
     );
     if (!result) {
       this.handleSelectionFailure(view, request, "tagSelection");
@@ -4530,7 +4839,8 @@ ${appendString}`;
         view,
         request.snippet,
         request.contextText,
-        request.occurrenceIndex
+        request.occurrenceIndex,
+        request.withinBlockOffset
       );
       if (!newResult) {
         new import_obsidian9.Notice("Selection lost - file may have changed.");
@@ -4566,7 +4876,8 @@ ${appendString}`;
       view,
       request.snippet,
       request.contextText,
-      request.occurrenceIndex
+      request.occurrenceIndex,
+      request.withinBlockOffset
     );
     if (!result) {
       this.handleSelectionFailure(view, request, "annotateSelection");
@@ -4581,7 +4892,8 @@ ${appendString}`;
         view,
         request.snippet,
         request.contextText,
-        request.occurrenceIndex
+        request.occurrenceIndex,
+        request.withinBlockOffset
       );
       if (!newResult) {
         new import_obsidian9.Notice("Selection lost - file may have changed.");
@@ -4629,7 +4941,8 @@ ${appendString}`;
       view,
       request.snippet,
       request.contextText,
-      request.occurrenceIndex
+      request.occurrenceIndex,
+      request.withinBlockOffset
     );
     if (!result) {
       this.handleSelectionFailure(view, request, "removeHighlightSelection");
@@ -4778,7 +5091,8 @@ ${appendString}`;
       view,
       request.snippet,
       request.contextText,
-      request.occurrenceIndex
+      request.occurrenceIndex,
+      request.withinBlockOffset
     );
     if (!result) {
       this.handleSelectionFailure(view, request, "applyColorHighlight", color);
@@ -4980,6 +5294,32 @@ ${appendString}`;
       if (matchForward) {
         expandedEnd += matchForward[0].length;
         expanded = true;
+      }
+    }
+    if (!expanded) {
+      const openEq = SelectionLogic.findOpeningEqMarker(raw, expandedStart, bodyStart);
+      if (openEq !== -1) {
+        const closeEq = raw.indexOf("==", openEq + 2);
+        if (closeEq !== -1 && closeEq + 2 > expandedEnd) {
+          expandedStart = openEq;
+          expandedEnd = closeEq + 2;
+          expanded = true;
+        }
+      }
+      if (!expanded) {
+        const preceding = raw.substring(0, expandedStart);
+        const lastMark = preceding.lastIndexOf("<mark");
+        if (lastMark !== -1 && lastMark >= bodyStart) {
+          const tagEnd = raw.indexOf(">", lastMark);
+          if (tagEnd !== -1 && tagEnd < expandedStart) {
+            const closeMark = raw.indexOf("</mark>", tagEnd);
+            if (closeMark !== -1 && closeMark >= expandedEnd) {
+              expandedStart = lastMark;
+              expandedEnd = closeMark + "</mark>".length;
+              expanded = true;
+            }
+          }
+        }
       }
     }
     const initiallySelectedText = raw.substring(expandedStart, expandedEnd);

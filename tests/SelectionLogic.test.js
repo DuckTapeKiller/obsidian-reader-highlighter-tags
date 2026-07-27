@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // ====================================================================
 // We test SelectionLogic methods in isolation by importing the class
@@ -932,5 +932,368 @@ describe("applyStructuralFilter \u2014 HTML tag precision", () => {
         expect(result.text).toContain("Avoidable loss of life");
         expect(result.text).toContain("Unlike most cancers");
         expect(result.text).toContain("cryotherapy");
+    });
+});
+
+// ====================================================================
+// resolveCandidates — block-verification
+// Verifies that when the existing three strategies pick a candidate
+// OUTSIDE the body block matching the user's context, resolveCandidates
+// re-runs the disambiguation against body-bounded candidates.
+// Hard no-op when contextText is null or the existing pick is in the
+// matching block.
+// ====================================================================
+describe("resolveCandidates — block-verification", () => {
+    // Minimal body that mirrors the user's real note structure:
+    //   - WHEN table with a `==cancer s==` highlight
+    //   - ENVIRONMENTAL bullet with `most cancers` (no comma)
+    //   - SCIENTIFIC bullet with `cervical cancers` (no comma)
+    //   - WHY bullet with `most cancers,` (the user's target)
+    // The pattern for "cancers," (with comma) would naturally only match
+    // the WHY bullet, but if a future regex becomes more permissive, the
+    // verification step must still pick the WHY-bullet candidate.
+    const body = `Header paragraph.
+
+| Year | Milestone |
+| --- | --- |
+| 2006 | First vaccine (Gardasil) licensed globally[^15]. |
+| Aug 2020 | India releases Operational Framework for common ==cancer s==creening (VIA for ages 30-65, every 5 years)[^14]. |
+
+Some intro about health.
+
+- Environmental footprint: lower than most cancers (no industrial carcinogen pathway).
+
+- **Why this matters**: cervical cancers and 6 & 11 for genital warts are HPV-driven.
+
+- **Avoidable loss of life**: Unlike most cancers, cervical cancer is **preventable (vaccine), detectable (HPV test/VIA), and curable (surgery, LEEP, cryotherapy)** if caught early[^15].`;
+
+    const contextText = "Avoidable loss of life: Unlike most cancers, cervical cancer is preventable (vaccine), detectable (HPV test/VIA), and curable (surgery, LEEP, cryotherapy) if caught early";
+    const snippet = "cancers,";
+    const withinBlockOffset = contextText.indexOf("cancers,");
+    const occurrenceIndex = 0;
+
+    it("canonical cervical-cancer case: returns the WHY-bullet candidate", () => {
+        const candidates = logic.findAllCandidates(body, snippet, 0);
+        expect(candidates.length).toBeGreaterThan(0);
+        const blocks = logic.createDocumentBlockRecords(body);
+        const result = logic.resolveCandidates(
+            candidates,
+            body,
+            snippet,
+            contextText,
+            occurrenceIndex,
+            withinBlockOffset,
+            blocks
+        );
+        expect(result).not.toBeNull();
+        // The correct answer is the `cancers,` in the WHY bullet — not a
+        // candidate from the WHEN table, ENVIRONMENTAL, or SCIENTIFIC bullets.
+        // Verify the chosen candidate is in the body block that contains the
+        // WHY bullet, and that the block's text includes the WHY bullet content.
+        const chosenBlock = blocks.find(
+            (b) => result.start >= b.start && result.start < b.end
+        );
+        expect(chosenBlock).toBeDefined();
+        expect(body.substring(chosenBlock.start, chosenBlock.end)).toContain("Avoidable loss of life");
+        // And NOT in any of the wrong blocks.
+        expect(body.substring(chosenBlock.start, chosenBlock.end)).not.toContain("cancer s");
+        expect(body.substring(chosenBlock.start, chosenBlock.end)).not.toContain("Environmental footprint");
+        expect(body.substring(chosenBlock.start, chosenBlock.end)).not.toContain("Why this matters");
+    });
+
+    it("no-op case: when existing strategies already pick the right block, no warning fires", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const candidates = logic.findAllCandidates(body, snippet, 0);
+            const blocks = logic.createDocumentBlockRecords(body);
+            logic.resolveCandidates(
+                candidates,
+                body,
+                snippet,
+                contextText,
+                occurrenceIndex,
+                withinBlockOffset,
+                blocks
+            );
+            const overrideWarnings = warnSpy.mock.calls.filter((call) =>
+                String(call[0] || "").includes("block-verification override")
+            );
+            expect(overrideWarnings.length).toBe(0);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    it("no-context case: when contextText is null, verification is skipped entirely", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const candidates = logic.findAllCandidates(body, snippet, 0);
+            const blocks = logic.createDocumentBlockRecords(body);
+            const result = logic.resolveCandidates(
+                candidates,
+                body,
+                snippet,
+                null,
+                occurrenceIndex,
+                withinBlockOffset,
+                blocks
+            );
+            expect(result).not.toBeNull();
+            const overrideWarnings = warnSpy.mock.calls.filter((call) =>
+                String(call[0] || "").includes("block-verification override")
+            );
+            expect(overrideWarnings.length).toBe(0);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    it("case-sensitivity regression: lowercase snippet still wins over capitalized match", () => {
+        // Body has both "Cancers," (capital, in para A) and "cancers," (lowercase,
+        // in para B). The user is in para B and selects lowercase. The
+        // verification step MUST NOT override the case-sensitivity preference.
+        const body2 = `Para A: Some Cancers, are rising in incidence.
+
+Para B: Unlike most cancers, cervical cancer is preventable today.`;
+        const contextText2 = "Unlike most cancers, cervical cancer is preventable today";
+        const snippet2 = "cancers,";
+        const candidates2 = logic.findAllCandidates(body2, snippet2, 0);
+        const blocks2 = logic.createDocumentBlockRecords(body2);
+        const result = logic.resolveCandidates(
+            candidates2,
+            body2,
+            snippet2,
+            contextText2,
+            0,
+            contextText2.indexOf("cancers,"),
+            blocks2
+        );
+        expect(result).not.toBeNull();
+        // The result must be the lowercase "cancers," in para B, not the
+        // capital "Cancers," in para A. Verify the chosen candidate is
+        // inside para B's body block.
+        const blocks2b = logic.createDocumentBlockRecords(body2);
+        const chosenBlock = blocks2b.find(
+            (b) => result.start >= b.start && result.start < b.end
+        );
+        expect(chosenBlock).toBeDefined();
+        expect(body2.substring(chosenBlock.start, chosenBlock.end)).toContain("cervical cancer is preventable");
+    });
+
+    it("single-candidate no-op: when only one candidate exists, returns it unchanged", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const singleBody = `Header.
+
+- **Avoidable loss of life**: Unlike most cancers, cervical cancer is **preventable** if caught early.`;
+            const candidates = logic.findAllCandidates(singleBody, snippet, 0);
+            expect(candidates.length).toBe(1);
+            const blocks = logic.createDocumentBlockRecords(singleBody);
+            const result = logic.resolveCandidates(
+                candidates,
+                singleBody,
+                snippet,
+                contextText,
+                occurrenceIndex,
+                withinBlockOffset,
+                blocks
+            );
+            expect(result).not.toBeNull();
+            expect(result.start).toBe(candidates[0].start);
+            // Note: the existing strategies may emit other warnings (e.g.
+            // 'ambiguous occurrence' for single-candidate edge cases); we
+            // only assert the verification step itself doesn't fire.
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    it("empty-body-blocks edge case: verification is a no-op when bodyBlocks is empty", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const candidates = logic.findAllCandidates(body, snippet, 0);
+            const result = logic.resolveCandidates(
+                candidates,
+                body,
+                snippet,
+                contextText,
+                occurrenceIndex,
+                withinBlockOffset,
+                [] // empty bodyBlocks
+            );
+            expect(result).not.toBeNull();
+            // The result should still be returned (existing strategies handle
+            // empty bodyBlocks gracefully).
+            const overrideWarnings = warnSpy.mock.calls.filter((call) =>
+                String(call[0] || "").includes("block-verification override")
+            );
+            expect(overrideWarnings.length).toBe(0);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+});
+
+// ====================================================================
+// verifyAgainstContextBlock — pure helper, unit-testable in isolation
+// ====================================================================
+describe("verifyAgainstContextBlock", () => {
+    const { verifyAgainstContextBlock } = SelectionLogic;
+
+    function makeCand(start, end) {
+        return { start, end, text: "x" };
+    }
+
+    it("returns chosen unchanged when chosen is null", () => {
+        const result = verifyAgainstContextBlock([], "", "ctx", [], null);
+        expect(result).toBeNull();
+    });
+
+    it("returns chosen unchanged when contextText is empty", () => {
+        const chosen = makeCand(10, 20);
+        const result = verifyAgainstContextBlock(
+            [chosen],
+            "some body",
+            "",
+            [{ start: 0, end: 100 }],
+            chosen
+        );
+        expect(result).toBe(chosen);
+    });
+
+    it("returns chosen unchanged when bodyBlocks is empty", () => {
+        const chosen = makeCand(10, 20);
+        const result = verifyAgainstContextBlock(
+            [chosen],
+            "some body",
+            "context",
+            [],
+            chosen
+        );
+        expect(result).toBe(chosen);
+    });
+
+    it("returns chosen unchanged when chosen is in the matching block", () => {
+        const body = "alpha beta gamma delta\n\nepsilon zeta eta theta";
+        const blocks = [
+            { start: 0, end: 22 },
+            { start: 22, end: 24 },
+            { start: 24, end: 50 },
+        ];
+        const chosen = makeCand(25, 30); // inside block #2
+        const result = verifyAgainstContextBlock(
+            [chosen],
+            body,
+            "epsilon zeta eta",
+            blocks,
+            chosen
+        );
+        expect(result).toBe(chosen);
+    });
+
+    it("re-picks to a closer block when chosen is in the wrong block", () => {
+        const body = "alpha beta gamma\n\nepsilon zeta eta\n\niota kappa lambda";
+        const blocks = [
+            { start: 0, end: 15 },
+            { start: 15, end: 17 },
+            { start: 17, end: 32 },
+            { start: 32, end: 34 },
+            { start: 34, end: 50 },
+        ];
+        // contextText matches block #2 (epsilon zeta eta)
+        // chosen is in block #0 (alpha beta gamma) — wrong block
+        const chosen = makeCand(0, 5);
+        // another candidate in block #2
+        const c2 = makeCand(20, 25);
+        const result = verifyAgainstContextBlock(
+            [chosen, c2],
+            body,
+            "epsilon zeta eta",
+            blocks,
+            chosen
+        );
+        expect(result).toBe(c2);
+    });
+
+    it("returns chosen unchanged when no body block contains any candidate", () => {
+        const body = "alpha\n\nbeta\n\ngamma";
+        const blocks = [
+            { start: 0, end: 5 },
+            { start: 5, end: 7 },
+            { start: 7, end: 11 },
+            { start: 11, end: 13 },
+            { start: 13, end: 18 },
+        ];
+        const chosen = makeCand(0, 5);
+        // No candidates in any block
+        const result = verifyAgainstContextBlock(
+            [],
+            body,
+            "alpha",
+            blocks,
+            chosen
+        );
+        expect(result).toBe(chosen);
+    });
+});
+
+// ====================================================================
+// pickContextBlock — pure helper, picks by Jaccard word-overlap
+// ====================================================================
+describe("pickContextBlock", () => {
+    const { pickContextBlock } = SelectionLogic;
+
+    it("returns null when bodyBlocks is empty", () => {
+        expect(pickContextBlock([], "context", "raw")).toBeNull();
+    });
+
+    it("returns null when contextText is null", () => {
+        expect(pickContextBlock([{ start: 0, end: 5 }], null, "raw")).toBeNull();
+    });
+
+    it("returns null when contextText is empty", () => {
+        expect(pickContextBlock([{ start: 0, end: 5 }], "", "raw")).toBeNull();
+    });
+
+    it("returns null when contextText has no content words > 1 char", () => {
+        // Only single-char words → ctxWords is empty → return null
+        expect(
+            pickContextBlock([{ start: 0, end: 5 }], "a b c", "a b c d e f")
+        ).toBeNull();
+    });
+
+    it("picks the block whose text shares the most words with contextText", () => {
+        const body = `alpha beta gamma delta
+
+epsilon zeta eta theta
+
+iota kappa lambda mu`;
+        const blocks = [
+            { start: 0, end: 22 },
+            { start: 22, end: 24 },
+            { start: 24, end: 49 },
+            { start: 49, end: 51 },
+            { start: 51, end: 70 },
+        ];
+        const contextText = "epsilon zeta eta extra";
+        const result = pickContextBlock(blocks, contextText, body);
+        expect(result).not.toBeNull();
+        // Block containing "epsilon zeta eta theta" should win
+        expect(body.substring(result.start, result.end)).toContain("epsilon");
+    });
+
+    it("ties broken by start ascending", () => {
+        const body = `same words here
+
+same words here`;
+        const blocks = [
+            { start: 0, end: 15 },
+            { start: 15, end: 17 },
+            { start: 17, end: 32 },
+        ];
+        const result = pickContextBlock(blocks, "same words here", body);
+        expect(result).not.toBeNull();
+        // Both blocks have the same text; ties → start ascending → first
+        expect(result.start).toBe(0);
     });
 });

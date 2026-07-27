@@ -1645,7 +1645,23 @@ var SelectionLogic = class _SelectionLogic {
         bodyBlocks
       );
       if (chosen) {
-        return { raw, start: chosen.start, end: chosen.end };
+        const verified = _SelectionLogic.verifyAgainstContextBlock(
+          candidates,
+          raw,
+          cleanContext,
+          bodyBlocks,
+          chosen
+        );
+        if (verified && verified !== chosen) {
+          const blockIdx = bodyBlocks.findIndex(
+            (b) => verified.start >= b.start && verified.start < b.end
+          );
+          console.warn(
+            `[Highlighter] block-verification override: chose offset ${verified.start} (block #${blockIdx}) over previous offset ${chosen.start}`
+          );
+        }
+        const finalChosen = verified || chosen;
+        return { raw, start: finalChosen.start, end: finalChosen.end };
       }
     }
     return { raw, start: candidates[0].start, end: candidates[0].end };
@@ -1765,6 +1781,91 @@ var SelectionLogic = class _SelectionLogic {
       return chosen;
     }
     return sortedByStart[0];
+  }
+  /**
+   * Pick the body block whose text best matches `contextText`, by Jaccard
+   * word-overlap of the block's normalised text against `contextText` (the
+   * same scoring rule as the existing `rankBlocksByContext` helper).
+   * Ties broken by start ascending. Returns `null` if `bodyBlocks` is
+   * empty, `contextText` is null/empty, or every block scores 0.
+   *
+   * Pure: no `this`, no DOM. Safe to unit-test.
+   */
+  static pickContextBlock(bodyBlocks, contextText, raw) {
+    if (!bodyBlocks || bodyBlocks.length === 0) return null;
+    if (!contextText || !contextText.trim()) return null;
+    const ctxWords = new Set(
+      contextText.toLowerCase().split(/\s+/).filter((w) => w.length > 1)
+    );
+    if (ctxWords.size === 0) return null;
+    let bestBlock = null;
+    let bestScore = 0;
+    for (const block of bodyBlocks) {
+      const window2 = raw.substring(
+        Math.max(0, block.start - 20),
+        Math.min(raw.length, block.end + 100)
+      );
+      const normalized = _SelectionLogic.normalizeSnippetTextForContext(window2);
+      const winWords = new Set(
+        normalized.toLowerCase().split(/\s+/).filter((w) => w.length > 1)
+      );
+      if (winWords.size === 0) continue;
+      let intersection = 0;
+      for (const w of ctxWords) if (winWords.has(w)) intersection++;
+      const union = (/* @__PURE__ */ new Set([...ctxWords, ...winWords])).size;
+      const score = union === 0 ? 0 : intersection / union;
+      if (score > bestScore || score === bestScore && bestBlock && block.start < bestBlock.start) {
+        bestScore = score;
+        bestBlock = block;
+      }
+    }
+    return bestScore > 0 ? bestBlock : null;
+  }
+  /**
+   * Final body-block verification step. Given a `chosen` candidate from the
+   * existing three disambiguation strategies, verify that it lives in the
+   * body block whose text best matches `contextText`. If it does, return
+   * `chosen` unchanged (the common case). If it does not, re-run the
+   * disambiguation against the body blocks that contain at least one
+   * candidate: pick the body block closest in offset to the matching
+   * block's start, then pick the candidate in that block whose start is
+   * closest to the matching block's start. Returns `chosen` unchanged when
+   * `contextText` is null/empty, `bodyBlocks` is empty, or `chosen` is
+   * null, or when no body block contains a candidate.
+   *
+   * Pure: no `this`, no DOM. Safe to unit-test.
+   */
+  static verifyAgainstContextBlock(candidates, body, contextText, bodyBlocks, chosen) {
+    if (!chosen) return chosen;
+    if (!contextText || !contextText.trim()) return chosen;
+    if (!bodyBlocks || bodyBlocks.length === 0) return chosen;
+    const matchingBlock = _SelectionLogic.pickContextBlock(bodyBlocks, contextText, body);
+    if (!matchingBlock) return chosen;
+    if (chosen.start >= matchingBlock.start && chosen.start < matchingBlock.end) {
+      return chosen;
+    }
+    const blocksWithCandidates = [];
+    for (const block of bodyBlocks) {
+      const inBlock = candidates.filter(
+        (c) => c.start >= block.start && c.start < block.end
+      );
+      if (inBlock.length > 0) {
+        blocksWithCandidates.push({ start: block.start, end: block.end, candidates: inBlock });
+      }
+    }
+    if (blocksWithCandidates.length === 0) return chosen;
+    blocksWithCandidates.sort((a, b) => {
+      const da = Math.abs(a.start - matchingBlock.start);
+      const db = Math.abs(b.start - matchingBlock.start);
+      return da - db;
+    });
+    const closest = blocksWithCandidates[0];
+    closest.candidates.sort((a, b) => {
+      const da = Math.abs(a.start - matchingBlock.start);
+      const db = Math.abs(b.start - matchingBlock.start);
+      return da - db;
+    });
+    return closest.candidates[0];
   }
   /**
    * Find every body offset where the rendered context could live in `raw`.

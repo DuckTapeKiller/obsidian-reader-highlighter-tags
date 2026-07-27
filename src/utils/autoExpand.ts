@@ -19,6 +19,28 @@ export function autoExpandSelection(
     let expandedStart = start;
     let expandedEnd = end;
     let expanded = true;
+    // ponytail: scope the "same delim on other side" guards to the CURRENT
+    // LINE, not the whole document. The previous implementation used
+    // `raw.substring(expandedEnd)` which spans the rest of the file — a
+    // `**` on a later line (e.g. the next bullet's lead-in) would falsely
+    // satisfy the guard and block the matchBack absorption of THIS line's
+    // leading `**`. Bug: triple-tap on `- **Bold lead-in**: rest...` when
+    // the next line also starts with `- **...` — the guard saw `**` in
+    // `after` and thought the selection was in the middle of a formatted
+    // span, so it never absorbed the leading `**`, and the wrap step
+    // produced a broken shape. The guard must only fire when the same
+    // delimiter is on the SAME line as the selection.
+    const lineEndFor = (offset: number): number => {
+        const nl = raw.indexOf("\n", offset);
+        return nl === -1 ? raw.length : nl;
+    };
+    const lineStartFor = (offset: number): number => {
+        // search backward for the previous newline, starting at offset-1
+        // so an offset sitting on a newline returns the line AFTER it
+        const start = Math.max(bodyStart, offset - 1);
+        const prevNl = raw.lastIndexOf("\n", start);
+        return prevNl === -1 ? bodyStart : prevNl + 1;
+    };
     while (expanded) {
         expanded = false;
         const preceding = raw.substring(0, expandedStart);
@@ -26,29 +48,17 @@ export function autoExpandSelection(
         if (matchBack && expandedStart > bodyStart) {
             const hit = matchBack[0];
             // ponytail: if the hit is a paired inline delimiter AND the same
-            // delimiter exists AFTER the selection but is NOT immediately
-            // adjacent to it, the selection is in the middle of a formatted
-            // span — the closing delimiter belongs to a pair that wraps the
-            // selection. Don't absorb; leave the selection as-is so the wrap
-            // step applies the highlight to just the selected text and the
-            // surrounding `**…**` / `==…==` stays in the source line. If the
-            // same delimiter IS immediately adjacent (i.e. the selection
-            // ends right at the closing delimiter), the user selected the
-            // whole span — absorb as before.
-            //
-            // ponytail: an UNRELATED `==` / `**` earlier in the document
-            // (e.g. another highlight on a different line) must NOT trigger
-            // the guard. The guard only fires when the same delimiter is
-            // present on the other side AND is NOT immediately adjacent to
-            // the selection — that pattern is unique to a span whose
-            // opening is before the selection and whose closing is past the
-            // selection (the substring case). When the closing is
-            // immediately adjacent (e.g. the user selected the whole
-            // `==x==` pair minus markers, or is removing an existing
-            // highlight that sits flush against the selection), the guard
-            // is skipped and the matchForward absorbs the closing too.
-            const after = raw.substring(expandedEnd);
-            const sameDelimOnOtherSide = PAIRED_DELIMS.has(hit) && after.includes(hit) && !after.startsWith(hit);
+            // delimiter exists AFTER the selection on the SAME LINE but is
+            // NOT immediately adjacent to it, the selection is in the
+            // middle of a formatted span — the closing delimiter belongs
+            // to a pair that wraps the selection. Don't absorb; leave the
+            // selection as-is. If the same delimiter IS immediately
+            // adjacent (i.e. the selection ends right at the closing
+            // delimiter), the user selected the whole span — absorb as
+            // before.
+            const afterOnLine = raw.substring(expandedEnd, lineEndFor(expandedEnd));
+            const sameDelimOnOtherSide =
+                PAIRED_DELIMS.has(hit) && afterOnLine.includes(hit) && !afterOnLine.startsWith(hit);
             if (!sameDelimOnOtherSide) {
                 const newStart = expandedStart - hit.length;
                 if (newStart >= bodyStart) {
@@ -64,33 +74,27 @@ export function autoExpandSelection(
         );
         if (matchForward) {
             const hit = matchForward[0];
-            // ponytail: same symmetric check on the forward side. If the hit
-            // is a paired inline delimiter AND the same delimiter exists
-            // BEFORE the selection but is NOT immediately adjacent to it,
-            // the selection is in the middle of a formatted span. Don't
-            // absorb the closing delimiter — the `:` (or whatever trailing
-            // punct would have been absorbed next) stays in the source line
-            // outside the highlight. If the same delimiter IS immediately
-            // adjacent on the leading side, the user selected the whole
-            // span — absorb as before.
+            // ponytail: same symmetric check on the forward side, scoped to
+            // the SAME LINE. If the hit is a paired inline delimiter AND
+            // the same delimiter exists BEFORE the selection on the same
+            // line but is NOT immediately adjacent to it, the selection is
+            // in the middle of a formatted span. Don't absorb. If the same
+            // delimiter IS immediately adjacent on the leading side, the
+            // user selected the whole span — absorb as before.
             //
-            // ponytail: the check must be scoped to the CURRENT formatted
-            // span, not the whole document. If matchBack just absorbed the
-            // opening of a pair (i.e. the chars at expandedStart are the
-            // same delimiter), the closing seen by matchForward is the
-            // closing of THAT pair — the wrap step will strip both. Without
-            // this scope, an unrelated `==` highlight earlier in the
-            // document (the cervical-cancer note has dozens) would falsely
-            // satisfy `before.includes("==")` and block absorption of the
-            // closing `==` of the highlight the user is actually removing.
+            // ponytail: if matchBack just absorbed the opening of a pair
+            // (i.e. the chars at expandedStart are the same delimiter),
+            // the closing seen by matchForward is the closing of THAT pair
+            // — the wrap step will strip both. Skip the guard so the
+            // matchForward absorbs the closing too.
             const matchBackAbsorbedSameDelim =
                 raw.substring(expandedStart, expandedStart + hit.length) === hit;
-            const before = raw.substring(bodyStart, expandedStart);
+            const beforeOnLine = raw.substring(lineStartFor(expandedStart), expandedStart);
             const sameDelimOnOtherSide =
                 !matchBackAbsorbedSameDelim &&
                 PAIRED_DELIMS.has(hit) &&
-                before.includes(hit) &&
-                !before.endsWith(hit);
+                beforeOnLine.includes(hit) &&
+                !beforeOnLine.endsWith(hit);
             if (!sameDelimOnOtherSide) {
                 expandedEnd += hit.length;
                 expanded = true;

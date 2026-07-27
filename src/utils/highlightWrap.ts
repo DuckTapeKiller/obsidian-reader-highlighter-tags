@@ -41,6 +41,23 @@ export function extractInlineBoundaries(content: string): { leading: string; cor
         if (text.endsWith(leading)) {
             return { leading: "", core: text, trailing: "" };
         }
+        // ponytail: single complete pair — the leading delimiter appears
+        // exactly twice in the full text (opening at the start, closing
+        // somewhere in the middle). The whole selection is the user's
+        // content; the formatting pair sits inside it. Return unchanged
+        // so the wrap composes `==text==` (the whole line highlighted,
+        // `**` on the inside). Covers the canonical triple-tap case
+        // `**Bold lead-in**: rest of the line…`. The 1-occurrence case
+        // (lone delim) still falls through to the peel path below. The
+        // 4+ occurrence case (embedded multi-span like `**foo** bar
+        // **baz**`) is still caught by the `innerCount >= 2` branch
+        // further down. The symmetric 2-occurrence case where the
+        // closing is at the end is already caught by the `endsWith`
+        // branch above.
+        const fullCount = (text.match(new RegExp(escapeForPair(leading), "g")) || []).length;
+        if (fullCount === 2) {
+            return { leading: "", core: text, trailing: "" };
+        }
         // Paired case: the leading delimiter's matching closing delimiter
         // is buried somewhere in the rest of the text (e.g. `**foo**,`).
         // Peel both, and let everything after the closing delimiter stay

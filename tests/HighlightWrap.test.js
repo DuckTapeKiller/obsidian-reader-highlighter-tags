@@ -93,52 +93,52 @@ describe("extractInlineBoundaries — asymmetric (peel the lone delimiter)", () 
     });
 });
 
-describe("extractInlineBoundaries — paired delimiter with trailing punctuation", () => {
-    it("peels both `**` and keeps a trailing comma — canonical bug case", () => {
+describe("extractInlineBoundaries — single pair with trailing content (unchanged)", () => {
+    it("returns unchanged for `**...** + trailing comma` (whole line is the user's selection)", () => {
         expect(extractInlineBoundaries("**17 Nov 2025**,")).toEqual({
-            leading: "**",
-            core: "17 Nov 2025",
-            trailing: "**,",
+            leading: "",
+            core: "**17 Nov 2025**,",
+            trailing: "",
         });
     });
 
-    it("peels both `**` and keeps a trailing period", () => {
+    it("returns unchanged for `**...** + trailing period`", () => {
         expect(extractInlineBoundaries("**Done**.")).toEqual({
-            leading: "**",
-            core: "Done",
-            trailing: "**.",
+            leading: "",
+            core: "**Done**.",
+            trailing: "",
         });
     });
 
-    it("peels both `*` (italic) and keeps a trailing period", () => {
+    it("returns unchanged for `*...* + trailing period` (italic)", () => {
         expect(extractInlineBoundaries("*café*.")).toEqual({
-            leading: "*",
-            core: "café",
-            trailing: "*.",
+            leading: "",
+            core: "*café*.",
+            trailing: "",
         });
     });
 
-    it("peels both `~~` (strikethrough) and keeps a trailing comma", () => {
+    it("returns unchanged for `~~...~~ + trailing comma` (strikethrough)", () => {
         expect(extractInlineBoundaries("~~old~~,")).toEqual({
-            leading: "~~",
-            core: "old",
-            trailing: "~~,",
+            leading: "",
+            core: "~~old~~,",
+            trailing: "",
         });
     });
 
-    it("peels both `` ` `` (inline code) and keeps a trailing semicolon", () => {
+    it("returns unchanged for `` `...` + trailing semicolon `` (inline code)", () => {
         expect(extractInlineBoundaries("`var`;")).toEqual({
-            leading: "`",
-            core: "var",
-            trailing: "`;",
+            leading: "",
+            core: "`var`;",
+            trailing: "",
         });
     });
 
-    it("peels both `**` and keeps a trailing closing paren", () => {
+    it("returns unchanged for `**...** + trailing closing paren`", () => {
         expect(extractInlineBoundaries("**foo**)")).toEqual({
-            leading: "**",
-            core: "foo",
-            trailing: "**)",
+            leading: "",
+            core: "**foo**)",
+            trailing: "",
         });
     });
 });
@@ -225,28 +225,27 @@ describe("wrap-site composition — canonical spec case", () => {
         expect(wrapped).toBe('**<mark style="background: #FFEE58; color: black;">one</mark>');
     });
 
-    it("paired `**` with trailing comma produces `**==17 Nov 2025==**,` (NOT `**==17 Nov 2025**,==`)", () => {
-        // The canonical bug: source `On **17 Nov 2025**,`, user selects `17 Nov 2025`,
-        // auto-expansion absorbs `**17 Nov 2025**,`. The closing `**` lands before
-        // the trailing comma, so the function must peel both `**` and keep the
-        // comma in the trailing slot.
+    it("single pair with trailing comma produces `==**17 Nov 2025**,==` (whole line highlighted)", () => {
+        // After the fix: a single bold pair with trailing content is the user's
+        // whole selection. The wrap composes `==text==` — the pair sits inside
+        // the highlight, not split around it.
         const wrapped = composeMarkdownWrap("**17 Nov 2025**,");
-        expect(wrapped).toBe("**==17 Nov 2025==**,");
-        expect(wrapped).not.toBe("**==17 Nov 2025**,==");
+        expect(wrapped).toBe("==**17 Nov 2025**,==");
+        expect(wrapped).not.toBe("**==17 Nov 2025==**,");
     });
 
-    it("paired `**` with trailing period produces `**==Done==**.`", () => {
-        expect(composeMarkdownWrap("**Done**.")).toBe("**==Done==**.");
+    it("single pair with trailing period produces `==**Done**.==`", () => {
+        expect(composeMarkdownWrap("**Done**.")).toBe("==**Done**.==");
     });
 
-    it("paired `` ` `` with trailing semicolon produces `` `==var==`; ``", () => {
-        expect(composeMarkdownWrap("`var`;")).toBe("`==var==`;");
+    it("single pair with trailing semicolon produces `` ==`var`;== ``", () => {
+        expect(composeMarkdownWrap("`var`;")).toBe("==`var`;==");
     });
 
-    it("color mode also keeps both `**` outside the <mark> for the paired-trailing-punct case", () => {
+    it("color mode also wraps the whole single-pair selection in <mark>", () => {
         const wrapped = composeColorWrap("**Done**.", "#FFEE58");
         expect(wrapped).toBe(
-            '**<mark style="background: #FFEE58; color: black;">Done</mark>**.'
+            '<mark style="background: #FFEE58; color: black;">**Done**.</mark>'
         );
     });
 });
@@ -306,11 +305,11 @@ describe("extractInlineBoundaries — embedded inline markers (multiple spans)",
         });
     });
 
-    it("regression: paired with trailing comma is still preserved", () => {
+    it("regression: single pair with trailing comma returns unchanged", () => {
         expect(extractInlineBoundaries("**17 Nov 2025**,")).toEqual({
-            leading: "**",
-            core: "17 Nov 2025",
-            trailing: "**,",
+            leading: "",
+            core: "**17 Nov 2025**,",
+            trailing: "",
         });
     });
 
@@ -318,6 +317,66 @@ describe("extractInlineBoundaries — embedded inline markers (multiple spans)",
         expect(extractInlineBoundaries("**one")).toEqual({
             leading: "**",
             core: "one",
+            trailing: "",
+        });
+    });
+});
+
+// ====================================================================
+// Single inline-formatting pair (one complete pair with substantial
+// trailing content). The leading delimiter appears exactly twice in the
+// text — opening at the start, closing in the middle. The whole text
+// is the user's selection; the function must return it unchanged so the
+// wrap composes `==text==` (whole selection highlighted, the formatting
+// pair sits inside the highlight). Regression for the canonical
+// triple-tap bug case.
+// ====================================================================
+describe("extractInlineBoundaries — single pair (unchanged)", () => {
+    it("canonical bug case: bold lead-in with substantial trailing content", () => {
+        const text = "**Indias projected SAF demand**: 62,000 t (2027) → 130,000 t (2028) → 380,000 t (2030).[^12]";
+        expect(extractInlineBoundaries(text)).toEqual({
+            leading: "",
+            core: text,
+            trailing: "",
+        });
+    });
+
+    it("minimal trailing letter: `**bold**a` returns unchanged", () => {
+        expect(extractInlineBoundaries("**bold**a")).toEqual({
+            leading: "",
+            core: "**bold**a",
+            trailing: "",
+        });
+    });
+
+    it("embedded multi-span (4+ occurrences) still returns unchanged", () => {
+        expect(extractInlineBoundaries("**foo** bar **baz** qux")).toEqual({
+            leading: "",
+            core: "**foo** bar **baz** qux",
+            trailing: "",
+        });
+    });
+
+    it("lone leading `**` (1 occurrence) still peels", () => {
+        expect(extractInlineBoundaries("**one")).toEqual({
+            leading: "**",
+            core: "one",
+            trailing: "",
+        });
+    });
+
+    it("lone trailing `**` (no leading) still peels", () => {
+        expect(extractInlineBoundaries("one**")).toEqual({
+            leading: "",
+            core: "one",
+            trailing: "**",
+        });
+    });
+
+    it("symmetric `**x**` (closing at end) still returns unchanged via endsWith branch", () => {
+        expect(extractInlineBoundaries("**one two three**")).toEqual({
+            leading: "",
+            core: "**one two three**",
             trailing: "",
         });
     });

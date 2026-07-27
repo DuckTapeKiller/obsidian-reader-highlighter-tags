@@ -4297,6 +4297,10 @@ function extractInlineBoundaries(content) {
     if (text.endsWith(leading)) {
       return { leading: "", core: text, trailing: "" };
     }
+    const fullCount = (text.match(new RegExp(escapeForPair(leading), "g")) || []).length;
+    if (fullCount === 2) {
+      return { leading: "", core: text, trailing: "" };
+    }
     const afterLeading = text.slice(leading.length);
     const innerCount = (afterLeading.match(new RegExp(escapeForPair(leading), "g")) || []).length;
     if (innerCount >= 2) {
@@ -4322,14 +4326,23 @@ function autoExpandSelection(raw, start, end, bodyStart) {
   let expandedStart = start;
   let expandedEnd = end;
   let expanded = true;
+  const lineEndFor = (offset) => {
+    const nl = raw.indexOf("\n", offset);
+    return nl === -1 ? raw.length : nl;
+  };
+  const lineStartFor = (offset) => {
+    const start2 = Math.max(bodyStart, offset - 1);
+    const prevNl = raw.lastIndexOf("\n", start2);
+    return prevNl === -1 ? bodyStart : prevNl + 1;
+  };
   while (expanded) {
     expanded = false;
     const preceding = raw.substring(0, expandedStart);
     const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[\^[^\]]+\]:?\s?|[([{"'«“‘‹])$/);
     if (matchBack && expandedStart > bodyStart) {
       const hit = matchBack[0];
-      const after = raw.substring(expandedEnd);
-      const sameDelimOnOtherSide = PAIRED_DELIMS.has(hit) && after.includes(hit) && !after.startsWith(hit);
+      const afterOnLine = raw.substring(expandedEnd, lineEndFor(expandedEnd));
+      const sameDelimOnOtherSide = PAIRED_DELIMS.has(hit) && afterOnLine.includes(hit) && !afterOnLine.startsWith(hit);
       if (!sameDelimOnOtherSide) {
         const newStart = expandedStart - hit.length;
         if (newStart >= bodyStart) {
@@ -4345,8 +4358,8 @@ function autoExpandSelection(raw, start, end, bodyStart) {
     if (matchForward) {
       const hit = matchForward[0];
       const matchBackAbsorbedSameDelim = raw.substring(expandedStart, expandedStart + hit.length) === hit;
-      const before = raw.substring(bodyStart, expandedStart);
-      const sameDelimOnOtherSide = !matchBackAbsorbedSameDelim && PAIRED_DELIMS.has(hit) && before.includes(hit) && !before.endsWith(hit);
+      const beforeOnLine = raw.substring(lineStartFor(expandedStart), expandedStart);
+      const sameDelimOnOtherSide = !matchBackAbsorbedSameDelim && PAIRED_DELIMS.has(hit) && beforeOnLine.includes(hit) && !beforeOnLine.endsWith(hit);
       if (!sameDelimOnOtherSide) {
         expandedEnd += hit.length;
         expanded = true;

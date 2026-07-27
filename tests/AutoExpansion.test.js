@@ -7,8 +7,25 @@ import { describe, it, expect } from "vitest";
 // ====================================================================
 
 import { autoExpandSelection } from "../src/utils/autoExpand";
+import { extractInlineBoundaries } from "../src/utils/highlightWrap";
 
 const NO_BODY = 0; // no frontmatter, body starts at offset 0
+
+// End-to-end pipeline: autoExpandSelection → split into lines →
+// extractInlineBoundaries → compose the wrap-site template the same way
+// `applyMarkdownModification` does. Used by the single-pair regression
+// test below to assert the final wrapped line.
+function pipelineWrap(raw, start, end, bodyStart = NO_BODY) {
+    const { start: s, end: e } = autoExpandSelection(raw, start, end, bodyStart);
+    const selected = raw.substring(s, e);
+    return selected
+        .split(/\r?\n/)
+        .map((line) => {
+            const { leading, core, trailing } = extractInlineBoundaries(line);
+            return `${leading}==${core}==${trailing}`;
+        })
+        .join("\n");
+}
 
 describe("autoExpandSelection — substring inside a formatted span (no expansion)", () => {
     it("does not absorb the trailing `**` or `:` when selection is a word inside `**bold**:`", () => {
@@ -233,5 +250,60 @@ describe("autoExpandSelection — unrelated paired delimiters earlier in the doc
         const { start, end } = autoExpandSelection(raw, innerOffset, innerOffset + inner.length, 0);
         // Both `**` and the trailing `,` should be absorbed.
         expect(raw.substring(start, end)).toBe("**17 Nov 2025**,");
+    });
+
+    it("absorbs the leading `**` of a bold lead-in even when the NEXT line also starts with `**` (same-line scope fix)", () => {
+        // Regression for the canonical bug: triple-tap on
+        // `- **India's projected SAF demand**: 62,000 t (2027) → ...`
+        // when the next bullet also starts with `- **CORSIA baseline**:`.
+        // The previous implementation checked `raw.substring(expandedEnd)`
+        // for `**` (the whole rest of the document), so the next line's
+        // `**` falsely satisfied the "selection is in the middle of a
+        // formatted span" guard and blocked the leading `**` absorption.
+        // The fix scopes the guard to the CURRENT LINE.
+        const raw = "- **India's projected SAF demand**: 62,000 t (2027) → 130,000 t (2028) → 380,000 t (2030).[^12]\n- **CORSIA baseline**: offsetting required for emissions above 85% of 2019 levels from 2024 onwards.";
+        // Selection starts at "India's" (position 4, just after the leading `**`).
+        // The end is the end of the first line (95) — simulates triple-tap
+        // which selects the whole line, not the whole file.
+        const indiasOffset = raw.indexOf("India's");
+        const lineEnd = raw.indexOf("\n");
+        const { start, end } = autoExpandSelection(raw, indiasOffset, lineEnd, 0);
+        // The leading `**` MUST be absorbed (it was the bug that it wasn't).
+        expect(start).toBe(indiasOffset - 2);
+        expect(raw.substring(start, end)).toBe("**India's projected SAF demand**: 62,000 t (2027) → 130,000 t (2028) → 380,000 t (2030).[^12]");
+    });
+});
+
+// ====================================================================
+// End-to-end regression for the canonical bug case: user triple-taps a
+// line whose lead-in is a bold span and applies a highlight. The full
+// pipeline (autoExpand + extractInlineBoundaries + wrap composition)
+// must produce `==text==` with the bold pair on the inside.
+// ====================================================================
+describe("end-to-end pipeline — single bold pair with substantial trailing content", () => {
+    it("triple-tap of bold lead-in bullet point produces `==**...==` with `**` inside", () => {
+        // Source line as the user would see it in the editor
+        const raw = "- **Indias projected SAF demand**: 62,000 t (2027) → 130,000 t (2028) → 380,000 t (2030).[^12]";
+        // Triple-tap selects from after `- ` (position 2) to end of line
+        const start = 2;
+        const end = raw.length;
+        const wrapped = pipelineWrap(raw, start, end);
+        const expected =
+            "==**Indias projected SAF demand**: 62,000 t (2027) → 130,000 t (2028) → 380,000 t (2030).[^12]==";
+        expect(wrapped).toBe(expected);
+        // And explicitly NOT the old broken shape
+        expect(wrapped).not.toBe(
+            "**==Indias projected SAF demand==**: 62,000 t (2027) → 130,000 t (2028) → 380,000 t (2030).[^12]"
+        );
+    });
+
+    it("full-span `**17 Nov 2025**,` still produces `==**17 Nov 2025**,==` after the fix", () => {
+        // Regression: the previously-peeled case now also wraps the whole
+        // selection (the `,` is now inside the highlight, not outside).
+        const raw = "On **17 Nov 2025**,";
+        const inner = "17 Nov 2025";
+        const innerOffset = raw.indexOf(inner);
+        const wrapped = pipelineWrap(raw, innerOffset, innerOffset + inner.length);
+        expect(wrapped).toBe("==**17 Nov 2025**,==");
     });
 });

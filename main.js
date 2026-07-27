@@ -4187,11 +4187,18 @@ function extractInlineBoundaries(content) {
       break;
     }
   }
-  if (leading && trailing) {
-    return { leading: "", core: text, trailing: "" };
-  }
   if (leading) {
-    return { leading, core: text.slice(leading.length), trailing: "" };
+    if (text.endsWith(leading)) {
+      return { leading: "", core: text, trailing: "" };
+    }
+    const afterLeading = text.slice(leading.length);
+    const closeIdx = afterLeading.indexOf(leading);
+    if (closeIdx !== -1) {
+      const core = afterLeading.slice(0, closeIdx);
+      const trailing2 = leading + afterLeading.slice(closeIdx + leading.length);
+      return { leading, core, trailing: trailing2 };
+    }
+    return { leading, core: afterLeading, trailing: "" };
   }
   if (trailing) {
     return { leading: "", core: text.slice(0, text.length - trailing.length), trailing };

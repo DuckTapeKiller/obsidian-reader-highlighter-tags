@@ -93,6 +93,56 @@ describe("extractInlineBoundaries — asymmetric (peel the lone delimiter)", () 
     });
 });
 
+describe("extractInlineBoundaries — paired delimiter with trailing punctuation", () => {
+    it("peels both `**` and keeps a trailing comma — canonical bug case", () => {
+        expect(extractInlineBoundaries("**17 Nov 2025**,")).toEqual({
+            leading: "**",
+            core: "17 Nov 2025",
+            trailing: "**,",
+        });
+    });
+
+    it("peels both `**` and keeps a trailing period", () => {
+        expect(extractInlineBoundaries("**Done**.")).toEqual({
+            leading: "**",
+            core: "Done",
+            trailing: "**.",
+        });
+    });
+
+    it("peels both `*` (italic) and keeps a trailing period", () => {
+        expect(extractInlineBoundaries("*café*.")).toEqual({
+            leading: "*",
+            core: "café",
+            trailing: "*.",
+        });
+    });
+
+    it("peels both `~~` (strikethrough) and keeps a trailing comma", () => {
+        expect(extractInlineBoundaries("~~old~~,")).toEqual({
+            leading: "~~",
+            core: "old",
+            trailing: "~~,",
+        });
+    });
+
+    it("peels both `` ` `` (inline code) and keeps a trailing semicolon", () => {
+        expect(extractInlineBoundaries("`var`;")).toEqual({
+            leading: "`",
+            core: "var",
+            trailing: "`;",
+        });
+    });
+
+    it("peels both `**` and keeps a trailing closing paren", () => {
+        expect(extractInlineBoundaries("**foo**)")).toEqual({
+            leading: "**",
+            core: "foo",
+            trailing: "**)",
+        });
+    });
+});
+
 describe("extractInlineBoundaries — no delimiter / defensive", () => {
     it("returns empty boundaries for plain text", () => {
         expect(extractInlineBoundaries("plain text")).toEqual({
@@ -173,5 +223,30 @@ describe("wrap-site composition — canonical spec case", () => {
     it("color mode also keeps the leading `**` outside the <mark>", () => {
         const wrapped = composeColorWrap("**one", "#FFEE58");
         expect(wrapped).toBe('**<mark style="background: #FFEE58; color: black;">one</mark>');
+    });
+
+    it("paired `**` with trailing comma produces `**==17 Nov 2025==**,` (NOT `**==17 Nov 2025**,==`)", () => {
+        // The canonical bug: source `On **17 Nov 2025**,`, user selects `17 Nov 2025`,
+        // auto-expansion absorbs `**17 Nov 2025**,`. The closing `**` lands before
+        // the trailing comma, so the function must peel both `**` and keep the
+        // comma in the trailing slot.
+        const wrapped = composeMarkdownWrap("**17 Nov 2025**,");
+        expect(wrapped).toBe("**==17 Nov 2025==**,");
+        expect(wrapped).not.toBe("**==17 Nov 2025**,==");
+    });
+
+    it("paired `**` with trailing period produces `**==Done==**.`", () => {
+        expect(composeMarkdownWrap("**Done**.")).toBe("**==Done==**.");
+    });
+
+    it("paired `` ` `` with trailing semicolon produces `` `==var==`; ``", () => {
+        expect(composeMarkdownWrap("`var`;")).toBe("`==var==`;");
+    });
+
+    it("color mode also keeps both `**` outside the <mark> for the paired-trailing-punct case", () => {
+        const wrapped = composeColorWrap("**Done**.", "#FFEE58");
+        expect(wrapped).toBe(
+            '**<mark style="background: #FFEE58; color: black;">Done</mark>**.'
+        );
     });
 });

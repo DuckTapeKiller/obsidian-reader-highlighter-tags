@@ -17,6 +17,7 @@
 export function extractInlineBoundaries(content: string): { leading: string; core: string; trailing: string } {
     const delimiters = ["**", "~~", "`", "*", "_"];
     const text = String(content ?? "");
+    const escapeForPair = (d: string): string => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
     let leading = "";
     for (const d of delimiters) {
@@ -46,6 +47,16 @@ export function extractInlineBoundaries(content: string): { leading: string; cor
         // in the trailing slot so trailing punctuation lands outside the
         // highlight wrapper.
         const afterLeading = text.slice(leading.length);
+        // ponytail: if the text contains the delimiter 2+ times after the
+        // leading one, the first inner occurrence is the *opening* of a
+        // new span, not the *closing* of the first. Return unchanged so
+        // the wrap composes `==text==` (full selection highlighted, inner
+        // formatting preserved). Covers the cervical-cancer case where the
+        // selection spans two bold runs separated by plain text.
+        const innerCount = (afterLeading.match(new RegExp(escapeForPair(leading), "g")) || []).length;
+        if (innerCount >= 2) {
+            return { leading: "", core: text, trailing: "" };
+        }
         const closeIdx = afterLeading.indexOf(leading);
         if (closeIdx !== -1) {
             const core = afterLeading.slice(0, closeIdx);

@@ -1544,7 +1544,8 @@ var SelectionLogic = class _SelectionLogic {
       // Markdown Images: ![caption](url)
       /!\[[^\]]*\]\([^)]+\)/g,
       // Global HTML Tags (Reading view strips these)
-      /<[^>]+>/g
+      // ponytail: must start with a letter so literal `<2%`, `<3rd`, `5 < 10` are not consumed
+      /<\/?[a-zA-Z][^>]*>/g
     ];
     let currentText = text;
     let currentSegments = [...segments];
@@ -2604,8 +2605,11 @@ var SelectionLogic = class _SelectionLogic {
       diagnostics,
       bestGuessContext: ""
     };
-    const firstWord = cleanedSnippet.split(/\s+/)[0].toLocaleLowerCase();
-    if (firstWord && !bodyContent.toLocaleLowerCase().includes(firstWord)) {
+    const normalizedBody = this.normalizeComparableText(bodyContent).toLocaleLowerCase();
+    const normalizedSnippet = this.normalizeComparableText(cleanedSnippet);
+    const anchorWords = normalizedSnippet.split(/\s+/).filter((w) => w.length > 2).sort((a, b) => b.length - a.length);
+    const anchor = anchorWords[0];
+    if (anchor && !normalizedBody.includes(anchor.toLocaleLowerCase())) {
       report.type = "PHANTOM";
       report.reason = "Text not found in the current file.";
       report.hint = "This text appears to come from an embedded note. Open the source note directly and highlight it there.";
@@ -4173,6 +4177,7 @@ init_highlights();
 function extractInlineBoundaries(content) {
   const delimiters = ["**", "~~", "`", "*", "_"];
   const text = String(content != null ? content : "");
+  const escapeForPair = (d) => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   let leading = "";
   for (const d of delimiters) {
     if (text.startsWith(d) && text.length > d.length) {
@@ -4192,6 +4197,10 @@ function extractInlineBoundaries(content) {
       return { leading: "", core: text, trailing: "" };
     }
     const afterLeading = text.slice(leading.length);
+    const innerCount = (afterLeading.match(new RegExp(escapeForPair(leading), "g")) || []).length;
+    if (innerCount >= 2) {
+      return { leading: "", core: text, trailing: "" };
+    }
     const closeIdx = afterLeading.indexOf(leading);
     if (closeIdx !== -1) {
       const core = afterLeading.slice(0, closeIdx);

@@ -250,3 +250,75 @@ describe("wrap-site composition — canonical spec case", () => {
         );
     });
 });
+
+// ====================================================================
+// Embedded inline markers — selection spans multiple bold runs separated
+// by plain text. The first inner `**` after the leading one is the
+// *opening* of a new span, not the *closing* of the first, so the
+// function must NOT peel it. Return the text unchanged so the wrap
+// composes `==text==` (full selection highlighted, inner formatting
+// preserved). Regression test for the cervical-cancer case.
+// ====================================================================
+describe("extractInlineBoundaries — embedded inline markers (multiple spans)", () => {
+    it("returns unchanged when text starts with ** and has ** in the middle (two bold spans)", () => {
+        const text = "**foo** bar **baz** qux";
+        expect(extractInlineBoundaries(text)).toEqual({
+            leading: "",
+            core: text,
+            trailing: "",
+        });
+    });
+
+    it("returns unchanged for the canonical cervical-cancer case", () => {
+        const text =
+            "**Avoidable loss of life**: Unlike most cancers, cervical cancer is **preventable (vaccine), detectable (HPV test/VIA), and curable (surgery, LEEP, cryotherapy)** if caught early[^15].";
+        expect(extractInlineBoundaries(text)).toEqual({
+            leading: "",
+            core: text,
+            trailing: "",
+        });
+    });
+
+    it("returns unchanged for multiple bold spans with no spaces", () => {
+        const text = "**foo**bar**baz**";
+        expect(extractInlineBoundaries(text)).toEqual({
+            leading: "",
+            core: text,
+            trailing: "",
+        });
+    });
+
+    it("wrap-site composition produces a single highlight wrapping the full selection", () => {
+        function composeMarkdownWrap(actualContent) {
+            const { leading, core, trailing } = extractInlineBoundaries(actualContent);
+            return `${leading}==${core}==${trailing}`;
+        }
+        expect(composeMarkdownWrap("**foo** bar **baz** qux")).toBe(
+            "==**foo** bar **baz** qux=="
+        );
+    });
+
+    it("regression: symmetric unchanged case is still preserved", () => {
+        expect(extractInlineBoundaries("**Cervical Cancer**")).toEqual({
+            leading: "",
+            core: "**Cervical Cancer**",
+            trailing: "",
+        });
+    });
+
+    it("regression: paired with trailing comma is still preserved", () => {
+        expect(extractInlineBoundaries("**17 Nov 2025**,")).toEqual({
+            leading: "**",
+            core: "17 Nov 2025",
+            trailing: "**,",
+        });
+    });
+
+    it("regression: lone leading delimiter is still preserved", () => {
+        expect(extractInlineBoundaries("**one")).toEqual({
+            leading: "**",
+            core: "one",
+            trailing: "",
+        });
+    });
+});

@@ -779,3 +779,158 @@ describe("findOpeningEqMarker", () => {
         expect(openEq).toBe(17);
     });
 });
+
+// ====================================================================
+// classifyFailure — PHANTOM false positives
+// The cleaned snippet is the input that stripBrowserJunk produces (smart
+// quotes / em-dashes / NBSPs already folded). The body is the raw file
+// minus frontmatter, with the original characters still in place.
+// ====================================================================
+describe("classifyFailure — PHANTOM false positives", () => {
+    const emptyDiagnostics = { strategies: {} };
+
+    it("falls through to DECORATION_MISMATCH when the body has a smart-quote guillemet but the cleaned snippet has a straight quote (smart-quote prefix case)", () => {
+        const rawSnippet = "\u00abHello world\u00bb"; // «Hello world» — what the user selected in Reading view
+        const cleanedSnippet = '"Hello world"'; // stripBrowserJunk normalises guillemets to straight quotes
+        const bodyContent = "greeting paragraph\n\u00abHello world\u00bb\nend";
+        const report = logic.classifyFailure(rawSnippet, cleanedSnippet, bodyContent, emptyDiagnostics);
+        expect(report.type).toBe("DECORATION_MISMATCH");
+        expect(report.type).not.toBe("PHANTOM");
+        expect(report.bestGuessContext).toBeTruthy();
+    });
+
+    it("falls through to DECORATION_MISMATCH when the body has a raw em-dash but the cleaned snippet has an ASCII hyphen (em-dash prefix case)", () => {
+        const rawSnippet = "\u2014 foo bar"; // — foo bar (em-dash)
+        const cleanedSnippet = "- foo bar"; // stripBrowserJunk converts em-dash to hyphen
+        const bodyContent = "intro\n\u2014 foo bar and more\nend";
+        const report = logic.classifyFailure(rawSnippet, cleanedSnippet, bodyContent, emptyDiagnostics);
+        expect(report.type).toBe("DECORATION_MISMATCH");
+        expect(report.type).not.toBe("PHANTOM");
+    });
+
+    it("falls through to DECORATION_MISMATCH when the first word is short but a later word is the real anchor (short first word case)", () => {
+        const rawSnippet = "I went to the supermarket";
+        const cleanedSnippet = "I went to the supermarket";
+        const bodyContent = "Today I went to the supermarket for groceries.";
+        const report = logic.classifyFailure(rawSnippet, cleanedSnippet, bodyContent, emptyDiagnostics);
+        expect(report.type).toBe("DECORATION_MISMATCH");
+        expect(report.type).not.toBe("PHANTOM");
+        expect(report.bestGuessContext).toContain("supermarket");
+    });
+
+    it("falls through to DECORATION_MISMATCH when the body has inline ** decoration around the word (inline ** decoration case)", () => {
+        const rawSnippet = "important";
+        const cleanedSnippet = "important";
+        const bodyContent = "This is **important** text for the meeting";
+        const report = logic.classifyFailure(rawSnippet, cleanedSnippet, bodyContent, emptyDiagnostics);
+        expect(report.type).toBe("DECORATION_MISMATCH");
+        expect(report.type).not.toBe("PHANTOM");
+        expect(report.bestGuessContext).toContain("important");
+    });
+
+    it("still returns PHANTOM when the cleaned snippet is genuinely absent from the body (genuine misselection case)", () => {
+        const rawSnippet = "delta epsilon zeta";
+        const cleanedSnippet = "delta epsilon zeta";
+        const bodyContent = "alpha beta gamma in the source note";
+        const report = logic.classifyFailure(rawSnippet, cleanedSnippet, bodyContent, emptyDiagnostics);
+        expect(report.type).toBe("PHANTOM");
+        expect(report.reason).toBe("Text not found in the current file.");
+    });
+
+    it("falls through to DECORATION_MISMATCH when the cleaned snippet has no content word of length > 2 (no content-word case)", () => {
+        const rawSnippet = "a b c";
+        const cleanedSnippet = "a b c";
+        const bodyContent = "one two three and a b c in the body";
+        const report = logic.classifyFailure(rawSnippet, cleanedSnippet, bodyContent, emptyDiagnostics);
+        expect(report.type).toBe("DECORATION_MISMATCH");
+        expect(report.type).not.toBe("PHANTOM");
+    });
+
+    it("returns PHANTOM when the body is empty (empty body case)", () => {
+        const rawSnippet = "anything at all";
+        const cleanedSnippet = "anything at all";
+        const bodyContent = "";
+        const report = logic.classifyFailure(rawSnippet, cleanedSnippet, bodyContent, emptyDiagnostics);
+        expect(report.type).toBe("PHANTOM");
+    });
+
+    it("populates bestGuessContext in the fall-through cases (best-guess is non-empty)", () => {
+        // Spot-check the four "decorated text" cases share a non-empty best-guess.
+        const cases = [
+            { raw: "\u00abHello world\u00bb", clean: '"Hello world"', body: "line one\n\u00abHello world\u00bb\nline three" },
+            { raw: "\u2014 foo bar", clean: "- foo bar", body: "intro\n\u2014 foo bar and more\nend" },
+            { raw: "I went to the supermarket", clean: "I went to the supermarket", body: "Today I went to the supermarket for groceries." },
+            { raw: "important", clean: "important", body: "This is **important** text for the meeting" },
+            { raw: "a b c", clean: "a b c", body: "one two three and a b c in the body" },
+        ];
+        for (const c of cases) {
+            const report = logic.classifyFailure(c.raw, c.clean, c.body, emptyDiagnostics);
+            expect(report.type).toBe("DECORATION_MISMATCH");
+            expect(report.bestGuessContext.length).toBeGreaterThan(0);
+        }
+    });
+});
+
+// ====================================================================
+// applyStructuralFilter — HTML tag precision
+// Regression test for the `<2% of Indian women...` false positive: the
+// old `/<[^>]+>/g` pattern matched literal `<` in body text and greedily
+// consumed everything up to the next `>`, swallowing 11k+ chars.
+// The new pattern requires a letter after `<` (or `</`).
+// ====================================================================
+describe("applyStructuralFilter \u2014 HTML tag precision", () => {
+    it("preserves literal '<2%' in a percentage expression (the canonical bug case)", () => {
+        const text = "<2% of Indian women have been screened in the past 5 years (NFHS-5); mortality is concentrated in rural, tribal, and lower-SES populations.";
+        const result = logic.applyStructuralFilter({ text, segments: [] });
+        expect(result.text).toContain("<2% of Indian women have been screened");
+        expect(result.text.length).toBe(text.length);
+    });
+
+    it("preserves literal '<3rd' in an ordinal expression", () => {
+        const text = "It is the <3rd most common cancer in women globally.";
+        const result = logic.applyStructuralFilter({ text, segments: [] });
+        expect(result.text).toContain("<3rd most common cancer");
+        expect(result.text.length).toBe(text.length);
+    });
+
+    it("preserves a math comparison '5 < 10 and 10 > 5'", () => {
+        const text = "5 < 10 and 10 > 5";
+        const result = logic.applyStructuralFilter({ text, segments: [] });
+        expect(result.text).toBe(text);
+    });
+
+    it("still strips real opening and closing tags like <div>...</div>", () => {
+        const text = "<div>some content</div>";
+        const result = logic.applyStructuralFilter({ text, segments: [] });
+        expect(result.text).toBe("some content");
+    });
+
+    it("still strips <mark>...</mark>", () => {
+        const text = "<mark>highlighted</mark> text";
+        const result = logic.applyStructuralFilter({ text, segments: [] });
+        expect(result.text).toBe("highlighted text");
+    });
+
+    it("still strips tags with attributes like <div class=\"foo\">", () => {
+        const text = '<div class="foo" id="bar">content</div>';
+        const result = logic.applyStructuralFilter({ text, segments: [] });
+        expect(result.text).toBe("content");
+    });
+
+    it("leaves '<>' (empty tag with no name) alone", () => {
+        const text = "before <> after";
+        const result = logic.applyStructuralFilter({ text, segments: [] });
+        expect(result.text).toBe(text);
+    });
+
+    it("the real cervical-cancer body now keeps the '<2%' and the 'Avoidable loss of life' line", () => {
+        // Simulated body with the bug-triggering `<2%` followed by content
+        // that includes the cervical paragraph far downstream.
+        const text = "Equity & social justice: <2% of Indian women screened.\n\nWHY:\n- **Avoidable loss of life**: Unlike most cancers, cervical cancer is **preventable (vaccine), detectable (HPV test/VIA), and curable (surgery, LEEP, cryotherapy)** if caught early.\n\n";
+        const result = logic.applyStructuralFilter({ text, segments: [] });
+        expect(result.text).toContain("<2% of Indian women screened");
+        expect(result.text).toContain("Avoidable loss of life");
+        expect(result.text).toContain("Unlike most cancers");
+        expect(result.text).toContain("cryotherapy");
+    });
+});

@@ -590,7 +590,8 @@ export class SelectionLogic {
             // Markdown Images: ![caption](url)
             /!\[[^\]]*\]\([^)]+\)/g,
             // Global HTML Tags (Reading view strips these)
-            /<[^>]+>/g,
+            // ponytail: must start with a letter so literal `<2%`, `<3rd`, `5 < 10` are not consumed
+            /<\/?[a-zA-Z][^>]*>/g,
         ];
 
         let currentText: string = text;
@@ -1854,8 +1855,18 @@ export class SelectionLogic {
             bestGuessContext: "",
         };
 
-        const firstWord = cleanedSnippet.split(/\s+/)[0].toLocaleLowerCase();
-        if (firstWord && !bodyContent.toLocaleLowerCase().includes(firstWord)) {
+        // ponytail: normalizeComparableText runs once per failed selection (cold path, sub-millisecond, no caching needed).
+        // Normalize both sides the same way the candidate strategies do, so smart quotes, em-dashes, NBSPs, and inline
+        // decoration markers (`**`, `==`, `<mark>`) cannot create a false PHANTOM just because the cleaned snippet has
+        // them folded differently from the raw body.
+        const normalizedBody = this.normalizeComparableText(bodyContent).toLocaleLowerCase();
+        const normalizedSnippet = this.normalizeComparableText(cleanedSnippet);
+        const anchorWords = normalizedSnippet
+            .split(/\s+/)
+            .filter((w) => w.length > 2)
+            .sort((a, b) => b.length - a.length);
+        const anchor = anchorWords[0];
+        if (anchor && !normalizedBody.includes(anchor.toLocaleLowerCase())) {
             report.type = "PHANTOM";
             report.reason = "Text not found in the current file.";
             report.hint =

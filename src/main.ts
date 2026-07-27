@@ -27,6 +27,7 @@ import {
     removeFootnoteFromRaw,
     removeAllFootnotesFromRaw,
 } from "./utils/highlights";
+import { extractInlineBoundaries } from "./utils/highlightWrap";
 import { BulkRecolorModal } from "./modals/BulkRecolorModal";
 
 interface SemanticColor {
@@ -1392,13 +1393,15 @@ export default class ReadingHighlighterPlugin extends Plugin {
             let wrappedContent = actualContent;
 
             if (mode === "highlight" || mode === "tag") {
+                const { leading, core, trailing } = extractInlineBoundaries(actualContent);
                 if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-                    wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${actualContent}</mark>`;
+                    wrappedContent = `${leading}<mark style="background: ${this.settings.highlightColor}; color: black;">${core}</mark>${trailing}`;
                 } else {
-                    wrappedContent = `==${actualContent}==`;
+                    wrappedContent = `${leading}==${core}==${trailing}`;
                 }
             } else if (mode === "color") {
-                wrappedContent = `<mark style="background: ${payload}; color: black;">${actualContent}</mark>`;
+                const { leading, core, trailing } = extractInlineBoundaries(actualContent);
+                wrappedContent = `${leading}<mark style="background: ${payload}; color: black;">${core}</mark>${trailing}`;
             } else if (mode === "bold") {
                 wrappedContent = `**${actualContent}**`;
             } else if (mode === "italic") {

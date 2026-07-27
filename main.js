@@ -3883,6 +3883,38 @@ var FailureRecoveryModal = class extends import_obsidian8.Modal {
 
 // src/main.ts
 init_highlights();
+
+// src/utils/highlightWrap.ts
+function extractInlineBoundaries(content) {
+  const delimiters = ["**", "~~", "`", "*", "_"];
+  const text = String(content != null ? content : "");
+  let leading = "";
+  for (const d of delimiters) {
+    if (text.startsWith(d) && text.length > d.length) {
+      leading = d;
+      break;
+    }
+  }
+  let trailing = "";
+  for (const d of delimiters) {
+    if (text.endsWith(d) && text.length > d.length) {
+      trailing = d;
+      break;
+    }
+  }
+  if (leading && trailing) {
+    return { leading: "", core: text, trailing: "" };
+  }
+  if (leading) {
+    return { leading, core: text.slice(leading.length), trailing: "" };
+  }
+  if (trailing) {
+    return { leading: "", core: text.slice(0, text.length - trailing.length), trailing };
+  }
+  return { leading: "", core: text, trailing: "" };
+}
+
+// src/main.ts
 var SMART_SELECTION_TAGS = /* @__PURE__ */ new Set(["P", "LI", "BLOCKQUOTE", "PRE", "H1", "H2", "H3", "H4", "H5", "H6", "TD", "TH"]);
 var FRONTMATTER_NEEDS_QUOTES_RE = new RegExp("[:\\s{}\\[\\],&*#?|<>=!%@\\\\-]");
 var FRONTMATTER_RESERVED_RE = /^(true|false|null|yes|no|on|off)$/i;
@@ -5025,13 +5057,15 @@ ${appendString}`;
       const tagStr = fullTag ? `${fullTag} ` : "";
       let wrappedContent = actualContent;
       if (mode === "highlight" || mode === "tag") {
+        const { leading, core, trailing } = extractInlineBoundaries(actualContent);
         if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-          wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${actualContent}</mark>`;
+          wrappedContent = `${leading}<mark style="background: ${this.settings.highlightColor}; color: black;">${core}</mark>${trailing}`;
         } else {
-          wrappedContent = `==${actualContent}==`;
+          wrappedContent = `${leading}==${core}==${trailing}`;
         }
       } else if (mode === "color") {
-        wrappedContent = `<mark style="background: ${payload}; color: black;">${actualContent}</mark>`;
+        const { leading, core, trailing } = extractInlineBoundaries(actualContent);
+        wrappedContent = `${leading}<mark style="background: ${payload}; color: black;">${core}</mark>${trailing}`;
       } else if (mode === "bold") {
         wrappedContent = `**${actualContent}**`;
       } else if (mode === "italic") {

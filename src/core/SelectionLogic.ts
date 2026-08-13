@@ -104,7 +104,7 @@ const BLOCK_LEVEL_TAGS_FOR_SPLIT = new Set([
 // Inline "noise" tokens that may exist in source Markdown but not in Reading view selections.
 // Keep this list conservative to avoid over-matching visible content (e.g., inside code blocks).
 const INLINE_DECORATION_PATTERN =
-    "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^\\[[^\\]]+\\]|\\^[a-zA-Z0-9-]+|%%[^%]*%%|\\^|\\\\|\\{|\\}|\\||\\d|<sub>|<sup>|<\\/sub>|<\\/sup>";
+    "<mark[^>]*>|<\\/mark>|==|\\*\\*|~~|\\*|_|`|\\[\\[|\\]\\]|\\[|\\]|\\$|\\^\\[[^\\]]+\\]|\\^[a-zA-Z0-9-]+|%%[^%]*%%|\\^|\\\\|\\{|\\}|\\||<sub>|<sup>|<\\/sub>|<\\/sup>";
 const GAP_PATTERN = "[\\s\\u00a0\\u1680\\u2000-\\u200b\\u202f\\u205f\\u3000\\u21a9\\u21b5\\ufe0e\\ufe0f]";
 // Additional single-character gaps that can exist in Markdown source but are often invisible in Reading view.
 // Keep this as a character class (not a long alternation) for performance.
@@ -227,11 +227,9 @@ export class SelectionLogic {
             diagnostics.strategies.blockSequence = { tried: false, reason: "single block" };
         }
 
-        if (candidates.length === 0) {
-            candidates = this.findHybridCandidates(bodyContent, snippet, 0);
-            diagnostics.strategies.hybridMatch = { tried: true, found: candidates.length };
-        }
-
+        // Prefer punctuation-preserving strategies before the intentionally lossy
+        // Hybrid/Fuzzy fallbacks. Otherwise text that differs only by punctuation
+        // can collapse to the same normalized candidate and resolve to the wrong place.
         if (candidates.length === 0) {
             candidates = this.findAllCandidates(bodyContent, snippet, 0);
             diagnostics.strategies.flexiblePattern = { tried: true, found: candidates.length };
@@ -240,6 +238,11 @@ export class SelectionLogic {
         if (candidates.length === 0) {
             candidates = this.findCandidatesStripped(bodyContent, snippet, 0);
             diagnostics.strategies.strippedMatch = { tried: true, found: candidates.length };
+        }
+
+        if (candidates.length === 0) {
+            candidates = this.findHybridCandidates(bodyContent, snippet, 0);
+            diagnostics.strategies.hybridMatch = { tried: true, found: candidates.length };
         }
 
         if (candidates.length === 0) {
@@ -667,6 +670,46 @@ export class SelectionLogic {
         };
     }
 
+    getCandidateSourceBlock(raw: string, candidate: Candidate): { start: number; end: number; text: string } {
+        const lineStart = raw.lastIndexOf("\n", Math.max(0, candidate.start - 1)) + 1;
+        const nextBreak = raw.indexOf("\n", candidate.end);
+        const lineEnd = nextBreak === -1 ? raw.length : nextBreak;
+        const candidateLine = raw.substring(lineStart, lineEnd).replace(/\r$/, "");
+        const lineParts = this.splitMarkdownLine(candidateLine);
+
+        let blockStart = lineStart;
+        let blockEnd = lineEnd;
+
+        // Lists, headings, blockquotes, and footnote entries are represented as
+        // their own Reading View blocks, so do not merge neighboring source lines.
+        if (!lineParts.prefix) {
+            const before = raw.substring(0, candidate.start);
+            const separators = [...before.matchAll(/\r?\n[ \t]*\r?\n/g)];
+            const previousSeparator = separators[separators.length - 1];
+            if (previousSeparator) {
+                blockStart = previousSeparator.index + previousSeparator[0].length;
+            } else {
+                blockStart = 0;
+            }
+
+            const after = raw.substring(candidate.end);
+            const nextSeparator = after.match(/\r?\n[ \t]*\r?\n/);
+            blockEnd =
+                nextSeparator && nextSeparator.index !== undefined ? candidate.end + nextSeparator.index : raw.length;
+        }
+
+        const text = raw
+            .substring(blockStart, blockEnd)
+            .split(/\r?\n/)
+            .map((line) => this.normalizeLineForCompare(line))
+            .filter((line) => line.length > 0)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        return { start: blockStart, end: blockEnd, text };
+    }
+
     resolveCandidates(
         candidates: Candidate[],
         raw: string,
@@ -676,24 +719,45 @@ export class SelectionLogic {
         if (candidates.length === 0) return null;
 
         if (context) {
-            const cleanContext = context.replace(/\s+/g, " ").trim();
-            candidates = candidates.map((cand) => {
-                const sourceBlock = (cand.text || raw.substring(cand.start, cand.end)).replace(/\s+/g, " ").trim();
-                const score = this.calculateSimilarity(sourceBlock, cleanContext);
-                return { ...cand, score };
-            });
+            const cleanContext = this.normalizeComparableText(context);
+            const groups = new Map<
+                string,
+                { start: number; end: number; text: string; score: number; candidates: Candidate[] }
+            >();
 
-            const bestScore = Math.max(...candidates.map((candidate) => candidate.score ?? 0));
-            const threshold = bestScore * 0.85;
-            const validCandidates = candidates.filter((candidate) => (candidate.score ?? 0) >= threshold);
+            for (const candidate of candidates) {
+                const sourceBlock = this.getCandidateSourceBlock(raw, candidate);
+                const score = this.calculateSimilarity(sourceBlock.text, cleanContext);
+                const key = `${sourceBlock.start}:${sourceBlock.end}`;
+                const existing = groups.get(key);
 
-            if (occurrenceIndex >= 0 && occurrenceIndex < validCandidates.length) {
-                const chosen = validCandidates[occurrenceIndex];
-                return { raw, start: chosen.start, end: chosen.end };
+                if (existing) {
+                    existing.score = Math.max(existing.score, score);
+                    existing.candidates.push(candidate);
+                } else {
+                    groups.set(key, {
+                        ...sourceBlock,
+                        score,
+                        candidates: [candidate],
+                    });
+                }
             }
 
-            if (validCandidates.length > 0) {
-                return { raw, start: validCandidates[0].start, end: validCandidates[0].end };
+            const sourceGroups = [...groups.values()].sort((a, b) => a.start - b.start);
+            const bestScore = Math.max(...sourceGroups.map((group) => group.score));
+            // An exact normalized block match receives 1000 from calculateSimilarity.
+            // Otherwise retain only genuinely close context matches before applying
+            // the DOM block occurrence index.
+            const threshold = bestScore >= 100 ? bestScore : bestScore * 0.85;
+            const validGroups = sourceGroups.filter((group) => group.score >= threshold);
+            const chosenGroup =
+                occurrenceIndex >= 0 && occurrenceIndex < validGroups.length
+                    ? validGroups[occurrenceIndex]
+                    : validGroups[0];
+
+            if (chosenGroup) {
+                const chosen = [...chosenGroup.candidates].sort((a, b) => a.start - b.start)[0];
+                return { raw, start: chosen.start, end: chosen.end };
             }
         }
 

@@ -62,22 +62,49 @@ export default defineConfig(
         },
     },
     {
-        // The full, current obsidianmd ruleset. Using the plugin's own
-        // `recommended` preset rather than a hand-picked subset means new rules
-        // arrive with the dependency instead of silently going unenforced.
-        //
-        // Scoped to the shipped plugin source: these are guidelines about plugin
-        // code, and the preset pulls in type-aware rules, which need every linted
-        // file to be part of the TypeScript program. `tests/` is not.
-        files: ["src/**/*.ts"],
+        // The full, current obsidianmd ruleset. Its own config already targets
+        // TS, JS and package.json in separate blocks, so `files` here is kept
+        // wide enough not to intersect any of those away — but it must exclude
+        // other JSON, since several blocks in the preset carry no file scope of
+        // their own and would otherwise run JavaScript rules against
+        // manifest.json. Several rules are type-aware; the program is enabled
+        // in the block below.
+        files: ["src/**/*.{ts,js}", "package.json"],
         extends: [obsidianmd.configs.recommended],
+    },
+    {
+        files: ["**/*.{ts,tsx,cts,mts}"],
         languageOptions: {
-            ...sharedLanguageOptions,
-            parser: tsparser,
             parserOptions: {
                 projectService: true,
                 tsconfigRootDir: import.meta.dirname,
             },
+        },
+    },
+    {
+        // `recommended` ships this one switched off. The code already uses
+        // `activeDocument` throughout, so turning it on costs nothing today and
+        // keeps a plain `document` from creeping in later — popout windows have
+        // their own document, and a plugin reaching for the wrong one silently
+        // stops working there.
+        files: ["src/**/*.ts"],
+        rules: { "obsidianmd/prefer-active-doc": "error" },
+    },
+    {
+        // `validate-manifest` reads the manifest as a JS object expression
+        // (Program > ExpressionStatement > ObjectExpression), so it needs the
+        // TypeScript parser rather than a JSON language — under `json/json` the
+        // AST shape differs and the rule silently never fires. Without any block
+        // at all ESLint skips the file outright ("no matching configuration").
+        //
+        // Its sibling `validate-license` is not wired up: it expects LICENSE to
+        // parse as JavaScript, which a real MIT licence does not, so it can only
+        // ever produce a parsing error.
+        files: ["manifest.json"],
+        languageOptions: { parser: tsparser, parserOptions: { ecmaFeatures: {} } },
+        plugins: { obsidianmd },
+        rules: {
+            "obsidianmd/validate-manifest": "error",
         },
     },
     eslintConfigPrettier

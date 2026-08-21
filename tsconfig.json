@@ -13,5 +13,5 @@
         "strict": false,
         "lib": ["DOM", "ES2022"]
     },
-    "include": ["src/**/*.ts", "src/**/*.js"]
+    "include": ["src/**/*.ts", "src/**/*.js", "tests/**/*.js", "vaultharness/**/*.js", "*.mjs"]
 }

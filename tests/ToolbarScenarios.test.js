@@ -3,6 +3,7 @@ import ReadingHighlighterPlugin from "../src/main";
 import { FloatingManager } from "../src/ui/FloatingManager";
 import { Platform } from "./obsidian-stub.js";
 import { createObsidianWindow } from "./dom-helpers.js";
+import { JSDOM } from "jsdom";
 
 async function setup(opts = {}) {
     const window = createObsidianWindow();
@@ -55,12 +56,21 @@ describe("scenarios", () => {
         expect(visible(ctx)).toBe(true);
     });
 
-    it("B: selection stays active across refresh, no new selectionchange", async () => {
+    it("B: a rebuild leaves the toolbar hidden until the next selection", async () => {
         const ctx = await setup();
         select(ctx);
+        expect(visible(ctx)).toBe(true);
+
         ctx.plugin.settings.enableColorPalette = true;
         await ctx.plugin.saveSettings();
-        // user does NOT re-select; toolbar state right after the rebuild
+
+        // Settings are changed from the settings window, so showing the toolbar
+        // at this moment would put it on top of the settings rather than in a
+        // note. It stays hidden, in the right document, ready for the next
+        // selection.
+        expect(visible(ctx)).toBe(false);
+        expect(ctx.plugin.floatingManager.containerEl.isConnected).toBe(true);
+        select(ctx);
         expect(visible(ctx)).toBe(true);
     });
 
@@ -117,6 +127,36 @@ describe("scenarios", () => {
         select(ctx);
         expect(visible(ctx)).toBe(false);
         modal.remove();
+    });
+
+    it("H: a settings change made from a separate window leaves the toolbar in the note's window", async () => {
+        const ctx = await setup();
+        select(ctx);
+        expect(visible(ctx)).toBe(true);
+        const noteDoc = ctx.doc;
+
+        // Obsidian 1.13 opens preferences as its own OS window, and
+        // `activeDocument` follows focus.
+        const settingsWindow = new JSDOM("<!doctype html><html><body></body></html>").window;
+        const previous = globalThis.activeDocument;
+        globalThis.activeDocument = settingsWindow.document;
+        try {
+            ctx.plugin.settings.enableColorPalette = true;
+            await ctx.plugin.saveSettings();
+        } finally {
+            globalThis.activeDocument = previous;
+        }
+
+        // Nothing may be built into the settings window...
+        expect(settingsWindow.document.querySelectorAll(".reading-highlighter-float-container")).toHaveLength(0);
+        // ...and the note's window keeps exactly one, hidden until reselection.
+        expect(noteDoc.querySelectorAll(".reading-highlighter-float-container")).toHaveLength(1);
+        expect(ctx.plugin.floatingManager.containerEl.ownerDocument).toBe(noteDoc);
+        expect(visible(ctx)).toBe(false);
+
+        // Back in the note, selecting brings it up again.
+        select(ctx);
+        expect(visible(ctx)).toBe(true);
     });
 
     it("E: many rapid refreshes (typing a meaning) leave a working toolbar", async () => {

@@ -77,7 +77,6 @@ export class FloatingManager {
 
     refresh() {
         // Rebuild toolbar when settings change
-        const wasVisible = this.containerEl?.style.display === "flex";
         if (this.containerEl) {
             this.containerEl.remove();
             this.containerEl = null;
@@ -85,17 +84,29 @@ export class FloatingManager {
         this.colorButtons = [];
         this.createElements();
         this.registerEvents();
-        // The rebuilt toolbar starts hidden, and visibility is only ever driven
-        // by `selectionchange`. A settings change does not fire that event, so
-        // without re-evaluating here the toolbar stays invisible for a selection
-        // the user still has active — and looks like it needs a restart to come
-        // back.
-        //
-        // Only restore it if it was on screen before the rebuild, though.
-        // Settings are usually changed from the settings dialog, where the
-        // note's selection is still live behind it: re-showing unconditionally
-        // would float the toolbar over the dialog.
-        if (wasVisible) this._doHandleSelection();
+        // Deliberately not shown here. Visibility belongs to `selectionchange`,
+        // and a settings change is made from the settings window — showing the
+        // toolbar at that moment puts it on top of the settings, not in a note.
+        // `createElements` has placed it in the reading view's document, so the
+        // next selection there brings it up.
+    }
+
+    /**
+     * The document the toolbar belongs in — the one holding the reading view,
+     * not whichever window happens to be focused.
+     *
+     * `activeDocument` follows focus, and in Obsidian 1.13 the settings window
+     * is a separate OS window. Building the toolbar against `activeDocument`
+     * while settings are open puts it inside the settings window: it appears
+     * floating over the preferences, and the note is left without one until the
+     * app restarts.
+     */
+    targetDocument(): Document {
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const fromView = view?.containerEl?.ownerDocument;
+        if (fromView) return fromView;
+        const fromWorkspace = (this.app.workspace as { containerEl?: HTMLElement }).containerEl?.ownerDocument;
+        return fromWorkspace ?? activeDocument;
     }
 
     /**
@@ -118,7 +129,8 @@ export class FloatingManager {
     createElements() {
         if (this.containerEl) return;
 
-        this.containerEl = activeDocument.createElement("div");
+        const doc = this.targetDocument();
+        this.containerEl = doc.createElement("div");
         this.containerEl.addClass("reading-highlighter-float-container");
 
         // Main highlight button
@@ -127,11 +139,11 @@ export class FloatingManager {
 
         // Semantic Color palette (only if enabled)
         if (this.plugin.settings.enableColorPalette) {
-            this.paletteContainer = activeDocument.createElement("div");
+            this.paletteContainer = doc.createElement("div");
             this.paletteContainer.addClass("reading-highlighter-palette");
 
             for (const { item, index } of this.visiblePaletteColors()) {
-                const colorBtn = activeDocument.createElement("button");
+                const colorBtn = doc.createElement("button");
                 colorBtn.addClass("reading-highlighter-color-btn");
                 colorBtn.setCssStyles({ backgroundColor: item.color });
                 colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
@@ -173,11 +185,11 @@ export class FloatingManager {
         this.extractAllBtn.addClass("pdf-only-btn");
         this.containerEl.appendChild(this.extractAllBtn);
 
-        activeDocument.body.appendChild(this.containerEl);
+        doc.body.appendChild(this.containerEl);
     }
 
     createButton(iconName: string, label: string): HTMLButtonElement {
-        const btn = activeDocument.createElement("button");
+        const btn = this.targetDocument().createElement("button");
         setIcon(btn, iconName);
         // Only add tooltip if enabled in settings
         if (this.plugin.settings.showTooltips) {
@@ -399,6 +411,12 @@ export class FloatingManager {
 
     show(rect: DOMRect) {
         if (!this.containerEl || !rect) return;
+        // A note can be moved to a popout window after the toolbar was built.
+        // Rebuild into the right document rather than showing it in the old one.
+        if (this.containerEl.ownerDocument !== this.targetDocument()) {
+            this.refresh();
+            if (!this.containerEl) return;
+        }
 
         // Show + reset dynamic styles & classes
         this.containerEl.setCssStyles({ display: "flex", top: "", bottom: "", left: "", right: "", transform: "" });

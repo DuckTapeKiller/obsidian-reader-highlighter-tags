@@ -875,8 +875,6 @@ var FloatingManager = class {
     }
   }
   refresh() {
-    var _a;
-    const wasVisible = ((_a = this.containerEl) == null ? void 0 : _a.style.display) === "flex";
     if (this.containerEl) {
       this.containerEl.remove();
       this.containerEl = null;
@@ -884,7 +882,24 @@ var FloatingManager = class {
     this.colorButtons = [];
     this.createElements();
     this.registerEvents();
-    if (wasVisible) this._doHandleSelection();
+  }
+  /**
+   * The document the toolbar belongs in — the one holding the reading view,
+   * not whichever window happens to be focused.
+   *
+   * `activeDocument` follows focus, and in Obsidian 1.13 the settings window
+   * is a separate OS window. Building the toolbar against `activeDocument`
+   * while settings are open puts it inside the settings window: it appears
+   * floating over the preferences, and the note is left without one until the
+   * app restarts.
+   */
+  targetDocument() {
+    var _a, _b;
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    const fromView = (_a = view == null ? void 0 : view.containerEl) == null ? void 0 : _a.ownerDocument;
+    if (fromView) return fromView;
+    const fromWorkspace = (_b = this.app.workspace.containerEl) == null ? void 0 : _b.ownerDocument;
+    return fromWorkspace != null ? fromWorkspace : activeDocument;
   }
   /**
    * Palette entries to show in the toolbar, each keeping its index into
@@ -904,15 +919,16 @@ var FloatingManager = class {
   }
   createElements() {
     if (this.containerEl) return;
-    this.containerEl = activeDocument.createElement("div");
+    const doc = this.targetDocument();
+    this.containerEl = doc.createElement("div");
     this.containerEl.addClass("reading-highlighter-float-container");
     this.highlightBtn = this.createButton("highlighter", "Highlight selection");
     this.containerEl.appendChild(this.highlightBtn);
     if (this.plugin.settings.enableColorPalette) {
-      this.paletteContainer = activeDocument.createElement("div");
+      this.paletteContainer = doc.createElement("div");
       this.paletteContainer.addClass("reading-highlighter-palette");
       for (const { item, index } of this.visiblePaletteColors()) {
-        const colorBtn = activeDocument.createElement("button");
+        const colorBtn = doc.createElement("button");
         colorBtn.addClass("reading-highlighter-color-btn");
         colorBtn.setCssStyles({ backgroundColor: item.color });
         colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
@@ -942,10 +958,10 @@ var FloatingManager = class {
     this.extractAllBtn = this.createButton("file-text", "Extract All PDF Text");
     this.extractAllBtn.addClass("pdf-only-btn");
     this.containerEl.appendChild(this.extractAllBtn);
-    activeDocument.body.appendChild(this.containerEl);
+    doc.body.appendChild(this.containerEl);
   }
   createButton(iconName, label) {
-    const btn = activeDocument.createElement("button");
+    const btn = this.targetDocument().createElement("button");
     (0, import_obsidian.setIcon)(btn, iconName);
     if (this.plugin.settings.showTooltips) {
       btn.setAttribute("aria-label", label);
@@ -1125,6 +1141,10 @@ var FloatingManager = class {
   }
   show(rect) {
     if (!this.containerEl || !rect) return;
+    if (this.containerEl.ownerDocument !== this.targetDocument()) {
+      this.refresh();
+      if (!this.containerEl) return;
+    }
     this.containerEl.setCssStyles({ display: "flex", top: "", bottom: "", left: "", right: "", transform: "" });
     this.containerEl.removeClass("reading-highlighter-vertical");
     const pos = this.plugin.settings.toolbarPosition || "text";

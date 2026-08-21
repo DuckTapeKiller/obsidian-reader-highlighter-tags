@@ -8,7 +8,7 @@ import path from "node:path";
 import { buildNote, rangeForSlice } from "./driver.js";
 import { bodyStartOf, splitBlocks } from "./render.js";
 
-const DIR = process.env.TABLES_DIR || "./test-vault/tables";
+const DIR = process.env.TABLES_DIR || "./test-vault";
 const REPORT = process.env.REPORT_PATH || "/tmp/tables.json";
 const ONLY = process.env.ONLY_KIND || "";
 

@@ -71,7 +71,7 @@ describe("issue 3: list marker must stay outside the highlight", () => {
         "",
         "Párrafo introductorio del artículo.",
         "",
-        "- La novela *Benkos* (2023), del autor palenquero.",
+        "- La novela *Primera* (2023), del autor regional.",
         "- Segundo elemento de la lista.",
         "",
         "Párrafo final.",
@@ -79,7 +79,7 @@ describe("issue 3: list marker must stay outside the highlight", () => {
     const html = [
         "<h1>Título</h1>",
         "<p>Párrafo introductorio del artículo.</p>",
-        "<ul><li>La novela <em>Benkos</em> (2023), del autor palenquero.</li>",
+        "<ul><li>La novela <em>Primera</em> (2023), del autor regional.</li>",
         "<li>Segundo elemento de la lista.</li></ul>",
         "<p>Párrafo final.</p>",
     ].join("");
@@ -89,7 +89,7 @@ describe("issue 3: list marker must stay outside the highlight", () => {
         const li = ctx.content.querySelectorAll("li")[0];
         const nodes = textNodes(li);
         await highlightRange(ctx, nodes[0], 0, nodes[nodes.length - 1], nodes[nodes.length - 1].nodeValue.length);
-        expect(ctx.out()).toContain("- ==La novela *Benkos* (2023), del autor palenquero.==");
+        expect(ctx.out()).toContain("- ==La novela *Primera* (2023), del autor regional.==");
         expect(ctx.out()).not.toContain("==- ");
     });
 
@@ -105,9 +105,9 @@ describe("issue 3: list marker must stay outside the highlight", () => {
 
 describe("issue 4: extending an existing highlight", () => {
     const raw =
-        "==Nació en Biohó, en el occidente de África.[^4] Era un miembro de la etnia bijago, como su esposa.== Su nombre de esclavo procedió de un mercader portugués.";
+        "==Nació en el norte, en el occidente del país.[^4] Era un miembro del primer grupo, como su esposa.== Su segundo nombre procedió de un comerciante lejano.";
     const html =
-        "<p><mark>Nació en Biohó, en el occidente de África.<sup>1</sup> Era un miembro de la etnia bijago, como su esposa.</mark> Su nombre de esclavo procedió de un mercader portugués.</p>";
+        "<p><mark>Nació en el norte, en el occidente del país.<sup>1</sup> Era un miembro del primer grupo, como su esposa.</mark> Su segundo nombre procedió de un comerciante lejano.</p>";
 
     it("merges into one highlight ending after the final period", async () => {
         const ctx = await setup(raw, html);
@@ -122,6 +122,6 @@ describe("issue 4: extending an existing highlight", () => {
         // Exactly one highlight, spanning the whole paragraph, period included.
         expect((out.match(/==/g) || []).length).toBe(2);
         expect(out.startsWith("==Nació")).toBe(true);
-        expect(out.trimEnd().endsWith("portugués.==")).toBe(true);
+        expect(out.trimEnd().endsWith("lejano.==")).toBe(true);
     });
 });

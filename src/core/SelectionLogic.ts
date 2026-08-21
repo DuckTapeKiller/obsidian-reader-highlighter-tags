@@ -904,8 +904,8 @@ export class SelectionLogic {
                 // A block whose text *is* the context beats one that merely
                 // contains it. Without that preference a one-character table
                 // cell like `2` matches every cell holding a 2 — `£8.25`,
-                // `£12.75` — and the alias of `[[Note|Benkos]]` matches any
-                // other cell with "Benkos" in it.
+                // `£12.75` — and the alias of `[[Note|Alias]]` matches any
+                // other cell containing that alias.
                 const exact = scored.filter((group) => group.text === cleanContext).sort(byStart);
                 const containing = scored.filter((group) => group.text.includes(cleanContext)).sort(byStart);
                 const best = scored[0];

@@ -64,13 +64,14 @@ describe("a selection entirely inside an existing highlight", () => {
 });
 
 describe("footnote reference inside the merged span", () => {
-    const raw = "==Nació en África.[^4] Era bijago.== Su nombre procedió de un mercader.";
-    const html = "<p><mark>Nació en África.<sup>1</sup> Era bijago.</mark> Su nombre procedió de un mercader.</p>";
+    const raw = "==Nació en el norte.[^4] Era del grupo.== Su nombre procedió de un comerciante.";
+    const html =
+        "<p><mark>Nació en el norte.<sup>1</sup> Era del grupo.</mark> Su nombre procedió de un comerciante.</p>";
 
     it("keeps the footnote inside and closes after the final period", async () => {
         const ctx = await setup(raw, html);
-        await selectBetween(ctx, "Era bijago", "un mercader.");
-        expect(ctx.out()).toBe("==Nació en África.[^4] Era bijago. Su nombre procedió de un mercader.==");
+        await selectBetween(ctx, "Era del grupo", "un comerciante.");
+        expect(ctx.out()).toBe("==Nació en el norte.[^4] Era del grupo. Su nombre procedió de un comerciante.==");
     });
 });
 

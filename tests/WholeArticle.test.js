@@ -12,25 +12,25 @@ const raw = [
     "",
     "## Biografía",
     "",
-    "==Nació en la región de Biohó, en el occidente de África.[^4] Era bijago.==",
+    "==Nació en la región del norte, en el occidente del país.[^4] Era del grupo.==",
     "",
-    "El pueblo bijago no era favorecido por los esclavistas.[^1] Era común entre ellos.",
+    "El pueblo del norte no era favorecido por los comerciantes.[^1] Era común entre ellos.",
     "",
     "### En la cultura",
     "",
-    "- La novela *Orika de los palenques* (1991), del autor colombiano Germán Espinosa.",
-    "- La novela *Benkos*... *las alas de un cimarrón* (2023), del autor palenquero-cartagenero.",
+    "- La novela *Segunda parte* (1991), del autor del sur.",
+    "- La novela *Primera*... *las alas del viento* (2023), del autor regional.",
     "",
     "Párrafo final del artículo.",
 ].join("\n");
 
 const html = [
     "<h2>Biografía</h2>",
-    "<p><mark>Nació en la región de Biohó, en el occidente de África.<sup>1</sup> Era bijago.</mark></p>",
-    "<p>El pueblo bijago no era favorecido por los esclavistas.<sup>2</sup> Era común entre ellos.</p>",
+    "<p><mark>Nació en la región del norte, en el occidente del país.<sup>1</sup> Era del grupo.</mark></p>",
+    "<p>El pueblo del norte no era favorecido por los comerciantes.<sup>2</sup> Era común entre ellos.</p>",
     "<h3>En la cultura</h3>",
-    "<ul><li>La novela <em>Orika de los palenques</em> (1991), del autor colombiano Germán Espinosa.</li>",
-    "<li>La novela <em>Benkos</em>... <em>las alas de un cimarrón</em> (2023), del autor palenquero-cartagenero.</li></ul>",
+    "<ul><li>La novela <em>Segunda parte</em> (1991), del autor del sur.</li>",
+    "<li>La novela <em>Primera</em>... <em>las alas del viento</em> (2023), del autor regional.</li></ul>",
     "<p>Párrafo final del artículo.</p>",
 ].join("");
 
@@ -53,7 +53,7 @@ describe("highlighting an entire article", () => {
         for (const line of ctx.out().split("\n")) {
             expect(line).not.toMatch(/^[ \t]*==[ \t]*[-*+][ \t]/);
         }
-        expect(ctx.out()).toContain("- ==La novela *Benkos*");
+        expect(ctx.out()).toContain("- ==La novela *Primera*");
     });
 
     it("never puts the opening marker before a heading hash", async () => {

@@ -21,6 +21,7 @@ import { getScroll, applyScroll, type ScrollPosition } from "./utils/dom";
 import { exportHighlightsToCSV, exportHighlightsToJSON, exportHighlightsToMD } from "./utils/export";
 import { FailureRecoveryModal, type DerivedRule } from "./ui/FailureRecoveryModal";
 import {
+    parseHighlights,
     mergeAdjacentHighlightsInRaw,
     migrateSpanHighlightsInRaw,
     recolorMarkHighlightsInRaw,
@@ -126,9 +127,18 @@ function toDisplayString(value: unknown): string {
     return String(primitive);
 }
 
+/** What `SelectionLogic.locateSelection` resolves a selection to. */
+interface LocatedRange {
+    file: TFile;
+    start: number;
+    end: number;
+}
+
 interface SelectionRequest {
     snippet: string;
     contextElement: HTMLElement | null;
+    blocks: HTMLElement[];
+    range: Range | null;
     contextText: string | null;
     occurrenceIndex: number;
     withinBlock: SelectionHint | null;
@@ -545,6 +555,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
         return {
             snippet,
             contextElement,
+            blocks: selectionContext?.blocks || [],
+            range: this.getSelectionRange(selectionSnapshot),
             contextText: contextElement ? this.getElementText(contextElement) : null,
             occurrenceIndex: this.getSelectionOccurrence(view, contextElement),
             withinBlock: this.getWithinBlockHint(contextElement, selectionSnapshot, snippet),
@@ -614,6 +626,84 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
     }
 
+    /**
+     * The portion of `range` that falls inside `block`, as its own range.
+     * Blocks in the middle of a selection are covered entirely; the first and
+     * last are usually partial.
+     */
+    intersectRangeWithBlock(range: Range, block: HTMLElement): Range | null {
+        try {
+            const blockRange = activeDocument.createRange();
+            blockRange.selectNodeContents(block);
+            if (range.compareBoundaryPoints(Range.START_TO_START, blockRange) > 0) {
+                blockRange.setStart(range.startContainer, range.startOffset);
+            }
+            if (range.compareBoundaryPoints(Range.END_TO_END, blockRange) < 0) {
+                blockRange.setEnd(range.endContainer, range.endOffset);
+            }
+            return blockRange.collapsed ? null : blockRange;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Locate the portion of the selection that lies in `block`.
+     */
+    async locateBlockPortion(view: MarkdownView, range: Range, block: HTMLElement): Promise<LocatedRange | null> {
+        const blockRange = this.intersectRangeWithBlock(range, block);
+        if (!blockRange) return null;
+        const snippet = blockRange.toString();
+        if (!snippet.trim()) return null;
+        return this.logic.locateSelection(
+            view.file,
+            view,
+            snippet,
+            this.getElementText(block),
+            this.getSelectionOccurrence(view, block),
+            getSelectedOccurrence(block, blockRange, snippet),
+            kindForTag(block.tagName)
+        );
+    }
+
+    /**
+     * Handle a selection spanning several blocks.
+     *
+     * Matching the whole article as one snippet fails: it asks the engine to
+     * align thousands of characters of rendered text — across headings, list
+     * markers, footnote references and existing highlights — against the source
+     * in one pass, and the user gets the recovery dialog instead of a highlight.
+     *
+     * A multi-block selection is contiguous, though, so only its two ends need
+     * locating. Anchor on the first and last blocks and apply a single edit
+     * across the span between them; `applyMarkdownModification` already walks a
+     * multi-line range line by line, keeping each line's `- ` or `#` prefix
+     * outside its highlight. Locating every block instead would be O(blocks)
+     * whole-file scans — minutes of frozen UI on a long article.
+     */
+    async highlightSpanningBlocks(view: MarkdownView, request: SelectionRequest, mode: string, payload: string) {
+        if (!request.range || !view.file) return false;
+        const blocks = request.blocks;
+
+        let head: LocatedRange | null = null;
+        for (let i = 0; i < blocks.length && !head; i++) {
+            head = await this.locateBlockPortion(view, request.range, blocks[i]);
+        }
+        let tail: LocatedRange | null = null;
+        for (let i = blocks.length - 1; i >= 0 && !tail; i--) {
+            tail = await this.locateBlockPortion(view, request.range, blocks[i]);
+        }
+        if (!head || !tail || head.file.path !== tail.file.path) return false;
+
+        const start = Math.min(head.start, tail.start);
+        const end = Math.max(head.end, tail.end);
+        if (end <= start) return false;
+
+        await this.saveUndoState(head.file);
+        await this.applyMarkdownModification(head.file, "", start, end, mode, payload);
+        return true;
+    }
+
     async highlightSelection(view: MarkdownView, selectionSnapshot?: SelectionSnapshot | null) {
         const sel = window.getSelection();
         const request = this.buildSelectionRequest(view, selectionSnapshot);
@@ -622,6 +712,31 @@ export default class ReadingHighlighterPlugin extends Plugin {
             return;
         }
         const scrollPos = getScroll(view);
+
+        let mode = "highlight";
+        let payload = "";
+        if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
+            mode = "color";
+            payload = this.settings.highlightColor;
+        }
+
+        // A selection spanning several blocks is handled one block at a time.
+        // Matching a whole article as a single snippet asks the engine to align
+        // thousands of characters of rendered text — across headings, list
+        // markers, footnote references and existing highlights — against the
+        // source in one go, and it simply fails, leaving the user with the
+        // recovery dialog. Each block on its own matches reliably.
+        if (request.blocks.length > 1) {
+            const ok = await this.highlightSpanningBlocks(view, request, mode, payload);
+            if (!ok) {
+                this.handleSelectionFailure(view, request, "highlightSelection");
+                return;
+            }
+            this.restoreScroll(view, scrollPos);
+            sel?.removeAllRanges();
+            new Notice("Highlighted!");
+            return;
+        }
 
         const result = await this.logic.locateSelection(
             view.file,
@@ -640,13 +755,6 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         const targetFile = result.file;
         await this.saveUndoState(targetFile);
-
-        let mode = "highlight";
-        let payload = "";
-        if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-            mode = "color";
-            payload = this.settings.highlightColor;
-        }
 
         await this.applyMarkdownModification(targetFile, "", result.start, result.end, mode, payload);
         this.restoreScroll(view, scrollPos);
@@ -1350,6 +1458,24 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 expanded = true;
             }
         }
+        // Merge with any highlight the selection overlaps.
+        //
+        // Extending a highlight — selecting from inside it out past its end —
+        // otherwise consumes the existing closing marker (the wrap step strips
+        // every `==` inside the selected span) and leaves the original opening
+        // marker unpaired, so one highlight becomes two broken fragments. Widen
+        // the range to the union of the selection and every highlight it touches;
+        // the interior markers are then stripped as usual and a single pair is
+        // written around the whole span.
+        if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
+            for (const existing of parseHighlights(raw).highlights) {
+                const overlaps = existing.openTagStart < expandedEnd && existing.closeTagEnd > expandedStart;
+                if (!overlaps) continue;
+                expandedStart = Math.min(expandedStart, existing.openTagStart);
+                expandedEnd = Math.max(expandedEnd, existing.closeTagEnd);
+            }
+        }
+
         const initiallySelectedText = raw.substring(expandedStart, expandedEnd);
         if (/\r?\n/.test(initiallySelectedText)) {
             expandedStart = this.getLineStart(raw, expandedStart);

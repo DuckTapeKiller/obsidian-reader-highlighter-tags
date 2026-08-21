@@ -182,6 +182,15 @@ export class SelectionLogic {
             return null;
         }
 
+        // A selection made only of markup characters — a stray pair of
+        // backticks, a lone `==` — has no content to find. Every strategy would
+        // still try, and the per-character flexible pattern degenerates into
+        // gap-matching against the whole note, which exhausts memory rather than
+        // failing.
+        if (!this.normalizeComparableText(snippet)) {
+            return null;
+        }
+
         // Apply Learned Rules (Adaptation Layer)
         const rules = this.getRules();
         if (rules && rules.length > 0) {
@@ -984,18 +993,24 @@ export class SelectionLogic {
 
         // Only strip citation-like markers [1] [^1] [6-1] [1,2]
         // These should not contain letters or we risk stripping actual visible words/inline footnotes.
-        return text
-            .normalize("NFC")
-            .replace(/#:~:text=[^&\s]+(?:&|$)?/g, "")
-            .replace(/[\u200b-\u200d\ufeff]/g, "")
-            .replace(/(?:\u21a9|\u21b5|\ufe0e|\ufe0f)+/g, " ")
-            .replace(/[\u00a0\u202f]/g, " ")
-            .replace(/[‐‑‒–—―]/g, "-")
-            .replace(/[“”«»]/g, '"')
-            .replace(/[‘’]/g, "'")
-            .replace(/\[\^?[0-9,.:; \-|#§]+\]/g, "")
-            .replace(/[ \t]+/g, " ")
-            .trim();
+        return (
+            text
+                .normalize("NFC")
+                // Obsidian never renders `%% comments %%`, so a Reading-view
+                // selection cannot legitimately contain one. Left in, the comment's
+                // id is treated as content to match.
+                .replace(/%%[\s\S]*?%%/g, "")
+                .replace(/#:~:text=[^&\s]+(?:&|$)?/g, "")
+                .replace(/[\u200b-\u200d\ufeff]/g, "")
+                .replace(/(?:\u21a9|\u21b5|\ufe0e|\ufe0f)+/g, " ")
+                .replace(/[\u00a0\u202f]/g, " ")
+                .replace(/[‐‑‒–—―]/g, "-")
+                .replace(/[“”«»]/g, '"')
+                .replace(/[‘’]/g, "'")
+                .replace(/\[\^?[0-9,.:; \-|#§]+\]/g, "")
+                .replace(/[ \t]+/g, " ")
+                .trim()
+        );
     }
 
     stripUrlsForPatternMatch(snippet: string): string {
@@ -1011,6 +1026,16 @@ export class SelectionLogic {
 
         const patternSnippet = this.stripUrlsForPatternMatch(cleanSnippet);
         if (!patternSnippet) {
+            return [];
+        }
+
+        // A long unbroken token — a UUID, hash or id — is the worst case for a
+        // per-character pattern: hyphens and digits are themselves gap
+        // characters, so every position can match several ways and the engine
+        // explores that space until it exhausts memory. Such a token either
+        // matches literally, which the earlier strategies already tried, or not
+        // at all, so the flexible pass has nothing to add here.
+        if (patternSnippet.length > 40 && !/\s/.test(patternSnippet)) {
             return [];
         }
 

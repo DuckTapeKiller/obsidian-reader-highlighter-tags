@@ -882,6 +882,7 @@ var FloatingManager = class {
     this.colorButtons = [];
     this.createElements();
     this.registerEvents();
+    this._doHandleSelection();
   }
   /**
    * Palette entries to show in the toolbar, each keeping its index into
@@ -1310,6 +1311,9 @@ var SelectionLogic = class {
     this.lastFailureReport = null;
     let snippet = this.stripBrowserJunk(selectionSnippet);
     if (!snippet) {
+      return null;
+    }
+    if (!this.normalizeComparableText(snippet)) {
       return null;
     }
     const rules = this.getRules();
@@ -1910,7 +1914,7 @@ var SelectionLogic = class {
     if (!text) {
       return text;
     }
-    return text.normalize("NFC").replace(/#:~:text=[^&\s]+(?:&|$)?/g, "").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/(?:\u21a9|\u21b5|\ufe0e|\ufe0f)+/g, " ").replace(/[\u00a0\u202f]/g, " ").replace(/[‐‑‒–—―]/g, "-").replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'").replace(/\[\^?[0-9,.:; \-|#§]+\]/g, "").replace(/[ \t]+/g, " ").trim();
+    return text.normalize("NFC").replace(/%%[\s\S]*?%%/g, "").replace(/#:~:text=[^&\s]+(?:&|$)?/g, "").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/(?:\u21a9|\u21b5|\ufe0e|\ufe0f)+/g, " ").replace(/[\u00a0\u202f]/g, " ").replace(/[‐‑‒–—―]/g, "-").replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'").replace(/\[\^?[0-9,.:; \-|#§]+\]/g, "").replace(/[ \t]+/g, " ").trim();
   }
   stripUrlsForPatternMatch(snippet) {
     return snippet;
@@ -1922,6 +1926,9 @@ var SelectionLogic = class {
     }
     const patternSnippet = this.stripUrlsForPatternMatch(cleanSnippet);
     if (!patternSnippet) {
+      return [];
+    }
+    if (patternSnippet.length > 40 && !/\s/.test(patternSnippet)) {
       return [];
     }
     const lineCount = (patternSnippet.match(/\n/g) || []).length;
@@ -2803,6 +2810,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
 // src/views/HighlightNavigator.ts
 var import_obsidian6 = require("obsidian");
 init_export();
+init_highlights();
 
 // src/modals/HighlightEditModal.ts
 var import_obsidian4 = require("obsidian");
@@ -3388,6 +3396,9 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     });
     menu.addSeparator();
     menu.addItem((mi) => {
+      mi.setTitle("Remove highlight").setIcon("trash-2").onClick(() => void this.removeSingleHighlight(item));
+    });
+    menu.addItem((mi) => {
       mi.setTitle("Remove all highlights (note)").setIcon("eraser").setWarning(true).onClick(async () => {
         const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
         if (!view || !view.file || view.file.path !== currentFile.path) {
@@ -3404,6 +3415,32 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
       });
     });
     menu.showAtMouseEvent(event);
+  }
+  /**
+   * Delete one highlight, leaving its text in place. Removing a single
+   * highlight previously meant opening the edit modal, which is several taps
+   * for the most common cleanup there is.
+   */
+  async removeSingleHighlight(item) {
+    const currentFile = this.currentFile;
+    if (!currentFile) return;
+    try {
+      await this.plugin.saveUndoState(currentFile);
+      let found = false;
+      await this.app.vault.process(currentFile, (data) => {
+        const highlight = findHighlightById(parseHighlights(data), item.id);
+        if (!highlight) return data;
+        found = true;
+        return removeHighlightFromRaw(data, highlight);
+      });
+      if (!found) {
+        new import_obsidian6.Notice("Highlight not found (it may have moved).");
+      }
+      await this.refresh(true);
+    } catch (err) {
+      console.error("Reader Highlighter Tags: failed to remove highlight.", err);
+      new import_obsidian6.Notice("Failed to remove highlight.");
+    }
   }
   openFootnoteActionsMenu(item, event) {
     const currentFile = this.currentFile;
@@ -4607,6 +4644,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     return {
       snippet,
       contextElement,
+      blocks: (selectionContext == null ? void 0 : selectionContext.blocks) || [],
+      range: this.getSelectionRange(selectionSnapshot),
       contextText: contextElement ? this.getElementText(contextElement) : null,
       occurrenceIndex: this.getSelectionOccurrence(view, contextElement),
       withinBlock: this.getWithinBlockHint(contextElement, selectionSnapshot, snippet),
@@ -4667,6 +4706,78 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       console.error(err);
     }
   }
+  /**
+   * The portion of `range` that falls inside `block`, as its own range.
+   * Blocks in the middle of a selection are covered entirely; the first and
+   * last are usually partial.
+   */
+  intersectRangeWithBlock(range, block) {
+    try {
+      const blockRange = activeDocument.createRange();
+      blockRange.selectNodeContents(block);
+      if (range.compareBoundaryPoints(Range.START_TO_START, blockRange) > 0) {
+        blockRange.setStart(range.startContainer, range.startOffset);
+      }
+      if (range.compareBoundaryPoints(Range.END_TO_END, blockRange) < 0) {
+        blockRange.setEnd(range.endContainer, range.endOffset);
+      }
+      return blockRange.collapsed ? null : blockRange;
+    } catch (e) {
+      return null;
+    }
+  }
+  /**
+   * Locate the portion of the selection that lies in `block`.
+   */
+  async locateBlockPortion(view, range, block) {
+    const blockRange = this.intersectRangeWithBlock(range, block);
+    if (!blockRange) return null;
+    const snippet = blockRange.toString();
+    if (!snippet.trim()) return null;
+    return this.logic.locateSelection(
+      view.file,
+      view,
+      snippet,
+      this.getElementText(block),
+      this.getSelectionOccurrence(view, block),
+      getSelectedOccurrence(block, blockRange, snippet),
+      kindForTag(block.tagName)
+    );
+  }
+  /**
+   * Handle a selection spanning several blocks.
+   *
+   * Matching the whole article as one snippet fails: it asks the engine to
+   * align thousands of characters of rendered text — across headings, list
+   * markers, footnote references and existing highlights — against the source
+   * in one pass, and the user gets the recovery dialog instead of a highlight.
+   *
+   * A multi-block selection is contiguous, though, so only its two ends need
+   * locating. Anchor on the first and last blocks and apply a single edit
+   * across the span between them; `applyMarkdownModification` already walks a
+   * multi-line range line by line, keeping each line's `- ` or `#` prefix
+   * outside its highlight. Locating every block instead would be O(blocks)
+   * whole-file scans — minutes of frozen UI on a long article.
+   */
+  async highlightSpanningBlocks(view, request, mode, payload) {
+    if (!request.range || !view.file) return false;
+    const blocks = request.blocks;
+    let head = null;
+    for (let i = 0; i < blocks.length && !head; i++) {
+      head = await this.locateBlockPortion(view, request.range, blocks[i]);
+    }
+    let tail = null;
+    for (let i = blocks.length - 1; i >= 0 && !tail; i--) {
+      tail = await this.locateBlockPortion(view, request.range, blocks[i]);
+    }
+    if (!head || !tail || head.file.path !== tail.file.path) return false;
+    const start = Math.min(head.start, tail.start);
+    const end = Math.max(head.end, tail.end);
+    if (end <= start) return false;
+    await this.saveUndoState(head.file);
+    await this.applyMarkdownModification(head.file, "", start, end, mode, payload);
+    return true;
+  }
   async highlightSelection(view, selectionSnapshot) {
     var _a;
     const sel = window.getSelection();
@@ -4676,6 +4787,23 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
       return;
     }
     const scrollPos = getScroll(view);
+    let mode = "highlight";
+    let payload = "";
+    if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
+      mode = "color";
+      payload = this.settings.highlightColor;
+    }
+    if (request.blocks.length > 1) {
+      const ok = await this.highlightSpanningBlocks(view, request, mode, payload);
+      if (!ok) {
+        this.handleSelectionFailure(view, request, "highlightSelection");
+        return;
+      }
+      this.restoreScroll(view, scrollPos);
+      sel == null ? void 0 : sel.removeAllRanges();
+      new import_obsidian9.Notice("Highlighted!");
+      return;
+    }
     const result = await this.logic.locateSelection(
       view.file,
       view,
@@ -4691,12 +4819,6 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     }
     const targetFile = result.file;
     await this.saveUndoState(targetFile);
-    let mode = "highlight";
-    let payload = "";
-    if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-      mode = "color";
-      payload = this.settings.highlightColor;
-    }
     await this.applyMarkdownModification(targetFile, "", result.start, result.end, mode, payload);
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
@@ -5304,6 +5426,14 @@ ${appendString}`;
       if (matchForward) {
         expandedEnd += matchForward[0].length;
         expanded = true;
+      }
+    }
+    if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
+      for (const existing of parseHighlights(raw).highlights) {
+        const overlaps = existing.openTagStart < expandedEnd && existing.closeTagEnd > expandedStart;
+        if (!overlaps) continue;
+        expandedStart = Math.min(expandedStart, existing.openTagStart);
+        expandedEnd = Math.max(expandedEnd, existing.closeTagEnd);
       }
     }
     const initiallySelectedText = raw.substring(expandedStart, expandedEnd);

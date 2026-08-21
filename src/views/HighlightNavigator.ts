@@ -12,6 +12,7 @@ import {
 import type ReadingHighlighterPlugin from "../main";
 import { getHighlightsFromContent } from "../utils/export";
 import type { Highlight } from "../utils/highlights";
+import { parseHighlights, findHighlightById, removeHighlightFromRaw } from "../utils/highlights";
 import type { HighlightWithFile } from "../utils/canvas";
 import { HighlightEditModal } from "../modals/HighlightEditModal";
 import { BulkRecolorModal } from "../modals/BulkRecolorModal";
@@ -438,6 +439,12 @@ export class HighlightNavigatorView extends ItemView {
         menu.addSeparator();
 
         menu.addItem((mi: MenuItem) => {
+            mi.setTitle("Remove highlight")
+                .setIcon("trash-2")
+                .onClick(() => void this.removeSingleHighlight(item));
+        });
+
+        menu.addItem((mi: MenuItem) => {
             mi.setTitle("Remove all highlights (note)")
                 .setIcon("eraser")
                 .setWarning(true)
@@ -459,6 +466,33 @@ export class HighlightNavigatorView extends ItemView {
         });
 
         menu.showAtMouseEvent(event);
+    }
+
+    /**
+     * Delete one highlight, leaving its text in place. Removing a single
+     * highlight previously meant opening the edit modal, which is several taps
+     * for the most common cleanup there is.
+     */
+    async removeSingleHighlight(item: Highlight) {
+        const currentFile = this.currentFile;
+        if (!currentFile) return;
+        try {
+            await this.plugin.saveUndoState(currentFile);
+            let found = false;
+            await this.app.vault.process(currentFile, (data) => {
+                const highlight = findHighlightById(parseHighlights(data), item.id);
+                if (!highlight) return data;
+                found = true;
+                return removeHighlightFromRaw(data, highlight);
+            });
+            if (!found) {
+                new Notice("Highlight not found (it may have moved).");
+            }
+            await this.refresh(true);
+        } catch (err) {
+            console.error("Reader Highlighter Tags: failed to remove highlight.", err);
+            new Notice("Failed to remove highlight.");
+        }
     }
 
     openFootnoteActionsMenu(item: NavFootnote, event: MouseEvent) {

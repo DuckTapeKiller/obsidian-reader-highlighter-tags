@@ -84,6 +84,12 @@ export class FloatingManager {
         this.colorButtons = [];
         this.createElements();
         this.registerEvents();
+        // The rebuilt toolbar starts hidden, and visibility is only ever driven
+        // by `selectionchange`. A settings change does not fire that event, so
+        // without re-evaluating here the toolbar stays invisible for a selection
+        // the user still has active — and looks like it needs a restart to come
+        // back. Re-read the current selection so the new toolbar matches it.
+        this._doHandleSelection();
     }
 
     /**

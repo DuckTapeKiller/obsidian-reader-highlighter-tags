@@ -13,7 +13,10 @@ export class Component extends Events {
     addChild(c) {
         return c;
     }
-    registerDomEvent() {}
+    registerDomEvent(el, type, handler, options) {
+        el.addEventListener(type, handler, options);
+        return handler;
+    }
     registerEvent() {}
     registerInterval() {}
 }

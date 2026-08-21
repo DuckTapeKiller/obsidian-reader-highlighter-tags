@@ -94,15 +94,33 @@ export function polyfillObsidianDom(window) {
     };
 }
 
+/**
+ * jsdom performs no layout, so Range/Element geometry is missing entirely. The
+ * toolbar positions itself from a selection rect, so supply a plausible one.
+ */
+export function polyfillGeometry(window) {
+    const rect = { x: 10, y: 20, top: 20, left: 10, bottom: 40, right: 110, width: 100, height: 20 };
+    const make = () => ({ ...rect, toJSON: () => rect });
+    if (!window.Range.prototype.getBoundingClientRect) {
+        window.Range.prototype.getBoundingClientRect = make;
+        window.Range.prototype.getClientRects = () => [make()];
+    }
+    if (!window.Element.prototype.getBoundingClientRect.__patched) {
+        window.Element.prototype.getBoundingClientRect = Object.assign(make, { __patched: true });
+    }
+}
+
 export function createObsidianWindow(html = "<!doctype html><html><body><div id='content'></div></body></html>") {
     const dom = new JSDOM(html, { pretendToBeVisual: true });
     polyfillInnerText(dom.window);
     polyfillObsidianDom(dom.window);
+    polyfillGeometry(dom.window);
     const { window } = dom;
     globalThis.window = window;
     globalThis.activeWindow = window;
     globalThis.activeDocument = window.document;
     globalThis.Node = window.Node;
     globalThis.NodeFilter = window.NodeFilter;
+    globalThis.Range = window.Range;
     return window;
 }

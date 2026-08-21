@@ -77,6 +77,7 @@ export class FloatingManager {
 
     refresh() {
         // Rebuild toolbar when settings change
+        const wasVisible = this.containerEl?.style.display === "flex";
         if (this.containerEl) {
             this.containerEl.remove();
             this.containerEl = null;
@@ -88,8 +89,13 @@ export class FloatingManager {
         // by `selectionchange`. A settings change does not fire that event, so
         // without re-evaluating here the toolbar stays invisible for a selection
         // the user still has active — and looks like it needs a restart to come
-        // back. Re-read the current selection so the new toolbar matches it.
-        this._doHandleSelection();
+        // back.
+        //
+        // Only restore it if it was on screen before the rebuild, though.
+        // Settings are usually changed from the settings dialog, where the
+        // note's selection is still live behind it: re-showing unconditionally
+        // would float the toolbar over the dialog.
+        if (wasVisible) this._doHandleSelection();
     }
 
     /**
@@ -358,7 +364,13 @@ export class FloatingManager {
         const snippet = sel?.toString() ?? "";
 
         if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
-            // Guard: Never show toolbar inside code blocks
+            // Guard: never show the toolbar inside code blocks, and never while
+            // a dialog is open — the note's selection stays live behind the
+            // settings dialog, and the toolbar would float on top of it.
+            if (activeDocument.querySelector(".modal-container, .modal-bg")) {
+                this.hide();
+                return;
+            }
             let node: Node | null = sel.anchorNode;
             while (node && node !== activeDocument.body) {
                 if (node.nodeName === "PRE" || node.nodeName === "CODE") {

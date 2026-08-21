@@ -32,7 +32,7 @@
         "eslint-plugin-obsidianmd": "^0.4.1",
         "globals": "^17.0.0",
         "jsdom": "^30.0.1",
-        "obsidian": "latest",
+        "obsidian": "^1.13.1",
         "prettier": "^3.8.3",
         "tslib": "2.4.0",
         "typescript": "^6.0.3",

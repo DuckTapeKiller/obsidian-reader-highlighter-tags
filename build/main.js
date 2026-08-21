@@ -875,6 +875,8 @@ var FloatingManager = class {
     }
   }
   refresh() {
+    var _a;
+    const wasVisible = ((_a = this.containerEl) == null ? void 0 : _a.style.display) === "flex";
     if (this.containerEl) {
       this.containerEl.remove();
       this.containerEl = null;
@@ -882,7 +884,7 @@ var FloatingManager = class {
     this.colorButtons = [];
     this.createElements();
     this.registerEvents();
-    this._doHandleSelection();
+    if (wasVisible) this._doHandleSelection();
   }
   /**
    * Palette entries to show in the toolbar, each keeping its index into
@@ -1097,6 +1099,10 @@ var FloatingManager = class {
     const sel = window.getSelection();
     const snippet = (_b = sel == null ? void 0 : sel.toString()) != null ? _b : "";
     if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
+      if (activeDocument.querySelector(".modal-container, .modal-bg")) {
+        this.hide();
+        return;
+      }
       let node = sel.anchorNode;
       while (node && node !== activeDocument.body) {
         if (node.nodeName === "PRE" || node.nodeName === "CODE") {
@@ -5721,6 +5727,256 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
       text,
       cls: `rht-settings-heading rht-settings-heading--${variant}`
     });
+  }
+  /**
+   * Declarative settings, so every option is reachable from Obsidian's
+   * settings search on 1.13 and later.
+   *
+   * `display()` below is kept for older versions: Obsidian only calls it when
+   * this returns an empty array, so the two never both run. Anything added
+   * here must also be added there, or it disappears for one audience or the
+   * other.
+   */
+  getSettingDefinitions() {
+    const s = this.plugin.settings;
+    const colourMeanings = s.semanticColors.map((item, index) => ({
+      name: `Color ${index + 1}`,
+      desc: item.color,
+      aliases: item.meaning ? [item.meaning] : [],
+      control: { type: "text", key: `semanticColors.${index}.meaning`, placeholder: "Meaning (e.g. Disagree)" }
+    }));
+    return [
+      {
+        type: "group",
+        heading: "Highlighting",
+        items: [
+          {
+            name: "Toolbar position",
+            desc: "Choose where the floating toolbar should appear.",
+            control: {
+              type: "dropdown",
+              key: "toolbarPosition",
+              options: {
+                text: "Next to text",
+                top: "Fixed at top center",
+                bottom: "Fixed at bottom center",
+                left: "Fixed left side",
+                right: "Fixed right side (default)"
+              }
+            }
+          },
+          {
+            name: "Enable color highlighting",
+            desc: "Use HTML <mark> tags with specific colors instead of == syntax.",
+            control: { type: "toggle", key: "enableColorHighlighting" }
+          },
+          {
+            name: "Highlight color",
+            desc: "Hex code for the default highlight color.",
+            visible: () => this.plugin.settings.enableColorHighlighting,
+            control: { type: "color", key: "highlightColor" }
+          },
+          {
+            name: "Enable color palette",
+            desc: "Show the semantic colour palette in the toolbar for quick selection.",
+            control: { type: "toggle", key: "enableColorPalette" }
+          },
+          {
+            name: "Only show colours with a meaning",
+            desc: "Hide palette colours that have no meaning assigned below, so the toolbar shows only the ones you actually use. Turn this off to show all of them.",
+            visible: () => this.plugin.settings.enableColorPalette,
+            control: { type: "toggle", key: "showOnlyAssignedColors" }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Semantic colour meanings",
+        visible: () => this.plugin.settings.enableColorPalette,
+        items: colourMeanings
+      },
+      {
+        type: "group",
+        heading: "Tags",
+        items: [
+          {
+            name: "Default tag prefix",
+            desc: "Automatically add this tag to every highlight (e.g., 'book').",
+            control: { type: "text", key: "defaultTagPrefix", placeholder: "Book" }
+          },
+          {
+            name: "Smart tag suggestions",
+            desc: "Suggest tags based on recent usage, folder, and frontmatter.",
+            control: { type: "toggle", key: "enableSmartTagSuggestions" }
+          },
+          {
+            name: "Enable smart paragraph selection",
+            desc: "Snap selections inside a paragraph, list item, heading, or blockquote to the entire block.",
+            control: { type: "toggle", key: "enableSmartParagraphSelection" }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Quote template",
+        items: [
+          {
+            name: "Quote format",
+            desc: "Template for copying text as quote. Variables: {{text}}, {{file}}, {{path}}, {{date}}, {{time}}, {{domain}}, {{author}}",
+            control: { type: "textarea", key: "quoteTemplate" }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Annotations",
+        items: [
+          {
+            name: "Enable annotations",
+            desc: "Add comments to selections as footnotes.",
+            control: { type: "toggle", key: "enableAnnotations" }
+          },
+          {
+            name: "Show annotation button",
+            desc: "Show the annotation button in the toolbar.",
+            control: { type: "toggle", key: "showAnnotationButton" }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Reading progress",
+        items: [
+          {
+            name: "Track reading progress",
+            desc: "Remember scroll position when leaving a file.",
+            control: { type: "toggle", key: "enableReadingProgress" }
+          },
+          {
+            name: "Clear reading positions",
+            desc: `Currently tracking ${Object.keys(s.readingPositions).length} file(s).`,
+            action: (el) => {
+              new import_obsidian9.Setting(el).addButton(
+                (button) => button.setButtonText("Clear all").onClick(async () => {
+                  this.plugin.settings.readingPositions = {};
+                  await this.plugin.saveSettings();
+                  new import_obsidian9.Notice("Reading positions cleared.");
+                  this.refreshDefinitions();
+                })
+              );
+            }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Toolbar buttons",
+        items: [
+          { name: "Show tag button", control: { type: "toggle", key: "showTagButton" } },
+          { name: "Show quote button", control: { type: "toggle", key: "showQuoteButton" } },
+          { name: "Show remove button", control: { type: "toggle", key: "showRemoveButton" } }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Mobile and UX",
+        items: [
+          {
+            name: "Haptic feedback",
+            desc: "Vibrate slightly on success (mobile only).",
+            control: { type: "toggle", key: "enableHaptics" }
+          },
+          {
+            name: "Show button tooltips",
+            desc: "Show tooltips when hovering over toolbar buttons.",
+            control: { type: "toggle", key: "showTooltips" }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Frontmatter integration",
+        items: [
+          {
+            name: "Auto-tag highlight in frontmatter",
+            desc: "Automatically inject a specific tag into the note's frontmatter whenever you highlight text.",
+            control: { type: "toggle", key: "enableFrontmatterTag" }
+          },
+          {
+            name: "Frontmatter highlight tag",
+            desc: "The tag to add (e.g. 'resaltados'). Do not include the # symbol.",
+            visible: () => this.plugin.settings.enableFrontmatterTag,
+            control: { type: "text", key: "frontmatterTag", placeholder: "Resaltados" }
+          }
+        ]
+      },
+      {
+        type: "group",
+        heading: "Learned normalization rules",
+        items: s.learnedNormRules.length ? [
+          ...s.learnedNormRules.map((rule, index) => ({
+            name: `Rule ${index + 1}`,
+            desc: `Ignore: "${rule.stripPattern}"`,
+            action: (el) => {
+              new import_obsidian9.Setting(el).addButton((btn) => {
+                btn.setButtonText("Delete").onClick(async () => {
+                  this.plugin.settings.learnedNormRules.splice(index, 1);
+                  await this.plugin.saveSettings();
+                  new import_obsidian9.Notice("Rule deleted.");
+                  this.refreshDefinitions();
+                });
+                btn.buttonEl.addClass("mod-warning");
+              });
+            }
+          })),
+          {
+            name: "Clear all rules",
+            action: (el) => {
+              new import_obsidian9.Setting(el).addButton((btn) => {
+                btn.setButtonText("Clear all rules").onClick(async () => {
+                  this.plugin.settings.learnedNormRules = [];
+                  await this.plugin.saveSettings();
+                  new import_obsidian9.Notice("All rules cleared.");
+                  this.refreshDefinitions();
+                });
+                btn.buttonEl.addClass("mod-warning");
+              });
+            }
+          }
+        ] : [{ name: "No rules learned yet." }]
+      }
+    ];
+  }
+  /** Read a declarative control's value out of the plugin's settings. */
+  getControlValue(key) {
+    var _a, _b;
+    const colour = key.match(/^semanticColors\.(\d+)\.meaning$/);
+    if (colour) return (_b = (_a = this.plugin.settings.semanticColors[Number(colour[1])]) == null ? void 0 : _a.meaning) != null ? _b : "";
+    return this.plugin.settings[key];
+  }
+  /** Persist a declarative control's value, mirroring the imperative handlers. */
+  setControlValue(key, value) {
+    const settings = this.plugin.settings;
+    const asText = typeof value === "string" ? value : "";
+    const colour = key.match(/^semanticColors\.(\d+)\.meaning$/);
+    if (colour) {
+      const entry = this.plugin.settings.semanticColors[Number(colour[1])];
+      if (entry) entry.meaning = asText;
+    } else if (key === "defaultTagPrefix") {
+      settings[key] = asText.replace(/\s+/g, "_").replace(/^#/, "");
+    } else if (key === "frontmatterTag") {
+      settings[key] = asText.replace(/^#/, "");
+    } else {
+      settings[key] = value;
+    }
+    void this.plugin.saveSettings();
+    this.refreshDefinitions();
+  }
+  /** Re-read the definitions, on versions that have the declarative API. */
+  refreshDefinitions() {
+    const tab = this;
+    if (typeof tab.update === "function") tab.update();
+    else this.render();
   }
   display() {
     this.render();

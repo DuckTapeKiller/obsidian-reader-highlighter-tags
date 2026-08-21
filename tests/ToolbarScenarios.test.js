@@ -88,6 +88,37 @@ describe("scenarios", () => {
         }
     });
 
+    it("F: a settings change from the settings dialog does not float the toolbar over it", async () => {
+        const ctx = await setup();
+        select(ctx);
+        expect(visible(ctx)).toBe(true);
+
+        // Opening the settings dialog leaves the note's selection live behind it.
+        const modal = ctx.doc.createElement("div");
+        modal.className = "modal-container";
+        ctx.doc.body.appendChild(modal);
+        ctx.plugin.floatingManager.hide();
+
+        ctx.plugin.settings.enableColorPalette = true;
+        await ctx.plugin.saveSettings();
+        expect(visible(ctx)).toBe(false);
+
+        // Closing it and re-selecting brings the toolbar back.
+        modal.remove();
+        select(ctx);
+        expect(visible(ctx)).toBe(true);
+    });
+
+    it("G: never shows while a dialog is open, even on a fresh selection", async () => {
+        const ctx = await setup();
+        const modal = ctx.doc.createElement("div");
+        modal.className = "modal-container";
+        ctx.doc.body.appendChild(modal);
+        select(ctx);
+        expect(visible(ctx)).toBe(false);
+        modal.remove();
+    });
+
     it("E: many rapid refreshes (typing a meaning) leave a working toolbar", async () => {
         const ctx = await setup();
         ctx.plugin.settings.enableColorPalette = true;

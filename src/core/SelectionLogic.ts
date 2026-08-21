@@ -619,13 +619,23 @@ export class SelectionLogic {
             // Table alignment rows
             /(?:^|\n)[ \t]*\|?[ \t:|-]+\|[ \t:|-]*(?=\n|$)/g,
             // Link URL portion: ](https://...)
+            //
+            // The destination may legitimately contain brackets, either inside a
+            // quoted title — `](…&redlink=1 "1877 (la página no existe)")`, which
+            // wiki exports produce constantly — or in the URL itself, as in
+            // `](…/wiki/Foo_(bar))`. Stopping at the first `)` truncates those and
+            // strands a `")` in the text the matcher searches, so a cell reading
+            // `1877` in Reading view can never be found. The three alternatives
+            // start on different characters, so there is no ambiguity for the
+            // engine to backtrack through.
+            //
             // NOTE: this runs before the image rule below, so `![caption](url)`
             // is reduced to `![caption` and the image rule never fires. The
             // caption therefore survives into the text the matcher searches.
             // Reordering these two fixes the leak but changes every downstream
             // offset, which cost more selections than it saved; block scoring
             // compensates for the leak instead (see resolveCandidates).
-            /\]\([^)]+\)/g,
+            /\]\((?:[^()"]|"[^"]*"|\([^()]*\))*\)/g,
             // Markdown Images: ![caption](url)
             /!\[[^\]]*\]\([^)]+\)/g,
             // Global HTML Tags (Reading view strips these)
@@ -1587,8 +1597,15 @@ export class SelectionLogic {
             }
 
             if (/[\p{L}\p{N}]/u.test(char)) {
-                normalized += char.toLocaleLowerCase();
-                map.push(offset);
+                // Lowercasing can lengthen a character: `İ` (U+0130) becomes
+                // `i` plus a combining dot, and `ẞ` becomes `ss`. One map entry
+                // per source character would then leave `map` shorter than
+                // `normalized`, and every match after the first such character
+                // would resolve to an offset that drifts further with each one —
+                // writing markers into the middle of words.
+                const lowered = char.toLocaleLowerCase();
+                normalized += lowered;
+                for (let k = 0; k < lowered.length; k++) map.push(offset);
             }
             offset += char.length;
         }

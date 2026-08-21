@@ -206,7 +206,9 @@ export function renderInline(src, base) {
         // A link wrapping an image — `[![alt](img)](href)` — renders as a
         // clickable image. Must be caught before the inline-link rule, which
         // would otherwise take `![alt` as the label and show the alt text.
-        let m = rest.match(/^\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/) || rest.match(/^\[!\[\[[^\]]*\]\]\]\([^)]*\)/);
+        let m =
+            rest.match(/^\[!\[[^\]]*\]\((?:[^()"]|"[^"]*"|\([^()]*\))*\)\]\((?:[^()"]|"[^"]*"|\([^()]*\))*\)/) ||
+            rest.match(/^\[!\[\[[^\]]*\]\]\]\((?:[^()"]|"[^"]*"|\([^()]*\))*\)/);
         if (m) {
             pushNode({ t: "opaque", tag: "img", text: "" });
             i += m[0].length;
@@ -215,7 +217,7 @@ export function renderInline(src, base) {
 
         // Images contribute no text. `![[file|alias]]` is an Obsidian embed: the
         // alias is a size/alt hint, not visible text.
-        m = rest.match(/^!\[\[[^\]]*\]\]/) || rest.match(/^!\[[^\]]*\]\([^)]*\)/);
+        m = rest.match(/^!\[\[[^\]]*\]\]/) || rest.match(/^!\[[^\]]*\]\((?:[^()"]|"[^"]*"|\([^()]*\))*\)/);
         if (m) {
             pushNode({ t: "opaque", tag: "img", text: "" });
             i += m[0].length;
@@ -261,7 +263,7 @@ export function renderInline(src, base) {
         }
 
         // Inline link: only the label is visible.
-        m = rest.match(/^\[([^\]]*)\]\(([^)]*)\)/);
+        m = rest.match(/^\[([^\]]*)\]\((?:[^()"]|"[^"]*"|\([^()]*\))*\)/);
         if (m) {
             pushNode({ t: "el", tag: "a", children: renderInline(m[1], base + i + 1) });
             i += m[0].length;

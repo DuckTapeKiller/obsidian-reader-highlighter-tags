@@ -1,5 +1,6 @@
 import { setIcon, MarkdownView, Platform, View, App } from "obsidian";
 import type ReadingHighlighterPlugin from "../main";
+import type { SemanticColor } from "../main";
 
 type ActionName =
     | "highlightSelection"
@@ -85,6 +86,23 @@ export class FloatingManager {
         this.registerEvents();
     }
 
+    /**
+     * Palette entries to show in the toolbar, each keeping its index into
+     * `semanticColors` so the colour applied stays correct however the list is
+     * filtered.
+     *
+     * With "only show colours with a meaning" on, colours left unnamed are
+     * hidden — a reader using a seven-colour taxonomy should not have to pick
+     * past eight unused swatches. If nothing has been named yet, every colour is
+     * shown rather than an empty palette that looks broken.
+     */
+    visiblePaletteColors(): { item: SemanticColor; index: number }[] {
+        const all = this.plugin.settings.semanticColors.map((item, index) => ({ item, index }));
+        if (!this.plugin.settings.showOnlyAssignedColors) return all;
+        const named = all.filter(({ item }) => (item.meaning || "").trim().length > 0);
+        return named.length > 0 ? named : all;
+    }
+
     createElements() {
         if (this.containerEl) return;
 
@@ -100,7 +118,7 @@ export class FloatingManager {
             this.paletteContainer = activeDocument.createElement("div");
             this.paletteContainer.addClass("reading-highlighter-palette");
 
-            this.plugin.settings.semanticColors.forEach((item, index) => {
+            for (const { item, index } of this.visiblePaletteColors()) {
                 const colorBtn = activeDocument.createElement("button");
                 colorBtn.addClass("reading-highlighter-color-btn");
                 colorBtn.setCssStyles({ backgroundColor: item.color });
@@ -108,7 +126,7 @@ export class FloatingManager {
                 colorBtn.setAttribute("data-color-index", index.toString());
                 this.colorButtons.push(colorBtn);
                 this.paletteContainer.appendChild(colorBtn);
-            });
+            }
 
             this.containerEl.appendChild(this.paletteContainer);
         }
@@ -216,7 +234,10 @@ export class FloatingManager {
         }
 
         // Color palette buttons
-        this.colorButtons.forEach((btn, index) => {
+        this.colorButtons.forEach((btn) => {
+            // Read the index off the button: the palette may be filtered, so a
+            // button's position is not its index into `semanticColors`.
+            const index = Number(btn.getAttribute("data-color-index"));
             const handler = (evt: Event) => {
                 preventFocus(evt);
                 let view: MarkdownView | View | null = this.app.workspace.getActiveViewOfType(MarkdownView);

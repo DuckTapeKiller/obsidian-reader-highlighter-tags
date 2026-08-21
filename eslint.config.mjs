@@ -6,11 +6,11 @@ import tsparser from "@typescript-eslint/parser";
 import obsidianmd from "eslint-plugin-obsidianmd";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 
-// NOTE: This config intentionally does NOT enable type-aware linting (no
-// `parserOptions.project` / no tsconfig). Type-aware linting surfaces hundreds
-// of `no-unsafe-*` / `no-explicit-any` warnings on this plain-JS codebase, none
-// of which block the Obsidian community store. We only enforce the AST-based
-// Obsidian guideline rules that are reported as Errors by the official review.
+// NOTE: The general TypeScript rules below run without type information, since
+// type-aware linting surfaces hundreds of `no-unsafe-*` / `no-explicit-any`
+// warnings that do not block the Obsidian community store. The obsidianmd
+// recommended set is a separate block that DOES enable the type-aware program,
+// because several of its rules require it.
 
 const sharedLanguageOptions = {
     globals: {
@@ -62,14 +62,22 @@ export default defineConfig(
         },
     },
     {
-        // Obsidian guideline rules reported as Errors by the official review.
-        // These are AST-based and need no type information.
-        files: ["**/*.{js,mjs,cjs,ts,tsx,cts,mts}"],
-        plugins: { obsidianmd },
-        rules: {
-            "obsidianmd/no-static-styles-assignment": "error",
-            "obsidianmd/settings-tab/no-manual-html-headings": "error",
-            "obsidianmd/detach-leaves": "error",
+        // The full, current obsidianmd ruleset. Using the plugin's own
+        // `recommended` preset rather than a hand-picked subset means new rules
+        // arrive with the dependency instead of silently going unenforced.
+        //
+        // Scoped to the shipped plugin source: these are guidelines about plugin
+        // code, and the preset pulls in type-aware rules, which need every linted
+        // file to be part of the TypeScript program. `tests/` is not.
+        files: ["src/**/*.ts"],
+        extends: [obsidianmd.configs.recommended],
+        languageOptions: {
+            ...sharedLanguageOptions,
+            parser: tsparser,
+            parserOptions: {
+                projectService: true,
+                tsconfigRootDir: import.meta.dirname,
+            },
         },
     },
     eslintConfigPrettier

@@ -1,4 +1,6 @@
 import { App, TFile, MarkdownView } from "obsidian";
+import { BlockKind, SourceBlock, splitSourceBlocks, findBlockAt } from "../utils/sourceBlocks";
+import type { SelectionHint } from "../utils/blockOccurrence";
 
 interface LearnedRule {
     stripPattern?: string;
@@ -169,7 +171,9 @@ export class SelectionLogic {
         view: MarkdownView,
         selectionSnippet: string,
         context: string | null = null,
-        occurrenceIndex = 0
+        occurrenceIndex = 0,
+        withinBlock: SelectionHint | null = null,
+        contextKind: BlockKind | null = null
     ): Promise<PhysicalResult | null> {
         this.lastFailureReport = null; // Note 2: Reset at top of call
 
@@ -265,7 +269,16 @@ export class SelectionLogic {
         // Apply Structural Snapping to all final candidates to protect footnotes/prefixes
         candidates = candidates.map((cand) => this.snapToStructuralBoundaries(fullRaw, cand));
 
-        const result = this.resolveCandidates(candidates, fullRaw, context, occurrenceIndex);
+        const result = this.resolveCandidates(
+            candidates,
+            fullRaw,
+            snippet,
+            context,
+            occurrenceIndex,
+            withinBlock,
+            splitSourceBlocks(bodyContent, firstSegmentBodyStart),
+            contextKind
+        );
         if (!result) {
             return null;
         }
@@ -576,6 +589,12 @@ export class SelectionLogic {
             // Table alignment rows
             /(?:^|\n)[ \t]*\|?[ \t:|-]+\|[ \t:|-]*(?=\n|$)/g,
             // Link URL portion: ](https://...)
+            // NOTE: this runs before the image rule below, so `![caption](url)`
+            // is reduced to `![caption` and the image rule never fires. The
+            // caption therefore survives into the text the matcher searches.
+            // Reordering these two fixes the leak but changes every downstream
+            // offset, which cost more selections than it saved; block scoring
+            // compensates for the leak instead (see resolveCandidates).
             /\]\([^)]+\)/g,
             // Markdown Images: ![caption](url)
             /!\[[^\]]*\]\([^)]+\)/g,
@@ -667,37 +686,231 @@ export class SelectionLogic {
         };
     }
 
+    /**
+     * Candidates whose source text really is the snippet once inline markers are
+     * stripped — i.e. the ones that correspond to a visible occurrence in
+     * Reading view. Compared case-insensitively, matching how the candidate
+     * strategies search.
+     */
+    literalCandidates(candidates: Candidate[], raw: string, snippet: string): Candidate[] {
+        const target = this.normalizeComparableText(snippet || "").toLocaleLowerCase();
+        if (!target) return [];
+        return candidates.filter((cand) => {
+            const text = cand.text ?? raw.substring(cand.start, cand.end);
+            return this.normalizeComparableText(text).toLocaleLowerCase() === target;
+        });
+    }
+
+    /**
+     * Reduce link syntax to the text Reading view actually shows, so a block's
+     * source text can be compared against the rendered context. Without this a
+     * table-of-contents entry like `[[Note#Prologue|Prologue]]` compares as its
+     * target rather than its alias, and scores worse against the context than an
+     * unrelated `# Prologue` heading elsewhere in the note.
+     */
+    stripLinkSyntax(line: string): string {
+        return (
+            line
+                .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+                .replace(/!\[\[[^\]]+\]\]/g, "")
+                .replace(/\[\[[^\]|]*\|([^\]]+)\]\]/g, "$1")
+                .replace(/\[\[([^\]]+)\]\]/g, "$1")
+                .replace(/\[\^[^\]]+\]/g, "")
+                .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+                // `applyStructuralFilter` has already removed the `](url)` half of
+                // every inline link by this point, leaving the opening bracket
+                // stranded (`[Ejemplos de palabras compuestas`). Reading view shows
+                // no bracket there, so leaving it in makes a table-of-contents entry
+                // score worse against its own rendered text than an unrelated
+                // heading with the same words.
+                .replace(/[[\]]/g, "")
+        );
+    }
+
+    /**
+     * Normalised source text of a block, for comparison against the rendered
+     * block text the caller captured from Reading view.
+     */
+    blockCompareText(raw: string, block: SourceBlock): string {
+        return raw
+            .substring(block.start, block.end)
+            .split(/\r?\n/)
+            .map((line) => this.normalizeLineForCompare(this.stripLinkSyntax(line)))
+            .filter((line) => line.length > 0)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    /**
+     * Choose which candidate the user actually selected.
+     *
+     * Three signals, each answering a different question:
+     *  - `context` (the rendered block's text) narrows to the right block, which
+     *    is what separates two paragraphs that both contain the snippet;
+     *  - `occurrenceIndex` picks between blocks whose rendered text is
+     *    *identical*, since those score the same and nothing else tells them
+     *    apart;
+     *  - `withinBlock` picks between repeats *inside* one block — the case a
+     *    paragraph with soft line breaks produces, where every occurrence shares
+     *    one block element and one context string.
+     *
+     * Each falls back to the previous behaviour when its signal is unavailable,
+     * so a selection captured without a live Range still resolves as before.
+     */
     resolveCandidates(
         candidates: Candidate[],
         raw: string,
+        snippet: string,
         context: string | null,
-        occurrenceIndex: number
+        occurrenceIndex: number,
+        withinBlock: SelectionHint | null = null,
+        blocks: SourceBlock[] = [],
+        contextKind: BlockKind | null = null
     ): { raw: string; start: number; end: number } | null {
         if (candidates.length === 0) return null;
 
-        if (context) {
-            const cleanContext = context.replace(/\s+/g, " ").trim();
-            candidates = candidates.map((cand) => {
-                const sourceBlock = (cand.text || raw.substring(cand.start, cand.end)).replace(/\s+/g, " ").trim();
-                const score = this.calculateSimilarity(sourceBlock, cleanContext);
-                return { ...cand, score };
+        // One candidate per start offset, so an ordinal counted in the rendered
+        // text lines up with position in this list.
+        const seenStarts = new Set<number>();
+        const unique = candidates
+            .slice()
+            .sort((a, b) => a.start - b.start)
+            .filter((cand) => {
+                if (seenStarts.has(cand.start)) return false;
+                seenStarts.add(cand.start);
+                return true;
             });
 
-            const bestScore = Math.max(...candidates.map((candidate) => candidate.score ?? 0));
-            const threshold = bestScore * 0.85;
-            const validCandidates = candidates.filter((candidate) => (candidate.score ?? 0) >= threshold);
+        const pickWithinBlock = (inBlock: Candidate[], blockStart: number): Candidate => {
+            if (!withinBlock || inBlock.length <= 1) return inBlock[0];
 
-            if (occurrenceIndex >= 0 && occurrenceIndex < validCandidates.length) {
-                const chosen = validCandidates[occurrenceIndex];
-                return { raw, start: chosen.start, end: chosen.end };
+            // The matcher's candidates are not all literal occurrences: it
+            // matches case-insensitively and tolerates gaps, so a block can yield
+            // `Foundry` for `foundry` and `in to` for `into`. Counting those as
+            // occurrences would shift the ordinal. Keep the candidates whose text
+            // really is the snippet, and number those.
+            const literal = this.literalCandidates(inBlock, raw, snippet);
+            const pool = literal.length > 0 ? literal : inBlock;
+
+            if (withinBlock.total === pool.length) {
+                const index = Math.max(0, Math.min(pool.length - 1, withinBlock.ordinal));
+                return pool[index];
             }
 
-            if (validCandidates.length > 0) {
-                return { raw, start: validCandidates[0].start, end: validCandidates[0].end };
+            // Counts disagree, so the ordinal cannot be trusted. Fall back to the
+            // candidate nearest the caret. Rendered and source offsets differ by
+            // the markup between them, which is normally far smaller than the
+            // distance between two occurrences.
+            const expected = blockStart + Math.max(0, withinBlock.caret);
+            let best = pool[0];
+            let bestDistance = Math.abs(pool[0].start - expected);
+            for (let i = 1; i < pool.length; i++) {
+                const distance = Math.abs(pool[i].start - expected);
+                if (distance < bestDistance) {
+                    best = pool[i];
+                    bestDistance = distance;
+                }
+            }
+            return best;
+        };
+
+        if (context && blocks.length > 0) {
+            // Normalise the rendered context exactly as the source side is
+            // normalised. `blockCompareText` folds smart quotes and dashes to
+            // ASCII, so comparing against raw rendered text would never match a
+            // paragraph containing typographic punctuation.
+            const cleanContext = this.normalizeComparableText(context);
+
+            // Group candidates by the source block they land in. Candidates that
+            // fall between blocks keep their own group so they stay selectable.
+            const groups = new Map<
+                string,
+                { text: string; start: number; kind: BlockKind | null; candidates: Candidate[] }
+            >();
+            for (const cand of unique) {
+                const block = findBlockAt(blocks, cand.start);
+                const key = block ? `b${block.start}` : `x${cand.start}`;
+                const existing = groups.get(key);
+                if (existing) {
+                    existing.candidates.push(cand);
+                    continue;
+                }
+                groups.set(key, {
+                    text: block
+                        ? this.blockCompareText(raw, block)
+                        : this.normalizeLineForCompare(cand.text || raw.substring(cand.start, cand.end)),
+                    start: block ? block.start : cand.start,
+                    kind: block ? block.kind : null,
+                    candidates: [cand],
+                });
+            }
+
+            const scored = [...groups.values()]
+                .map((group) => ({ ...group, score: this.calculateSimilarity(group.text, cleanContext) }))
+                .sort((a, b) => b.score - a.score || a.start - b.start);
+
+            if (scored.length > 0) {
+                // A block's source text can carry words Reading view never shows
+                // — most often an image caption, since the structural filter
+                // strips `](url)` before its image rule can match and the caption
+                // survives. Such a block reads as `!Photograph of a hall Scroll
+                // through the whole page…`, scoring far below a bare paragraph
+                // with the same visible words, so a note repeating that paragraph
+                // after every image would collapse onto the one clean copy.
+                // Treat any block *containing* the rendered context as an equal
+                // match, so the repeats are all seen and can be indexed.
+                const containing = scored
+                    .filter((group) => group.text === cleanContext || group.text.includes(cleanContext))
+                    .sort((a, b) => a.start - b.start);
+                const best = scored[0];
+                let identical =
+                    containing.length > 0
+                        ? containing
+                        : scored.filter((group) => group.text === best.text).sort((a, b) => a.start - b.start);
+
+                // `occurrenceIndex` counts DOM elements sharing one tag, so only
+                // blocks rendering as that same kind belong in the sequence it
+                // indexes: a list item and a heading reading alike are two
+                // sequences, not one.
+                if (contextKind && identical.length > 1) {
+                    const sameKind = identical.filter((group) => group.kind === contextKind);
+                    if (sameKind.length > 0) identical = sameKind;
+                }
+
+                const chosenGroup =
+                    occurrenceIndex >= 0 && occurrenceIndex < identical.length
+                        ? identical[occurrenceIndex]
+                        : identical[0] || best;
+
+                const chosen = pickWithinBlock(chosenGroup.candidates, chosenGroup.start);
+                return { raw, start: chosen.start, end: chosen.end };
             }
         }
 
-        return { raw, start: candidates[0].start, end: candidates[0].end };
+        if (context) {
+            // No block map available: keep the original snippet-similarity path,
+            // but still honour the within-block ordinal among the survivors.
+            const cleanContext = context.replace(/\s+/g, " ").trim();
+            const rescored = unique.map((cand) => {
+                const sourceBlock = (cand.text || raw.substring(cand.start, cand.end)).replace(/\s+/g, " ").trim();
+                return { ...cand, score: this.calculateSimilarity(sourceBlock, cleanContext) };
+            });
+            const bestScore = Math.max(...rescored.map((candidate) => candidate.score ?? 0));
+            const threshold = bestScore * 0.85;
+            const validCandidates = rescored.filter((candidate) => (candidate.score ?? 0) >= threshold);
+
+            if (validCandidates.length > 0) {
+                const chosen =
+                    occurrenceIndex >= 0 && occurrenceIndex < validCandidates.length
+                        ? validCandidates[occurrenceIndex]
+                        : pickWithinBlock(validCandidates, validCandidates[0].start);
+                return { raw, start: chosen.start, end: chosen.end };
+            }
+        }
+
+        const fallback = pickWithinBlock(unique, unique[0].start);
+        return { raw, start: fallback.start, end: fallback.end };
     }
 
     createFlexiblePattern(snippet: string): string {

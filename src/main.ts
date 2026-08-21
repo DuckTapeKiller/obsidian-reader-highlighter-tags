@@ -27,9 +27,11 @@ import {
     removeFootnoteFromRaw,
     removeAllFootnotesFromRaw,
 } from "./utils/highlights";
+import { getSelectedOccurrence, type SelectionHint } from "./utils/blockOccurrence";
+import { kindForTag, type BlockKind } from "./utils/sourceBlocks";
 import { BulkRecolorModal } from "./modals/BulkRecolorModal";
 
-interface SemanticColor {
+export interface SemanticColor {
     color: string;
     meaning: string;
 }
@@ -48,6 +50,7 @@ interface ReadingHighlighterSettings {
     showRemoveButton: boolean;
     showQuoteButton: boolean;
     enableColorPalette: boolean;
+    showOnlyAssignedColors: boolean;
     semanticColors: SemanticColor[];
     quoteTemplate: string;
     enableAnnotations: boolean;
@@ -80,6 +83,7 @@ const DEFAULT_SETTINGS: ReadingHighlighterSettings = {
     showRemoveButton: true,
     showQuoteButton: true,
     enableColorPalette: false,
+    showOnlyAssignedColors: true,
     semanticColors: [
         { color: "#FFCDD2", meaning: "Important" },
         { color: "#F8BBD0", meaning: "" },
@@ -127,6 +131,8 @@ interface SelectionRequest {
     contextElement: HTMLElement | null;
     contextText: string | null;
     occurrenceIndex: number;
+    withinBlock: SelectionHint | null;
+    contextKind: BlockKind | null;
 }
 
 interface PdfTextItem {
@@ -541,7 +547,29 @@ export default class ReadingHighlighterPlugin extends Plugin {
             contextElement,
             contextText: contextElement ? this.getElementText(contextElement) : null,
             occurrenceIndex: this.getSelectionOccurrence(view, contextElement),
+            withinBlock: this.getWithinBlockHint(contextElement, selectionSnapshot, snippet),
+            contextKind: kindForTag(contextElement?.tagName),
         };
+    }
+
+    /**
+     * Which occurrence of `snippet` inside `contextElement` the caret is on.
+     *
+     * `getSelectionOccurrence` distinguishes repeated *blocks*; this
+     * distinguishes repeats *within* one block, which is what a paragraph
+     * containing soft line breaks (Shift+Enter) produces — one <p>, one context
+     * string, several identical snippets. Returns null when there is no live
+     * range to read, leaving the matcher on its previous first-match behaviour.
+     */
+    getWithinBlockHint(
+        contextElement: HTMLElement | null,
+        selectionSnapshot: SelectionSnapshot | null,
+        snippet: string
+    ): SelectionHint | null {
+        if (!contextElement) return null;
+        const range = this.getSelectionRange(selectionSnapshot);
+        if (!range) return null;
+        return getSelectedOccurrence(contextElement, range, snippet);
     }
 
     getSelectionOccurrence(view: MarkdownView, contextElement: HTMLElement | null) {
@@ -600,7 +628,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+            request.withinBlock,
+            request.contextKind
         );
 
         if (!result) {
@@ -764,7 +794,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+            request.withinBlock,
+            request.contextKind
         );
 
         if (!result) {
@@ -781,7 +813,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 view,
                 request.snippet,
                 request.contextText,
-                request.occurrenceIndex
+                request.occurrenceIndex,
+                request.withinBlock,
+                request.contextKind
             );
             if (!newResult) {
                 new Notice("Selection lost - file may have changed.");
@@ -822,7 +856,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+            request.withinBlock,
+            request.contextKind
         );
 
         if (!result) {
@@ -839,7 +875,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 view,
                 request.snippet,
                 request.contextText,
-                request.occurrenceIndex
+                request.occurrenceIndex,
+                request.withinBlock,
+                request.contextKind
             );
             if (!newResult) {
                 new Notice("Selection lost - file may have changed.");
@@ -889,7 +927,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+            request.withinBlock,
+            request.contextKind
         );
 
         if (!result) {
@@ -1067,7 +1107,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
             view,
             request.snippet,
             request.contextText,
-            request.occurrenceIndex
+            request.occurrenceIndex,
+            request.withinBlock,
+            request.contextKind
         );
         if (!result) {
             this.handleSelectionFailure(view, request, "applyColorHighlight", color);
@@ -1500,7 +1542,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
     // Render a section heading without raw <h2>/<h3> tags. Styled via styles.css
     // using the theme's own heading variables so it matches the previous look.
     sectionHeading(text: string, variant: "h2" | "h3" | "h4") {
-        return this.containerEl.createEl("div", {
+        return this.containerEl.createDiv({
             text,
             cls: `rht-settings-heading rht-settings-heading--${variant}`,
         });
@@ -1553,7 +1595,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
         }
         new Setting(containerEl)
             .setName("Enable color palette")
-            .setDesc("Show a palette of 5 colors in the toolbar for quick selection.")
+            .setDesc("Show the semantic colour palette in the toolbar for quick selection.")
             .addToggle((toggle) =>
                 toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
                     this.plugin.settings.enableColorPalette = value;
@@ -1562,18 +1604,23 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 })
             );
         if (this.plugin.settings.enableColorPalette) {
-            this.sectionHeading("Semantic Color Meanings", "h4");
+            new Setting(containerEl)
+                .setName("Only show colours with a meaning")
+                .setDesc(
+                    "Hide palette colours that have no meaning assigned below, so the toolbar shows only the ones you actually use. Turn this off to show all of them."
+                )
+                .addToggle((toggle) =>
+                    toggle.setValue(this.plugin.settings.showOnlyAssignedColors).onChange(async (value) => {
+                        this.plugin.settings.showOnlyAssignedColors = value;
+                        await this.plugin.saveSettings();
+                    })
+                );
+
+            this.sectionHeading("Semantic colour meanings", "h4");
             this.plugin.settings.semanticColors.forEach((item, index) => {
                 const setting = new Setting(containerEl).setName(`Color ${index + 1}`);
-                const colorPreview = activeDocument.createElement("div");
-                colorPreview.setCssStyles({
-                    width: "24px",
-                    height: "24px",
-                    borderRadius: "4px",
-                    backgroundColor: item.color,
-                    marginRight: "10px",
-                });
-                setting.controlEl.appendChild(colorPreview);
+                const colorPreview = setting.controlEl.createDiv({ cls: "rht-color-swatch" });
+                colorPreview.setCssStyles({ backgroundColor: item.color });
                 setting.addText((text) =>
                     text
                         .setPlaceholder("Meaning (e.g. Disagree)")

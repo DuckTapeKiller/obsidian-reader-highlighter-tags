@@ -267,6 +267,27 @@ export class SelectionLogic {
         }
 
         if (candidates.length === 0) {
+            // Reading view renders a footnote reference as a superscript number,
+            // so a selection reads `Rebelión1` where the source says
+            // `Rebelión[^a]` — an extra character the matcher cannot skip,
+            // because every strategy skips tokens in the *source*, never in the
+            // snippet. Retry once without those markers. This only runs after a
+            // failure, so it can add matches but never change an existing one.
+            const withoutMarkers = snippet.replace(/(?<=[\p{L}\p{N}.,;:!?"'”’)\]])\d{1,3}(?=$|[\s\p{P}])/gu, "");
+            if (withoutMarkers !== snippet && withoutMarkers.trim()) {
+                for (const strategy of [
+                    this.findHybridCandidates,
+                    this.findAllCandidates,
+                    this.findCandidatesStripped,
+                ]) {
+                    candidates = strategy.call(this, bodyContent, withoutMarkers, 0);
+                    if (candidates.length > 0) break;
+                }
+                diagnostics.strategies.footnoteMarkerRetry = { tried: true, found: candidates.length };
+            }
+        }
+
+        if (candidates.length === 0) {
             // Classification & failure recording (Bug 1: return null)
             this.lastFailureReport = this.classifyFailure(selectionSnippet, snippet, bodyContent, diagnostics);
             this.logSelectionDiagnostics(selectionSnippet, snippet, bodyContent, selectionBlocks, diagnostics);
@@ -869,14 +890,20 @@ export class SelectionLogic {
                 // after every image would collapse onto the one clean copy.
                 // Treat any block *containing* the rendered context as an equal
                 // match, so the repeats are all seen and can be indexed.
-                const containing = scored
-                    .filter((group) => group.text === cleanContext || group.text.includes(cleanContext))
-                    .sort((a, b) => a.start - b.start);
+                const byStart = (a: { start: number }, b: { start: number }) => a.start - b.start;
+                // A block whose text *is* the context beats one that merely
+                // contains it. Without that preference a one-character table
+                // cell like `2` matches every cell holding a 2 — `£8.25`,
+                // `£12.75` — and the alias of `[[Note|Benkos]]` matches any
+                // other cell with "Benkos" in it.
+                const exact = scored.filter((group) => group.text === cleanContext).sort(byStart);
+                const containing = scored.filter((group) => group.text.includes(cleanContext)).sort(byStart);
                 const best = scored[0];
-                let identical =
-                    containing.length > 0
-                        ? containing
-                        : scored.filter((group) => group.text === best.text).sort((a, b) => a.start - b.start);
+                let identical = exact.length
+                    ? exact
+                    : containing.length
+                      ? containing
+                      : scored.filter((group) => group.text === best.text).sort(byStart);
 
                 // `occurrenceIndex` counts DOM elements sharing one tag, so only
                 // blocks rendering as that same kind belong in the sequence it

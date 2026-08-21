@@ -15,10 +15,7 @@ function getWindow() {
     return sharedWindow;
 }
 
-function appendBlock(doc, container, tag, spec) {
-    const el = doc.createElement(tag);
-    const chars = [];
-
+function buildInto(doc, el, spec, chars) {
     const build = (nodes, parent) => {
         for (const node of nodes) {
             if (node.t === "text") {
@@ -49,8 +46,70 @@ function appendBlock(doc, container, tag, spec) {
     };
 
     build(spec, el);
+}
+
+function appendBlock(doc, container, tag, spec) {
+    const el = doc.createElement(tag);
+    const chars = [];
+    buildInto(doc, el, spec, chars);
     container.appendChild(el);
     return { el, chars };
+}
+
+/**
+ * Build a real <table> for a table block and register every cell as its own
+ * selectable entry. Reading view renders each cell as a <td>/<th>, and those
+ * are the elements the plugin treats as selection blocks.
+ */
+function appendTable(doc, container, raw, block, rendered) {
+    const table = doc.createElement("table");
+    const thead = doc.createElement("thead");
+    const tbody = doc.createElement("tbody");
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    const info = { el: table, rows: [], cells: [] };
+    let bodyRow = 0;
+
+    block.rows.forEach((row, rowIndex) => {
+        if (row.delimiter) return;
+        const isHeader = rowIndex === 0;
+        const tr = doc.createElement("tr");
+        (isHeader ? thead : tbody).appendChild(tr);
+        const rowInfo = { el: tr, isHeader, index: isHeader ? 0 : bodyRow++, cells: [] };
+
+        row.cells.forEach((cell, colIndex) => {
+            const source = raw.substring(cell.start, cell.end);
+            const td = doc.createElement(isHeader ? "th" : "td");
+            tr.appendChild(td);
+
+            const chars = [];
+            const spec = renderInline(source, cell.start);
+            buildInto(doc, td, spec, chars);
+            const norm = normalizeChars(chars);
+            const entry = {
+                block,
+                el: td,
+                chars,
+                norm,
+                text: textOf(norm),
+                unsupported: isUnsupported(source),
+                source,
+                cell,
+                rowIndex,
+                colIndex,
+                isHeader,
+                table: info,
+            };
+            rendered.push(entry);
+            rowInfo.cells.push(entry);
+            info.cells.push(entry);
+        });
+        info.rows.push(rowInfo);
+    });
+
+    return info;
 }
 
 /** Collapse whitespace the way the plugin's context text does. */
@@ -78,7 +137,12 @@ export async function buildNote(raw, path = "note.md") {
     const container = doc.getElementById("content");
 
     const rendered = [];
+    const tables = [];
     for (const block of splitBlocks(raw, bodyStartOf(raw))) {
+        if (block.tag === "table") {
+            tables.push(appendTable(doc, container, raw, block, rendered));
+            continue;
+        }
         const source = raw.substring(block.contentStart, block.contentEnd);
         if (!source.trim()) continue;
         const { el, chars } = appendBlock(doc, container, block.tag, renderInline(source, block.contentStart));
@@ -134,6 +198,7 @@ export async function buildNote(raw, path = "note.md") {
         file,
         rendered,
         raw,
+        tables,
         getCurrent: () => current,
         reset: () => {
             current = raw;

@@ -1182,6 +1182,30 @@ var FOOTNOTE_DEF_RE = /^\s{0,3}\[\^[^\]]+\]:/;
 var TABLE_ROW_RE = /^\s*\|/;
 var FENCE_RE = /^\s{0,3}(?:```|~~~)/;
 var THEMATIC_BREAK_RE = /^\s{0,3}(?:\*\s*\*\s*\*|-\s*-\s*-|_\s*_\s*_)[\s*\-_]*$/;
+function tableCellRanges(line, lineStart) {
+  const cells = [];
+  let cursor = 0;
+  const push = (from, to) => {
+    let start = from;
+    let end = to;
+    while (start < end && /\s/.test(line[start])) start++;
+    while (end > start && /\s/.test(line[end - 1])) end--;
+    if (end > start) cells.push({ start: lineStart + start, end: lineStart + end, kind: "table" });
+  };
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (line[i] === "|") {
+      push(cursor, i);
+      cursor = i + 1;
+    }
+  }
+  push(cursor, line.length);
+  return cells;
+}
+var TABLE_DELIMITER_RE = /^\s*\|?(\s*:?-+:?\s*\|)+\s*:?-*:?\s*\|?\s*$/;
 function ownBlockKind(line) {
   if (HEADING_RE.test(line)) return "heading";
   if (LIST_ITEM_RE.test(line)) return "list";
@@ -1225,6 +1249,13 @@ function splitSourceBlocks(text, offset = 0) {
       blockKind = "code";
     } else if (!line.trim()) {
       flush();
+    } else if (TABLE_ROW_RE.test(line)) {
+      flush();
+      if (!TABLE_DELIMITER_RE.test(line)) {
+        for (const cell of tableCellRanges(line, lineStart)) {
+          blocks.push({ start: cell.start + offset, end: cell.end + offset, kind: "table" });
+        }
+      }
     } else if (ownBlockKind(line)) {
       flush();
       blockStart = lineStart;
@@ -1373,6 +1404,20 @@ var SelectionLogic = class {
     if (candidates.length === 0) {
       candidates = this.findProximityCandidates(bodyContent, snippet, 0);
       diagnostics.strategies.proximityMatch = { tried: true, found: candidates.length };
+    }
+    if (candidates.length === 0) {
+      const withoutMarkers = snippet.replace(/(?<=[\p{L}\p{N}.,;:!?"'”’)\]])\d{1,3}(?=$|[\s\p{P}])/gu, "");
+      if (withoutMarkers !== snippet && withoutMarkers.trim()) {
+        for (const strategy of [
+          this.findHybridCandidates,
+          this.findAllCandidates,
+          this.findCandidatesStripped
+        ]) {
+          candidates = strategy.call(this, bodyContent, withoutMarkers, 0);
+          if (candidates.length > 0) break;
+        }
+        diagnostics.strategies.footnoteMarkerRetry = { tried: true, found: candidates.length };
+      }
     }
     if (candidates.length === 0) {
       this.lastFailureReport = this.classifyFailure(selectionSnippet, snippet, bodyContent, diagnostics);
@@ -1824,9 +1869,11 @@ var SelectionLogic = class {
       }
       const scored = [...groups.values()].map((group) => ({ ...group, score: this.calculateSimilarity(group.text, cleanContext) })).sort((a, b) => b.score - a.score || a.start - b.start);
       if (scored.length > 0) {
-        const containing = scored.filter((group) => group.text === cleanContext || group.text.includes(cleanContext)).sort((a, b) => a.start - b.start);
+        const byStart = (a, b) => a.start - b.start;
+        const exact = scored.filter((group) => group.text === cleanContext).sort(byStart);
+        const containing = scored.filter((group) => group.text.includes(cleanContext)).sort(byStart);
         const best = scored[0];
-        let identical = containing.length > 0 ? containing : scored.filter((group) => group.text === best.text).sort((a, b) => a.start - b.start);
+        let identical = exact.length ? exact : containing.length ? containing : scored.filter((group) => group.text === best.text).sort(byStart);
         if (contextKind && identical.length > 1) {
           const sameKind = identical.filter((group) => group.kind === contextKind);
           if (sameKind.length > 0) identical = sameKind;
@@ -5385,6 +5432,71 @@ ${appendString}`;
     }
     return this.needsYamlQuotes(normalized) ? `"${normalized.replace(/"/g, '\\"')}"` : normalized;
   }
+  /** The full line of `raw` containing `offset`. */
+  lineContaining(raw, offset) {
+    return raw.substring(this.getLineStart(raw, offset), this.getLineEnd(raw, offset));
+  }
+  /**
+   * Cell ranges of a table row, split on unescaped pipes only.
+   *
+   * `\|` is an escaped pipe: it is content, not a column boundary. Splitting
+   * on it tears wiki links (`[[Note\|Alias]]`) and code spans (`` `a \| b` ``)
+   * in half and writes a marker into the middle of them.
+   */
+  splitTableCells(line) {
+    const cells = [];
+    let cursor = 0;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === "\\") {
+        i++;
+        continue;
+      }
+      if (line[i] === "|") {
+        cells.push({ start: cursor, end: i });
+        cursor = i + 1;
+      }
+    }
+    cells.push({ start: cursor, end: line.length });
+    return cells;
+  }
+  /**
+   * Rewrite one table row, wrapping only the cells the selection covers.
+   *
+   * Highlighting a row cannot be done by wrapping the selected span: a `==`
+   * pair spanning a `|` swallows the column boundary and the table stops
+   * rendering as a table. Each covered cell gets its own pair instead.
+   */
+  applyToTableRow(line, lineStart, selectionStart, selectionEnd, mode, payload) {
+    const cells = this.splitTableCells(line);
+    const pieces = [];
+    cells.forEach((cell, index) => {
+      var _a, _b, _c, _d;
+      const text = line.substring(cell.start, cell.end);
+      const stripped = text.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "").split("==").join("");
+      const trimmed = stripped.trim();
+      const isEdge = index === 0 || index === cells.length - 1;
+      let contentStart = cell.start;
+      let contentEnd = cell.end;
+      while (contentStart < contentEnd && /\s/.test(line[contentStart])) contentStart++;
+      while (contentEnd > contentStart && /\s/.test(line[contentEnd - 1])) contentEnd--;
+      const covered = lineStart + contentEnd > selectionStart && lineStart + contentStart < selectionEnd;
+      if (isEdge || !trimmed || !covered || mode === "remove") {
+        pieces.push(mode === "remove" ? stripped : covered && !isEdge ? stripped : text);
+        return;
+      }
+      const leadWS = (_b = (_a = stripped.match(/^(\s*)/)) == null ? void 0 : _a[1]) != null ? _b : "";
+      const trailWS = (_d = (_c = stripped.match(/(\s*)$/)) == null ? void 0 : _c[1]) != null ? _d : "";
+      let wrapped;
+      if (mode === "color" || this.settings.enableColorHighlighting && this.settings.highlightColor) {
+        const color = mode === "color" ? payload : this.settings.highlightColor;
+        wrapped = `<mark style="background: ${color}; color: black;">${trimmed}</mark>`;
+      } else {
+        wrapped = `==${trimmed}==`;
+      }
+      pieces.push(`${leadWS}${wrapped}${trailWS}`);
+    });
+    return pieces.join("|");
+  }
   isTableAlignmentRow(line) {
     return /^\s*\|(\s*:?-+:?\s*\|)+\s*$/.test(line);
   }
@@ -5441,9 +5553,21 @@ ${appendString}`;
       expandedStart = this.getLineStart(raw, expandedStart);
       expandedEnd = this.getLineEnd(raw, expandedEnd);
     }
+    const selectionStart = expandedStart;
+    const selectionEnd = expandedEnd;
+    if (this.isTableDataRow(this.lineContaining(raw, expandedStart)) || this.isTableDataRow(this.lineContaining(raw, expandedEnd))) {
+      expandedStart = this.getLineStart(raw, expandedStart);
+      expandedEnd = this.getLineEnd(raw, expandedEnd);
+    }
     const selectedText = raw.substring(expandedStart, expandedEnd);
     const newline = raw.includes("\r\n") ? "\r\n" : "\n";
     const lines = selectedText.split(/\r?\n/);
+    const lineOffsets = [];
+    let runningOffset = expandedStart;
+    for (const line of lines) {
+      lineOffsets.push(runningOffset);
+      runningOffset += line.length + newline.length;
+    }
     let fullTag = "";
     const sanitizeTag = (t) => t.trim().replace(/^#/, "").replace(/\s+/g, "_");
     if (mode === "tag" && payload) {
@@ -5464,35 +5588,12 @@ ${appendString}`;
       const cleanAutoTag = sanitizeTag(autoTag);
       fullTag = fullTag ? `${fullTag} #${cleanAutoTag}` : `#${cleanAutoTag}`;
     }
-    const processedLines = lines.map((line) => {
+    const processedLines = lines.map((line, lineIndex) => {
       var _a, _b;
       let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
       if (this.isTableAlignmentRow(line)) return line;
       if (this.isTableDataRow(line)) {
-        cleanLine = cleanLine.split("==").join("");
-        if (mode === "remove") return cleanLine;
-        const parts = cleanLine.split("|");
-        const wrappedParts = parts.map((cell, idx) => {
-          if (idx === 0 || idx === parts.length - 1) return cell;
-          const trimmedCell = cell.trim();
-          if (!trimmedCell) return cell;
-          const leadWS2 = cell.match(/^(\s*)/)[1];
-          const trailWS2 = cell.match(/(\s*)$/)[1];
-          let wrapped;
-          if (mode === "highlight" || mode === "tag") {
-            if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-              wrapped = `<mark style="background: ${this.settings.highlightColor}; color: black;">${trimmedCell}</mark>`;
-            } else {
-              wrapped = `==${trimmedCell}==`;
-            }
-          } else if (mode === "color") {
-            wrapped = `<mark style="background: ${payload}; color: black;">${trimmedCell}</mark>`;
-          } else {
-            wrapped = trimmedCell;
-          }
-          return `${leadWS2}${wrapped}${trailWS2}`;
-        });
-        return wrappedParts.join("|");
+        return this.applyToTableRow(line, lineOffsets[lineIndex], selectionStart, selectionEnd, mode, payload);
       }
       if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
         cleanLine = cleanLine.split("==").join("");

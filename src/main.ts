@@ -1404,6 +1404,94 @@ export default class ReadingHighlighterPlugin extends Plugin {
         return this.needsYamlQuotes(normalized) ? `"${normalized.replace(/"/g, '\\"')}"` : normalized;
     }
 
+    /** The full line of `raw` containing `offset`. */
+    lineContaining(raw: string, offset: number): string {
+        return raw.substring(this.getLineStart(raw, offset), this.getLineEnd(raw, offset));
+    }
+
+    /**
+     * Cell ranges of a table row, split on unescaped pipes only.
+     *
+     * `\|` is an escaped pipe: it is content, not a column boundary. Splitting
+     * on it tears wiki links (`[[Note\|Alias]]`) and code spans (`` `a \| b` ``)
+     * in half and writes a marker into the middle of them.
+     */
+    splitTableCells(line: string): { start: number; end: number }[] {
+        const cells: { start: number; end: number }[] = [];
+        let cursor = 0;
+        for (let i = 0; i < line.length; i++) {
+            if (line[i] === "\\") {
+                i++;
+                continue;
+            }
+            if (line[i] === "|") {
+                cells.push({ start: cursor, end: i });
+                cursor = i + 1;
+            }
+        }
+        cells.push({ start: cursor, end: line.length });
+        return cells;
+    }
+
+    /**
+     * Rewrite one table row, wrapping only the cells the selection covers.
+     *
+     * Highlighting a row cannot be done by wrapping the selected span: a `==`
+     * pair spanning a `|` swallows the column boundary and the table stops
+     * rendering as a table. Each covered cell gets its own pair instead.
+     */
+    applyToTableRow(
+        line: string,
+        lineStart: number,
+        selectionStart: number,
+        selectionEnd: number,
+        mode: string,
+        payload: string
+    ): string {
+        const cells = this.splitTableCells(line);
+        const pieces: string[] = [];
+
+        cells.forEach((cell, index) => {
+            const text = line.substring(cell.start, cell.end);
+            const stripped = text
+                .replace(/<mark[^>]*>/g, "")
+                .replace(/<\/mark>/g, "")
+                .split("==")
+                .join("");
+            const trimmed = stripped.trim();
+
+            // The fragments outside the outer pipes are not cells.
+            const isEdge = index === 0 || index === cells.length - 1;
+            // Coverage is measured against the cell's *content*, not its padding.
+            // A match can run a little past a cell boundary — the flexible
+            // matcher treats spaces and `|` as skippable — and counting the
+            // padding would drag the neighbouring cell in with it.
+            let contentStart = cell.start;
+            let contentEnd = cell.end;
+            while (contentStart < contentEnd && /\s/.test(line[contentStart])) contentStart++;
+            while (contentEnd > contentStart && /\s/.test(line[contentEnd - 1])) contentEnd--;
+            const covered = lineStart + contentEnd > selectionStart && lineStart + contentStart < selectionEnd;
+
+            if (isEdge || !trimmed || !covered || mode === "remove") {
+                pieces.push(mode === "remove" ? stripped : covered && !isEdge ? stripped : text);
+                return;
+            }
+
+            const leadWS = stripped.match(/^(\s*)/)?.[1] ?? "";
+            const trailWS = stripped.match(/(\s*)$/)?.[1] ?? "";
+            let wrapped: string;
+            if (mode === "color" || (this.settings.enableColorHighlighting && this.settings.highlightColor)) {
+                const color = mode === "color" ? payload : this.settings.highlightColor;
+                wrapped = `<mark style="background: ${color}; color: black;">${trimmed}</mark>`;
+            } else {
+                wrapped = `==${trimmed}==`;
+            }
+            pieces.push(`${leadWS}${wrapped}${trailWS}`);
+        });
+
+        return pieces.join("|");
+    }
+
     isTableAlignmentRow(line: string) {
         return /^\s*\|(\s*:?-+:?\s*\|)+\s*$/.test(line);
     }
@@ -1481,9 +1569,30 @@ export default class ReadingHighlighterPlugin extends Plugin {
             expandedStart = this.getLineStart(raw, expandedStart);
             expandedEnd = this.getLineEnd(raw, expandedEnd);
         }
+        // A table row must be rewritten as whole cells, so the range is widened
+        // to full lines — but the caller's own range is kept, because only the
+        // cells it actually covers should be highlighted.
+        const selectionStart = expandedStart;
+        const selectionEnd = expandedEnd;
+        if (
+            this.isTableDataRow(this.lineContaining(raw, expandedStart)) ||
+            this.isTableDataRow(this.lineContaining(raw, expandedEnd))
+        ) {
+            expandedStart = this.getLineStart(raw, expandedStart);
+            expandedEnd = this.getLineEnd(raw, expandedEnd);
+        }
+
         const selectedText = raw.substring(expandedStart, expandedEnd);
         const newline = raw.includes("\r\n") ? "\r\n" : "\n";
         const lines = selectedText.split(/\r?\n/);
+        // Absolute offset of each line, so a table row can work out which of its
+        // cells the selection covers.
+        const lineOffsets: number[] = [];
+        let runningOffset = expandedStart;
+        for (const line of lines) {
+            lineOffsets.push(runningOffset);
+            runningOffset += line.length + newline.length;
+        }
         let fullTag = "";
         const sanitizeTag = (t: string) => t.trim().replace(/^#/, "").replace(/\s+/g, "_");
         if (mode === "tag" && payload) {
@@ -1509,34 +1618,11 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const cleanAutoTag = sanitizeTag(autoTag);
             fullTag = fullTag ? `${fullTag} #${cleanAutoTag}` : `#${cleanAutoTag}`;
         }
-        const processedLines = lines.map((line) => {
+        const processedLines = lines.map((line, lineIndex) => {
             let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
             if (this.isTableAlignmentRow(line)) return line;
             if (this.isTableDataRow(line)) {
-                cleanLine = cleanLine.split("==").join("");
-                if (mode === "remove") return cleanLine;
-                const parts = cleanLine.split("|");
-                const wrappedParts = parts.map((cell, idx) => {
-                    if (idx === 0 || idx === parts.length - 1) return cell;
-                    const trimmedCell = cell.trim();
-                    if (!trimmedCell) return cell;
-                    const leadWS = cell.match(/^(\s*)/)[1];
-                    const trailWS = cell.match(/(\s*)$/)[1];
-                    let wrapped: string;
-                    if (mode === "highlight" || mode === "tag") {
-                        if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-                            wrapped = `<mark style="background: ${this.settings.highlightColor}; color: black;">${trimmedCell}</mark>`;
-                        } else {
-                            wrapped = `==${trimmedCell}==`;
-                        }
-                    } else if (mode === "color") {
-                        wrapped = `<mark style="background: ${payload}; color: black;">${trimmedCell}</mark>`;
-                    } else {
-                        wrapped = trimmedCell;
-                    }
-                    return `${leadWS}${wrapped}${trailWS}`;
-                });
-                return wrappedParts.join("|");
+                return this.applyToTableRow(line, lineOffsets[lineIndex], selectionStart, selectionEnd, mode, payload);
             }
             if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
                 cleanLine = cleanLine.split("==").join("");

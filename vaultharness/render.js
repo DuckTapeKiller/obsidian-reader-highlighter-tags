@@ -14,6 +14,48 @@ const TABLE_ROW_RE = /^\s*\|/;
 const QUOTE_RE = /^\s{0,3}>/;
 const THEMATIC_BREAK_RE = /^\s{0,3}(?:\*\s*\*\s*\*|-\s*-\s*-|_\s*_\s*_)[\s*\-_]*$/;
 
+const DELIMITER_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+
+/** Split a table row on unescaped pipes, keeping each cell's source offsets. */
+export function parseTableRow(raw, lineStart, line) {
+    const cells = [];
+    let i = 0;
+    // Skip the leading pipe and any indent.
+    while (i < line.length && /\s/.test(line[i])) i++;
+    if (line[i] === "|") i++;
+
+    let cellStart = i;
+    const push = (end) => {
+        let s = cellStart;
+        let e = end;
+        while (s < e && /\s/.test(line[s])) s++;
+        while (e > s && /\s/.test(line[e - 1])) e--;
+        cells.push({ start: lineStart + s, end: lineStart + e });
+    };
+    for (; i < line.length; i++) {
+        if (line[i] === "\\") {
+            i++;
+            continue;
+        }
+        if (line[i] === "|") {
+            push(i);
+            cellStart = i + 1;
+        }
+    }
+    // Trailing content after the last pipe, if the row has no closing pipe.
+    if (cellStart < line.length && line.slice(cellStart).trim()) push(line.length);
+    return cells;
+}
+
+/** True when `line` is a table row (not the delimiter). */
+export function isTableRow(line) {
+    return /^\s{0,3}\|/.test(line) && !DELIMITER_RE.test(line);
+}
+
+export function isDelimiterRow(line) {
+    return line.includes("|") && DELIMITER_RE.test(line);
+}
+
 /** Offset of the body, after YAML frontmatter — the plugin's own rule. */
 export function bodyStartOf(raw) {
     if (!raw.startsWith("---")) return 0;
@@ -54,7 +96,22 @@ export function splitBlocks(raw, bodyStart) {
         } else if (!line.trim()) {
             flush();
         } else if (TABLE_ROW_RE.test(line) || THEMATIC_BREAK_RE.test(line)) {
-            flush();
+            if (TABLE_ROW_RE.test(line)) {
+                if (!current || current.tag !== "table") {
+                    flush();
+                    current = { tag: "table", start: i, contentStart: i, contentEnd, end: contentEnd, rows: [] };
+                }
+                current.contentEnd = contentEnd;
+                current.end = contentEnd;
+                current.rows.push({
+                    start: i,
+                    end: contentEnd,
+                    delimiter: isDelimiterRow(line),
+                    cells: isDelimiterRow(line) ? [] : parseTableRow(raw, i, line),
+                });
+            } else {
+                flush();
+            }
         } else if (QUOTE_RE.test(line)) {
             const marker = line.match(/^\s{0,3}>[ \t]?/)[0];
             if (current && current.tag === "blockquote") {

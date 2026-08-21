@@ -36,6 +36,36 @@ const TABLE_ROW_RE = /^\s*\|/;
 const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
 const THEMATIC_BREAK_RE = /^\s{0,3}(?:\*\s*\*\s*\*|-\s*-\s*-|_\s*_\s*_)[\s*\-_]*$/;
 
+/**
+ * Cell ranges within a table row, split on unescaped pipes. `\|` is content —
+ * an escaped pipe inside a wiki link or code span — not a column boundary.
+ */
+function tableCellRanges(line: string, lineStart: number): SourceBlock[] {
+    const cells: SourceBlock[] = [];
+    let cursor = 0;
+    const push = (from: number, to: number): void => {
+        let start = from;
+        let end = to;
+        while (start < end && /\s/.test(line[start])) start++;
+        while (end > start && /\s/.test(line[end - 1])) end--;
+        if (end > start) cells.push({ start: lineStart + start, end: lineStart + end, kind: "table" });
+    };
+    for (let i = 0; i < line.length; i++) {
+        if (line[i] === "\\") {
+            i++;
+            continue;
+        }
+        if (line[i] === "|") {
+            push(cursor, i);
+            cursor = i + 1;
+        }
+    }
+    push(cursor, line.length);
+    return cells;
+}
+
+const TABLE_DELIMITER_RE = /^\s*\|?(\s*:?-+:?\s*\|)+\s*:?-*:?\s*\|?\s*$/;
+
 /** The kind a line starts, or null when it continues the current block. */
 function ownBlockKind(line: string): BlockKind | null {
     if (HEADING_RE.test(line)) return "heading";
@@ -94,6 +124,18 @@ export function splitSourceBlocks(text: string, offset = 0): SourceBlock[] {
         } else if (!line.trim()) {
             // Blank line: hard block boundary.
             flush();
+        } else if (TABLE_ROW_RE.test(line)) {
+            // Reading view renders every table cell as its own <td>/<th>, and
+            // those are the elements a selection is anchored to. Treating the
+            // whole row as one block would compare a one-word cell against the
+            // entire row, so each cell becomes its own block. The delimiter row
+            // renders as nothing at all.
+            flush();
+            if (!TABLE_DELIMITER_RE.test(line)) {
+                for (const cell of tableCellRanges(line, lineStart)) {
+                    blocks.push({ start: cell.start + offset, end: cell.end + offset, kind: "table" });
+                }
+            }
         } else if (ownBlockKind(line)) {
             flush();
             blockStart = lineStart;

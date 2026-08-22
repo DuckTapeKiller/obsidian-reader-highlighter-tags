@@ -44,7 +44,7 @@ export function polyfillInnerText(window) {
  * harness must provide them to exercise that code at all.
  */
 export function polyfillObsidianDom(window) {
-    const { Element, HTMLElement } = window;
+    const { Element, HTMLElement, DocumentFragment } = window;
     if (Element.prototype.addClass) return;
     Element.prototype.addClass = function (...cls) {
         this.classList.add(...cls.filter(Boolean));
@@ -92,6 +92,14 @@ export function polyfillObsidianDom(window) {
     Element.prototype.createSpan = function (opts) {
         return createEl.call(this, "span", opts);
     };
+    // Obsidian puts these on Node, so a fragment has them as well.
+    DocumentFragment.prototype.createEl = createEl;
+    DocumentFragment.prototype.createDiv = function (opts) {
+        return createEl.call(this, "div", opts);
+    };
+    DocumentFragment.prototype.createSpan = function (opts) {
+        return createEl.call(this, "span", opts);
+    };
 }
 
 /**
@@ -122,5 +130,14 @@ export function createObsidianWindow(html = "<!doctype html><html><body><div id=
     globalThis.Node = window.Node;
     globalThis.NodeFilter = window.NodeFilter;
     globalThis.Range = window.Range;
+    // Obsidian exposes its element helpers as globals too, not only on Node.
+    globalThis.createEl = (tag, opts) => window.document.body.createEl(tag, opts);
+    globalThis.createDiv = (opts) => window.document.body.createDiv(opts);
+    globalThis.createSpan = (opts) => window.document.body.createSpan(opts);
+    globalThis.createFragment = (cb) => {
+        const frag = window.document.createDocumentFragment();
+        if (cb) cb(frag);
+        return frag;
+    };
     return window;
 }

@@ -273,14 +273,17 @@ export class SelectionLogic {
             // because every strategy skips tokens in the *source*, never in the
             // snippet. Retry once without those markers. This only runs after a
             // failure, so it can add matches but never change an existing one.
-            const withoutMarkers = snippet.replace(/(?<=[\p{L}\p{N}.,;:!?"'”’)\]])\d{1,3}(?=$|[\s\p{P}])/gu, "");
+            // Written with a capture group rather than a lookbehind: lookbehind
+            // is unsupported on iOS before 16.4, and Obsidian runs there.
+            const withoutMarkers = snippet.replace(/([\p{L}\p{N}.,;:!?"'”’)\]])\d{1,3}(?=$|[\s\p{P}])/gu, "$1");
             if (withoutMarkers !== snippet && withoutMarkers.trim()) {
-                for (const strategy of [
-                    this.findHybridCandidates,
-                    this.findAllCandidates,
-                    this.findCandidatesStripped,
-                ]) {
-                    candidates = strategy.call(this, bodyContent, withoutMarkers, 0);
+                const retries: ((text: string, snip: string) => Candidate[])[] = [
+                    (text, snip) => this.findHybridCandidates(text, snip, 0),
+                    (text, snip) => this.findAllCandidates(text, snip, 0),
+                    (text, snip) => this.findCandidatesStripped(text, snip, 0),
+                ];
+                for (const retry of retries) {
+                    candidates = retry(bodyContent, withoutMarkers);
                     if (candidates.length > 0) break;
                 }
                 diagnostics.strategies.footnoteMarkerRetry = { tried: true, found: candidates.length };
@@ -290,7 +293,6 @@ export class SelectionLogic {
         if (candidates.length === 0) {
             // Classification & failure recording (Bug 1: return null)
             this.lastFailureReport = this.classifyFailure(selectionSnippet, snippet, bodyContent, diagnostics);
-            this.logSelectionDiagnostics(selectionSnippet, snippet, bodyContent, selectionBlocks, diagnostics);
             return null;
         }
 
@@ -314,68 +316,6 @@ export class SelectionLogic {
         }
 
         return this.mapVirtualToPhysical(result.start, result.end, virtual.segments);
-    }
-
-    // R1: Diagnostic logging for failed selection matching
-    logSelectionDiagnostics(
-        rawSnippet: string,
-        cleanedSnippet: string,
-        bodyContent: string,
-        selectionBlocks: string[],
-        diagnostics: Diagnostics
-    ) {
-        const truncate = (str: string, len = 120): string => (str.length > len ? str.substring(0, len) + "…" : str);
-        const hasSupplementary = (str: string) => [...str].some((ch) => ch.length > 1);
-
-        console.group("%c[Highlighter] Selection Match Failed", "color: #e74c3c; font-weight: bold");
-
-        console.log("📋 Raw snippet:", truncate(rawSnippet, 200));
-        console.log("🧹 Cleaned snippet:", truncate(cleanedSnippet, 200));
-        console.log("📐 Snippet length:", cleanedSnippet.length, "chars,", [...cleanedSnippet].length, "code points");
-        console.log("🔤 Contains supplementary-plane chars:", hasSupplementary(cleanedSnippet));
-        console.log("📄 Selection blocks:", selectionBlocks.length);
-
-        console.log("\n🔍 Strategy Results:");
-        for (const [name, result] of Object.entries(diagnostics.strategies)) {
-            if (result.tried) {
-                console.log(`  ${(result.found ?? 0) > 0 ? "✅" : "❌"} ${name}: ${result.found} candidates`);
-            } else {
-                console.log(`  ⏭️ ${name}: skipped (${result.reason})`);
-            }
-        }
-
-        // Show what the flexible pattern looks like for the first 80 chars
-        try {
-            const sampleSnippet = cleanedSnippet.substring(0, 80);
-            const samplePattern = this.createFlexiblePattern(sampleSnippet);
-            if (samplePattern) {
-                console.log("\n🔧 Sample regex (first 80 chars):", truncate(samplePattern, 300));
-                try {
-                    const testRegex = new RegExp(samplePattern, "gmu");
-                    const testMatch = testRegex.exec(bodyContent);
-                    console.log("  Test match:", testMatch ? `✅ at offset ${testMatch.index}` : "❌ no match");
-                } catch (e) {
-                    console.log("  Test match: ⚠️ regex error:", e instanceof Error ? e.message : String(e));
-                }
-            }
-        } catch (e) {
-            console.log("  Pattern build error:", e instanceof Error ? e.message : String(e));
-        }
-
-        // Show nearby source context
-        const normalizedSnippet = this.normalizeComparableText(cleanedSnippet);
-        const firstWord = normalizedSnippet.split(/\s+/)[0];
-        if (firstWord && firstWord.length > 2) {
-            const idx = bodyContent.indexOf(firstWord);
-            if (idx !== -1) {
-                console.log("\n📍 First word '" + firstWord + "' found at offset", idx);
-                console.log("  Source context:", truncate(bodyContent.substring(idx, idx + 200), 200));
-            } else {
-                console.log("\n📍 First word '" + firstWord + "' NOT found in body content");
-            }
-        }
-
-        console.groupEnd();
     }
 
     async resolveVirtualContent(

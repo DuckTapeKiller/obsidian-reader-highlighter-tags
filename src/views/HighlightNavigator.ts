@@ -111,7 +111,7 @@ export class HighlightNavigatorView extends ItemView {
         const footer = container.createDiv({ cls: "highlight-navigator-footer" });
         const footerBtnGroup = footer.createDiv({ cls: "highlight-navigator-footer-buttons" });
 
-        const exportBtn = footerBtnGroup.createEl("button", { text: "Export MD", cls: "mod-cta" });
+        const exportBtn = footerBtnGroup.createEl("button", { text: "Export md", cls: "mod-cta" });
         exportBtn.onclick = () => void this.exportHighlights();
         exportBtn.oncontextmenu = (e) => {
             e.preventDefault();
@@ -122,7 +122,7 @@ export class HighlightNavigatorView extends ItemView {
         const canvasBtn = footerBtnGroup.createEl("button", { text: "Canvas", cls: "mod-cta" });
         canvasBtn.onclick = () => void this.exportCurrentFileToCanvas();
 
-        const scanBtn = footerBtnGroup.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
+        const scanBtn = footerBtnGroup.createEl("button", { text: "Scan vault", cls: "mod-cta" });
         scanBtn.onclick = () => void this.plugin.activateResearchView();
 
         const bulkBtn = footerBtnGroup.createEl("button", { text: "Bulk", cls: "mod-cta" });
@@ -673,7 +673,7 @@ export class HighlightNavigatorView extends ItemView {
 
         const menu = new Menu();
         menu.addItem((mi: MenuItem) => {
-            mi.setTitle("Export MD")
+            mi.setTitle("Export md")
                 .setIcon("file-text")
                 .onClick(() => void this.exportHighlights());
         });
@@ -739,7 +739,7 @@ export class HighlightNavigatorView extends ItemView {
                 return;
             }
 
-            new Notice("Generating Canvas...");
+            new Notice("Generating canvas...");
             const exportPath = await exportHighlightsToCanvas(this.app, highlights);
 
             const file = this.app.vault.getAbstractFileByPath(exportPath);

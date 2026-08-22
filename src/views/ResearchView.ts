@@ -8,6 +8,18 @@ export const RESEARCH_VIEW = "reader-research-view";
 
 type ResearchHighlight = Highlight & { file: TFile; frontmatter: Record<string, unknown> };
 
+/**
+ * Stringify a value that may be anything. Objects have no useful string form —
+ * `String({})` is `"[object Object]"` — so they become empty rather than noise.
+ */
+function asText(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+        return String(value);
+    }
+    return "";
+}
+
 export class ResearchView extends ItemView {
     plugin: ReadingHighlighterPlugin;
     scanner: VaultScanner;
@@ -47,7 +59,7 @@ export class ResearchView extends ItemView {
     }
 
     getDisplayText() {
-        return "Global Research View";
+        return "Global research view";
     }
 
     getIcon() {
@@ -63,12 +75,12 @@ export class ResearchView extends ItemView {
         const header = container.createDiv({ cls: "research-view-header" });
 
         const titleRow = header.createDiv({ cls: "research-view-title-row" });
-        titleRow.createEl("h3", { text: "Research View" });
+        titleRow.createEl("h3", { text: "Research view" });
 
-        const scanBtn = titleRow.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
+        const scanBtn = titleRow.createEl("button", { text: "Scan vault", cls: "mod-cta" });
         scanBtn.onclick = () => void this.startScan();
 
-        const canvasBtn = titleRow.createEl("button", { text: "Export Canvas" });
+        const canvasBtn = titleRow.createEl("button", { text: "Export canvas" });
         canvasBtn.onclick = () => void this.exportToCanvas();
 
         // Search Bar & Date Filter
@@ -238,19 +250,19 @@ export class ResearchView extends ItemView {
             if (this.filterKey === "tags" || this.filterKey === "tag") {
                 if (Array.isArray(val)) {
                     return (val as unknown[]).some((t) =>
-                        String(t).toLowerCase().replace(/^#/, "").includes(filterVal)
+                        asText(t).toLowerCase().replace(/^#/, "").includes(filterVal)
                     );
                 }
-                return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
+                return asText(val).toLowerCase().replace(/^#/, "").includes(filterVal);
             }
 
             // Handle Arrays
             if (Array.isArray(val)) {
-                return (val as unknown[]).some((v) => String(v).toLowerCase().includes(filterVal));
+                return (val as unknown[]).some((v) => asText(v).toLowerCase().includes(filterVal));
             }
 
             // Default string match
-            return String(val).toLowerCase().includes(filterVal);
+            return asText(val).toLowerCase().includes(filterVal);
         });
     }
 
@@ -397,12 +409,12 @@ export class ResearchView extends ItemView {
         }
 
         if (allHighlights.length === 0) {
-            new Notice("No highlights to export to Canvas.");
+            new Notice("No highlights to export to canvas.");
             return;
         }
 
         try {
-            new Notice("Generating Canvas...");
+            new Notice("Generating canvas...");
             const exportPath = await exportHighlightsToCanvas(this.app, allHighlights);
             const file = this.app.vault.getAbstractFileByPath(exportPath);
             if (file instanceof TFile) {

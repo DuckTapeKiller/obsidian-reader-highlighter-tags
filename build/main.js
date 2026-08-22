@@ -520,8 +520,15 @@ __export(export_exports, {
 function detectNewline2(raw) {
   return raw.includes("\r\n") ? "\r\n" : "\n";
 }
+function asText2(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return "";
+}
 function csvEscape(value) {
-  const str = value == null ? "" : String(value);
+  const str = asText2(value);
   if (/[",\r\n]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -1241,6 +1248,7 @@ function ownBlockKind(line) {
   return null;
 }
 function splitSourceBlocks(text, offset = 0) {
+  var _a;
   const blocks = [];
   if (!text) return blocks;
   let lineStart = 0;
@@ -1286,7 +1294,7 @@ function splitSourceBlocks(text, offset = 0) {
       flush();
       blockStart = lineStart;
       blockEnd = contentEnd;
-      blockKind = ownBlockKind(line);
+      blockKind = (_a = ownBlockKind(line)) != null ? _a : "paragraph";
     } else if (blockStart === -1) {
       blockStart = lineStart;
       blockEnd = contentEnd;
@@ -1432,14 +1440,15 @@ var SelectionLogic = class {
       diagnostics.strategies.proximityMatch = { tried: true, found: candidates.length };
     }
     if (candidates.length === 0) {
-      const withoutMarkers = snippet.replace(/(?<=[\p{L}\p{N}.,;:!?"'”’)\]])\d{1,3}(?=$|[\s\p{P}])/gu, "");
+      const withoutMarkers = snippet.replace(/([\p{L}\p{N}.,;:!?"'”’)\]])\d{1,3}(?=$|[\s\p{P}])/gu, "$1");
       if (withoutMarkers !== snippet && withoutMarkers.trim()) {
-        for (const strategy of [
-          this.findHybridCandidates,
-          this.findAllCandidates,
-          this.findCandidatesStripped
-        ]) {
-          candidates = strategy.call(this, bodyContent, withoutMarkers, 0);
+        const retries = [
+          (text, snip) => this.findHybridCandidates(text, snip, 0),
+          (text, snip) => this.findAllCandidates(text, snip, 0),
+          (text, snip) => this.findCandidatesStripped(text, snip, 0)
+        ];
+        for (const retry of retries) {
+          candidates = retry(bodyContent, withoutMarkers);
           if (candidates.length > 0) break;
         }
         diagnostics.strategies.footnoteMarkerRetry = { tried: true, found: candidates.length };
@@ -1447,7 +1456,6 @@ var SelectionLogic = class {
     }
     if (candidates.length === 0) {
       this.lastFailureReport = this.classifyFailure(selectionSnippet, snippet, bodyContent, diagnostics);
-      this.logSelectionDiagnostics(selectionSnippet, snippet, bodyContent, selectionBlocks, diagnostics);
       return null;
     }
     candidates = this.offsetCandidates(candidates, firstSegmentBodyStart);
@@ -1466,54 +1474,6 @@ var SelectionLogic = class {
       return null;
     }
     return this.mapVirtualToPhysical(result.start, result.end, virtual.segments);
-  }
-  // R1: Diagnostic logging for failed selection matching
-  logSelectionDiagnostics(rawSnippet, cleanedSnippet, bodyContent, selectionBlocks, diagnostics) {
-    var _a;
-    const truncate = (str, len = 120) => str.length > len ? str.substring(0, len) + "\u2026" : str;
-    const hasSupplementary = (str) => [...str].some((ch) => ch.length > 1);
-    console.group("%c[Highlighter] Selection Match Failed", "color: #e74c3c; font-weight: bold");
-    console.log("\u{1F4CB} Raw snippet:", truncate(rawSnippet, 200));
-    console.log("\u{1F9F9} Cleaned snippet:", truncate(cleanedSnippet, 200));
-    console.log("\u{1F4D0} Snippet length:", cleanedSnippet.length, "chars,", [...cleanedSnippet].length, "code points");
-    console.log("\u{1F524} Contains supplementary-plane chars:", hasSupplementary(cleanedSnippet));
-    console.log("\u{1F4C4} Selection blocks:", selectionBlocks.length);
-    console.log("\n\u{1F50D} Strategy Results:");
-    for (const [name, result] of Object.entries(diagnostics.strategies)) {
-      if (result.tried) {
-        console.log(`  ${((_a = result.found) != null ? _a : 0) > 0 ? "\u2705" : "\u274C"} ${name}: ${result.found} candidates`);
-      } else {
-        console.log(`  \u23ED\uFE0F ${name}: skipped (${result.reason})`);
-      }
-    }
-    try {
-      const sampleSnippet = cleanedSnippet.substring(0, 80);
-      const samplePattern = this.createFlexiblePattern(sampleSnippet);
-      if (samplePattern) {
-        console.log("\n\u{1F527} Sample regex (first 80 chars):", truncate(samplePattern, 300));
-        try {
-          const testRegex = new RegExp(samplePattern, "gmu");
-          const testMatch = testRegex.exec(bodyContent);
-          console.log("  Test match:", testMatch ? `\u2705 at offset ${testMatch.index}` : "\u274C no match");
-        } catch (e) {
-          console.log("  Test match: \u26A0\uFE0F regex error:", e instanceof Error ? e.message : String(e));
-        }
-      }
-    } catch (e) {
-      console.log("  Pattern build error:", e instanceof Error ? e.message : String(e));
-    }
-    const normalizedSnippet = this.normalizeComparableText(cleanedSnippet);
-    const firstWord = normalizedSnippet.split(/\s+/)[0];
-    if (firstWord && firstWord.length > 2) {
-      const idx = bodyContent.indexOf(firstWord);
-      if (idx !== -1) {
-        console.log("\n\u{1F4CD} First word '" + firstWord + "' found at offset", idx);
-        console.log("  Source context:", truncate(bodyContent.substring(idx, idx + 200), 200));
-      } else {
-        console.log("\n\u{1F4CD} First word '" + firstWord + "' NOT found in body content");
-      }
-    }
-    console.groupEnd();
   }
   async resolveVirtualContent(file, depth = 0, opContext = { cache: /* @__PURE__ */ new Map(), visited: /* @__PURE__ */ new Set() }, fragment = null) {
     if (depth > 5) {
@@ -2669,6 +2629,13 @@ var SelectionLogic = class {
 
 // src/modals/TagSuggestModal.ts
 var import_obsidian2 = require("obsidian");
+function asText(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return "";
+}
 var TagSuggestModal = class extends import_obsidian2.Modal {
   constructor(plugin, onChoose) {
     super(plugin.app);
@@ -2686,12 +2653,12 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
     const { contentEl, modalEl } = this;
     contentEl.addClass("reading-highlighter-tag-modal");
     modalEl.addClass("reading-highlighter-tag-modal");
-    contentEl.createEl("h2", { text: "Add Tags" });
+    contentEl.createEl("h2", { text: "Add tags" });
     if (this.plugin.settings.enableSmartTagSuggestions) {
       const smartTags = this.getSuggestedTags();
       if (smartTags.length > 0) {
         this.smartSuggestionEl = contentEl.createDiv({ cls: "smart-suggestions-container" });
-        this.smartSuggestionEl.createEl("span", { text: "Suggestions: ", cls: "smart-suggestions-label" });
+        this.smartSuggestionEl.createSpan({ text: "Suggestions: ", cls: "smart-suggestions-label" });
         const chipsContainer = this.smartSuggestionEl.createDiv({ cls: "smart-suggestions-chips" });
         smartTags.forEach((tag) => {
           const chip = chipsContainer.createEl("button", {
@@ -2760,7 +2727,7 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
       if (tagsValue) {
         const fmTags = Array.isArray(tagsValue) ? tagsValue : [tagsValue];
         fmTags.forEach((tag) => {
-          const cleanTag = String(tag).replace(/^#/, "");
+          const cleanTag = asText(tag).replace(/^#/, "");
           if (cleanTag && !suggestions.includes(cleanTag)) {
             suggestions.push(cleanTag);
           }
@@ -2855,7 +2822,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
     if (modalContainer) {
       modalContainer.classList.add("reading-highlighter-modal-container");
     }
-    contentEl.createEl("h2", { text: "Add Annotation" });
+    contentEl.createEl("h2", { text: "Add annotation" });
     contentEl.createEl("p", {
       text: "Your comment will be added as a footnote at the bottom of the document.",
       cls: "annotation-description"
@@ -2876,7 +2843,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
     const footer = contentEl.createDiv({ cls: "modal-footer" });
     const cancelBtn = footer.createEl("button", { text: "Cancel" });
     cancelBtn.onclick = () => this.close();
-    const submitBtn = footer.createEl("button", { text: "Add Annotation", cls: "mod-cta" });
+    const submitBtn = footer.createEl("button", { text: "Add annotation", cls: "mod-cta" });
     submitBtn.onclick = () => this.submit();
   }
   submit() {
@@ -2919,7 +2886,7 @@ var HighlightEditModal = class extends import_obsidian4.Modal {
     contentEl.empty();
     contentEl.addClass("reading-highlighter-highlight-edit-modal");
     modalEl.addClass("reading-highlighter-highlight-edit-modal");
-    contentEl.createEl("h2", { text: "Edit Highlight" });
+    contentEl.createEl("h2", { text: "Edit highlight" });
     let raw;
     try {
       raw = await this.app.vault.read(this.file);
@@ -2981,7 +2948,7 @@ var HighlightEditModal = class extends import_obsidian4.Modal {
     const footer = contentEl.createDiv({ cls: "modal-footer highlight-edit-footer" });
     const cancelBtn = footer.createEl("button", { text: "Cancel" });
     cancelBtn.onclick = () => this.close();
-    const removeBtn = footer.createEl("button", { text: "Remove Highlight" });
+    const removeBtn = footer.createEl("button", { text: "Remove highlight" });
     removeBtn.onclick = () => void this.applyEdits({ remove: true });
     const applyBtn = footer.createEl("button", { text: "Apply", cls: "mod-cta" });
     applyBtn.onclick = () => void this.applyEdits({ remove: false });
@@ -3243,7 +3210,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     this.contentEl = container.createDiv({ cls: "highlight-navigator-content" });
     const footer = container.createDiv({ cls: "highlight-navigator-footer" });
     const footerBtnGroup = footer.createDiv({ cls: "highlight-navigator-footer-buttons" });
-    const exportBtn = footerBtnGroup.createEl("button", { text: "Export MD", cls: "mod-cta" });
+    const exportBtn = footerBtnGroup.createEl("button", { text: "Export md", cls: "mod-cta" });
     exportBtn.onclick = () => void this.exportHighlights();
     exportBtn.oncontextmenu = (e) => {
       e.preventDefault();
@@ -3252,7 +3219,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     };
     const canvasBtn = footerBtnGroup.createEl("button", { text: "Canvas", cls: "mod-cta" });
     canvasBtn.onclick = () => void this.exportCurrentFileToCanvas();
-    const scanBtn = footerBtnGroup.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
+    const scanBtn = footerBtnGroup.createEl("button", { text: "Scan vault", cls: "mod-cta" });
     scanBtn.onclick = () => void this.plugin.activateResearchView();
     const bulkBtn = footerBtnGroup.createEl("button", { text: "Bulk", cls: "mod-cta" });
     bulkBtn.onclick = (e) => this.openBulkMenu(e);
@@ -3659,7 +3626,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     if (!this.currentFile) return;
     const menu = new import_obsidian6.Menu();
     menu.addItem((mi) => {
-      mi.setTitle("Export MD").setIcon("file-text").onClick(() => void this.exportHighlights());
+      mi.setTitle("Export md").setIcon("file-text").onClick(() => void this.exportHighlights());
     });
     menu.addItem((mi) => {
       mi.setTitle("Export JSON").setIcon("code").onClick(() => void this.exportHighlightsJSON());
@@ -3710,7 +3677,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
         new import_obsidian6.Notice("No highlights to export.");
         return;
       }
-      new import_obsidian6.Notice("Generating Canvas...");
+      new import_obsidian6.Notice("Generating canvas...");
       const exportPath = await exportHighlightsToCanvas2(this.app, highlights);
       const file = this.app.vault.getAbstractFileByPath(exportPath);
       if (file instanceof import_obsidian6.TFile) {
@@ -3787,6 +3754,13 @@ var VaultScanner = class {
 // src/views/ResearchView.ts
 init_canvas();
 var RESEARCH_VIEW = "reader-research-view";
+function asText3(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return "";
+}
 var ResearchView = class extends import_obsidian7.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
@@ -3807,7 +3781,7 @@ var ResearchView = class extends import_obsidian7.ItemView {
     return RESEARCH_VIEW;
   }
   getDisplayText() {
-    return "Global Research View";
+    return "Global research view";
   }
   getIcon() {
     return "search";
@@ -3818,10 +3792,10 @@ var ResearchView = class extends import_obsidian7.ItemView {
     container.addClass("research-view-container");
     const header = container.createDiv({ cls: "research-view-header" });
     const titleRow = header.createDiv({ cls: "research-view-title-row" });
-    titleRow.createEl("h3", { text: "Research View" });
-    const scanBtn = titleRow.createEl("button", { text: "Scan Vault", cls: "mod-cta" });
+    titleRow.createEl("h3", { text: "Research view" });
+    const scanBtn = titleRow.createEl("button", { text: "Scan vault", cls: "mod-cta" });
     scanBtn.onclick = () => void this.startScan();
-    const canvasBtn = titleRow.createEl("button", { text: "Export Canvas" });
+    const canvasBtn = titleRow.createEl("button", { text: "Export canvas" });
     canvasBtn.onclick = () => void this.exportToCanvas();
     const searchContainer = header.createDiv({ cls: "research-view-search" });
     const searchInput = searchContainer.createEl("input", {
@@ -3956,15 +3930,15 @@ var ResearchView = class extends import_obsidian7.ItemView {
       if (this.filterKey === "tags" || this.filterKey === "tag") {
         if (Array.isArray(val)) {
           return val.some(
-            (t) => String(t).toLowerCase().replace(/^#/, "").includes(filterVal)
+            (t) => asText3(t).toLowerCase().replace(/^#/, "").includes(filterVal)
           );
         }
-        return String(val).toLowerCase().replace(/^#/, "").includes(filterVal);
+        return asText3(val).toLowerCase().replace(/^#/, "").includes(filterVal);
       }
       if (Array.isArray(val)) {
-        return val.some((v) => String(v).toLowerCase().includes(filterVal));
+        return val.some((v) => asText3(v).toLowerCase().includes(filterVal));
       }
-      return String(val).toLowerCase().includes(filterVal);
+      return asText3(val).toLowerCase().includes(filterVal);
     });
   }
   renderContent() {
@@ -4066,11 +4040,11 @@ var ResearchView = class extends import_obsidian7.ItemView {
       });
     }
     if (allHighlights.length === 0) {
-      new import_obsidian7.Notice("No highlights to export to Canvas.");
+      new import_obsidian7.Notice("No highlights to export to canvas.");
       return;
     }
     try {
-      new import_obsidian7.Notice("Generating Canvas...");
+      new import_obsidian7.Notice("Generating canvas...");
       const exportPath = await exportHighlightsToCanvas(this.app, allHighlights);
       const file = this.app.vault.getAbstractFileByPath(exportPath);
       if (file instanceof import_obsidian7.TFile) {
@@ -4156,7 +4130,7 @@ var FailureRecoveryModal = class extends import_obsidian8.Modal {
       window.setTimeout(() => text.inputEl.focus(), 10);
     });
     new import_obsidian8.Setting(contentEl).addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close())).addButton(
-      (btn) => btn.setButtonText("Apply Once").onClick(() => {
+      (btn) => btn.setButtonText("Apply once").onClick(() => {
         if (!this.correction.trim()) {
           new import_obsidian8.Notice("Please provide the corrected text.");
           return;
@@ -4170,7 +4144,7 @@ var FailureRecoveryModal = class extends import_obsidian8.Modal {
         this.close();
       })
     ).addButton(
-      (btn) => btn.setButtonText("Apply & Learn").setCta().onClick(() => {
+      (btn) => btn.setButtonText("Apply & learn").setCta().onClick(() => {
         if (!this.correction.trim()) {
           new import_obsidian8.Notice("Please provide the corrected text.");
           return;
@@ -5977,15 +5951,15 @@ var ReadingHighlighterSettingTab = class extends import_obsidian9.PluginSettingT
   /** Persist a declarative control's value, mirroring the imperative handlers. */
   setControlValue(key, value) {
     const settings = this.plugin.settings;
-    const asText = typeof value === "string" ? value : "";
+    const asText4 = typeof value === "string" ? value : "";
     const colour = key.match(/^semanticColors\.(\d+)\.meaning$/);
     if (colour) {
       const entry = this.plugin.settings.semanticColors[Number(colour[1])];
-      if (entry) entry.meaning = asText;
+      if (entry) entry.meaning = asText4;
     } else if (key === "defaultTagPrefix") {
-      settings[key] = asText.replace(/\s+/g, "_").replace(/^#/, "");
+      settings[key] = asText4.replace(/\s+/g, "_").replace(/^#/, "");
     } else if (key === "frontmatterTag") {
-      settings[key] = asText.replace(/^#/, "");
+      settings[key] = asText4.replace(/^#/, "");
     } else {
       settings[key] = value;
     }

@@ -56,7 +56,7 @@ export class HighlightEditModal extends Modal {
         contentEl.addClass("reading-highlighter-highlight-edit-modal");
         modalEl.addClass("reading-highlighter-highlight-edit-modal");
 
-        contentEl.createEl("h2", { text: "Edit Highlight" });
+        contentEl.createEl("h2", { text: "Edit highlight" });
 
         let raw: string;
         try {
@@ -137,7 +137,7 @@ export class HighlightEditModal extends Modal {
         const cancelBtn = footer.createEl("button", { text: "Cancel" });
         cancelBtn.onclick = () => this.close();
 
-        const removeBtn = footer.createEl("button", { text: "Remove Highlight" });
+        const removeBtn = footer.createEl("button", { text: "Remove highlight" });
         removeBtn.onclick = () => void this.applyEdits({ remove: true });
 
         const applyBtn = footer.createEl("button", { text: "Apply", cls: "mod-cta" });

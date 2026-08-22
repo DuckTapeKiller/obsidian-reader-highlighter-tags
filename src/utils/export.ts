@@ -10,8 +10,20 @@ function detectNewline(raw: string): string {
     return raw.includes("\r\n") ? "\r\n" : "\n";
 }
 
+/**
+ * Stringify a value that may be anything. Objects have no useful string form —
+ * `String({})` is `"[object Object]"` — so they become empty rather than noise.
+ */
+function asText(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+        return String(value);
+    }
+    return "";
+}
+
 function csvEscape(value: unknown): string {
-    const str = value == null ? "" : String(value);
+    const str = asText(value);
     if (/[",\r\n]/.test(str)) {
         return `"${str.replace(/"/g, '""')}"`;
     }

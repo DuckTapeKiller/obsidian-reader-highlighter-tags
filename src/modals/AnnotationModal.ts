@@ -24,7 +24,7 @@ export class AnnotationModal extends Modal {
             modalContainer.classList.add("reading-highlighter-modal-container");
         }
 
-        contentEl.createEl("h2", { text: "Add Annotation" });
+        contentEl.createEl("h2", { text: "Add annotation" });
 
         contentEl.createEl("p", {
             text: "Your comment will be added as a footnote at the bottom of the document.",
@@ -55,7 +55,7 @@ export class AnnotationModal extends Modal {
         const cancelBtn = footer.createEl("button", { text: "Cancel" });
         cancelBtn.onclick = () => this.close();
 
-        const submitBtn = footer.createEl("button", { text: "Add Annotation", cls: "mod-cta" });
+        const submitBtn = footer.createEl("button", { text: "Add annotation", cls: "mod-cta" });
         submitBtn.onclick = () => this.submit();
     }
 

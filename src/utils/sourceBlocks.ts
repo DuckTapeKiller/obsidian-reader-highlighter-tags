@@ -140,7 +140,7 @@ export function splitSourceBlocks(text: string, offset = 0): SourceBlock[] {
             flush();
             blockStart = lineStart;
             blockEnd = contentEnd;
-            blockKind = ownBlockKind(line) as BlockKind;
+            blockKind = ownBlockKind(line) ?? "paragraph";
         } else if (blockStart === -1) {
             blockStart = lineStart;
             blockEnd = contentEnd;

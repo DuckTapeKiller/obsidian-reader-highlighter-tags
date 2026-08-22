@@ -141,3 +141,10 @@ vite.config.ts.timestamp-*
 # macOS metadata
 .DS_Store
 **/.DS_Store
+
+# Local vault test harness (not part of the plugin)
+vaultharness/
+vitest.harness.mjs
+RELEASE-NOTES-*.md
+pr-*-reply.md
+build/

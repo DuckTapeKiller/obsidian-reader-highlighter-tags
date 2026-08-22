@@ -1,6 +1,6 @@
 {
     "name": "reader-highlighter-tags",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "description": "Highlight text in Reading View",
     "main": "main.js",
     "scripts": {
@@ -8,7 +8,7 @@
         "build": "node esbuild.config.mjs production",
         "test": "vitest run",
         "test:watch": "vitest",
-        "lint": "eslint \"src/**/*.{js,ts}\" \"tests/**/*.{js,ts}\" \"vaultharness/**/*.js\" \"*.mjs\" package.json manifest.json",
+        "lint": "eslint src tests *.mjs package.json manifest.json",
         "format": "prettier --write \"src/**/*.{js,ts}\" \"tests/**/*.{js,ts}\" \"*.{json,md,mjs}\"",
         "format:check": "prettier --check \"src/**/*.{js,ts}\" \"tests/**/*.{js,ts}\" \"*.{json,md,mjs}\""
     },

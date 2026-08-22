@@ -82,7 +82,7 @@ export class FailureRecoveryModal extends Modal {
         new Setting(contentEl)
             .addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.close()))
             .addButton((btn) =>
-                btn.setButtonText("Apply Once").onClick(() => {
+                btn.setButtonText("Apply once").onClick(() => {
                     if (!this.correction.trim()) {
                         new Notice("Please provide the corrected text.");
                         return;
@@ -98,7 +98,7 @@ export class FailureRecoveryModal extends Modal {
             )
             .addButton((btn) =>
                 btn
-                    .setButtonText("Apply & Learn")
+                    .setButtonText("Apply & learn")
                     .setCta()
                     .onClick(() => {
                         if (!this.correction.trim()) {

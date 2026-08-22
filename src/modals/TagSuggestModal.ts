@@ -8,6 +8,18 @@ interface MetadataCacheWithTags {
 /**
  * Multi-select tag modal with fuzzy search and smart suggestions.
  */
+/**
+ * Stringify a value that may be anything. Objects have no useful string form —
+ * `String({})` is `"[object Object]"` — so they become empty rather than noise.
+ */
+function asText(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+        return String(value);
+    }
+    return "";
+}
+
 export class TagSuggestModal extends Modal {
     plugin: ReadingHighlighterPlugin;
     onChoose: (result: string) => void | Promise<void>;
@@ -36,14 +48,14 @@ export class TagSuggestModal extends Modal {
         contentEl.addClass("reading-highlighter-tag-modal");
         modalEl.addClass("reading-highlighter-tag-modal");
 
-        contentEl.createEl("h2", { text: "Add Tags" });
+        contentEl.createEl("h2", { text: "Add tags" });
 
         // Smart suggestions section (if enabled)
         if (this.plugin.settings.enableSmartTagSuggestions) {
             const smartTags = this.getSuggestedTags();
             if (smartTags.length > 0) {
                 this.smartSuggestionEl = contentEl.createDiv({ cls: "smart-suggestions-container" });
-                this.smartSuggestionEl.createEl("span", { text: "Suggestions: ", cls: "smart-suggestions-label" });
+                this.smartSuggestionEl.createSpan({ text: "Suggestions: ", cls: "smart-suggestions-label" });
 
                 const chipsContainer = this.smartSuggestionEl.createDiv({ cls: "smart-suggestions-chips" });
                 smartTags.forEach((tag) => {
@@ -135,7 +147,7 @@ export class TagSuggestModal extends Modal {
             if (tagsValue) {
                 const fmTags: unknown[] = Array.isArray(tagsValue) ? tagsValue : [tagsValue];
                 fmTags.forEach((tag) => {
-                    const cleanTag = String(tag).replace(/^#/, "");
+                    const cleanTag = asText(tag).replace(/^#/, "");
                     if (cleanTag && !suggestions.includes(cleanTag)) {
                         suggestions.push(cleanTag);
                     }

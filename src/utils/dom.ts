@@ -16,7 +16,7 @@ interface PreviewScroll {
 }
 
 function getPreview(view: MarkdownView): PreviewScroll {
-    return view.previewMode as unknown as PreviewScroll;
+    return view.previewMode as PreviewScroll;
 }
 
 export function getScroll(view: MarkdownView): ScrollPosition {

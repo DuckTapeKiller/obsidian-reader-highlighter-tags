@@ -59,7 +59,7 @@ export class BulkRecolorModal extends Modal {
             .setName("From color")
             .setDesc("Only used when the limit toggle is enabled.")
             .addText((text) => {
-                text.setPlaceholder("#RRGGBB");
+                text.setPlaceholder("Hex color like #ff0000");
                 text.setValue(this.state.fromColor);
                 text.onChange((value) => {
                     this.state.fromColor = (value || "").trim();
@@ -82,7 +82,7 @@ export class BulkRecolorModal extends Modal {
             .setName("To color")
             .setDesc("Target color to apply.")
             .addText((text) => {
-                text.setPlaceholder("#RRGGBB");
+                text.setPlaceholder("Hex color like #ff0000");
                 text.setValue(this.state.toColor);
                 text.onChange((value) => {
                     this.state.toColor = (value || "").trim();

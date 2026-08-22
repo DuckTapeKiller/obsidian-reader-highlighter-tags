@@ -311,24 +311,19 @@ export class HighlightNavigatorView extends ItemView {
         stats.createSpan({ text: statsText });
 
         const list = container.createDiv({ cls: "highlight-navigator-list" });
-        const fragment = activeDocument.createDocumentFragment();
+        const fragment = createFragment();
 
         filteredItems.forEach((item, index) => {
-            const el = activeDocument.createElement("div");
-            el.addClass("highlight-navigator-item");
+            const el = fragment.createDiv({ cls: "highlight-navigator-item" });
 
             if (type === "highlights") {
                 const highlight = item as Highlight;
                 // Color indicator
                 if (highlight.color) {
-                    const colorDot = activeDocument.createElement("span");
-                    colorDot.addClass("highlight-color-dot");
+                    const colorDot = el.createSpan({ cls: "highlight-color-dot" });
                     colorDot.setCssStyles({ backgroundColor: highlight.color });
-                    el.appendChild(colorDot);
                 } else {
-                    const colorDot = activeDocument.createElement("span");
-                    colorDot.addClass("highlight-color-dot", "highlight-default");
-                    el.appendChild(colorDot);
+                    el.createSpan({ cls: "highlight-color-dot highlight-default" });
                 }
             } else {
                 const footnote = item as NavFootnote;
@@ -337,19 +332,15 @@ export class HighlightNavigatorView extends ItemView {
                 // id — those differ for out-of-order names (e.g. Wikipedia
                 // imports). The source id is kept in a tooltip. Unreferenced
                 // definitions have no rendered number, so fall back to `[^id]`.
-                const idSpan = activeDocument.createElement("span");
-                idSpan.addClass("footnote-id");
+                const idSpan = el.createSpan({ cls: "footnote-id" });
                 idSpan.textContent =
                     footnote.displayNumber != null ? `${footnote.displayNumber} ` : `[^${footnote.id}] `;
                 idSpan.setAttribute("title", `[^${footnote.id}]`);
                 idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
-                el.appendChild(idSpan);
             }
 
-            const textSpan = activeDocument.createElement("span");
-            textSpan.addClass("highlight-text");
+            const textSpan = el.createSpan({ cls: "highlight-text" });
             textSpan.textContent = this.stripMarkdown(item.text);
-            el.appendChild(textSpan);
 
             // Actions menu (hidden until hover on desktop; always available on mobile).
             // Available for both highlights and footnote annotations.
@@ -361,8 +352,7 @@ export class HighlightNavigatorView extends ItemView {
                 }
             };
 
-            const menuBtn = activeDocument.createElement("button");
-            menuBtn.addClass("highlight-item-menu");
+            const menuBtn = el.createEl("button", { cls: "highlight-item-menu" });
             menuBtn.setAttribute("aria-label", type === "highlights" ? "Highlight actions" : "Annotation actions");
             menuBtn.textContent = "⋯";
             menuBtn.onclick = (e) => {
@@ -370,15 +360,12 @@ export class HighlightNavigatorView extends ItemView {
                 e.stopPropagation();
                 openMenu(e);
             };
-            el.appendChild(menuBtn);
 
             // Trailing ordinal badge (highlights only). Footnotes already show
             // their Reading-View number as the leading badge.
             if (type === "highlights") {
-                const numberBadge = activeDocument.createElement("span");
-                numberBadge.addClass("highlight-number");
+                const numberBadge = el.createSpan({ cls: "highlight-number" });
                 numberBadge.textContent = `${index + 1}`;
-                el.appendChild(numberBadge);
             }
 
             el.oncontextmenu = (e) => {
@@ -398,8 +385,6 @@ export class HighlightNavigatorView extends ItemView {
                     void this.jumpToLine((item as Highlight).line);
                 }
             };
-
-            fragment.appendChild(el);
         });
 
         list.appendChild(fragment);

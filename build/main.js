@@ -927,48 +927,39 @@ var FloatingManager = class {
   createElements() {
     if (this.containerEl) return;
     const doc = this.targetDocument();
-    this.containerEl = doc.createElement("div");
-    this.containerEl.addClass("reading-highlighter-float-container");
+    this.containerEl = doc.body.createDiv({ cls: "reading-highlighter-float-container" });
     this.highlightBtn = this.createButton("highlighter", "Highlight selection");
-    this.containerEl.appendChild(this.highlightBtn);
     if (this.plugin.settings.enableColorPalette) {
-      this.paletteContainer = doc.createElement("div");
-      this.paletteContainer.addClass("reading-highlighter-palette");
+      this.paletteContainer = this.containerEl.createDiv({ cls: "reading-highlighter-palette" });
       for (const { item, index } of this.visiblePaletteColors()) {
-        const colorBtn = doc.createElement("button");
-        colorBtn.addClass("reading-highlighter-color-btn");
+        const colorBtn = this.paletteContainer.createEl("button", {
+          cls: "reading-highlighter-color-btn"
+        });
         colorBtn.setCssStyles({ backgroundColor: item.color });
         colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
         colorBtn.setAttribute("data-color-index", index.toString());
         this.colorButtons.push(colorBtn);
-        this.paletteContainer.appendChild(colorBtn);
       }
-      this.containerEl.appendChild(this.paletteContainer);
     }
     if (this.plugin.settings.showTagButton) {
       this.tagBtn = this.createButton("tag", "Tag selection");
-      this.containerEl.appendChild(this.tagBtn);
     }
     if (this.plugin.settings.showQuoteButton) {
       this.quoteBtn = this.createButton("quote", "Copy as quote");
-      this.containerEl.appendChild(this.quoteBtn);
     }
     if (this.plugin.settings.enableAnnotations && this.plugin.settings.showAnnotationButton) {
       this.annotateBtn = this.createButton("message-square", "Add annotation");
-      this.containerEl.appendChild(this.annotateBtn);
     }
     if (this.plugin.settings.showRemoveButton) {
       this.removeBtn = this.createButton("trash-2", "Remove highlights");
       this.removeBtn.addClass("reading-highlighter-remove-btn");
-      this.containerEl.appendChild(this.removeBtn);
     }
     this.extractAllBtn = this.createButton("file-text", "Extract All PDF Text");
     this.extractAllBtn.addClass("pdf-only-btn");
-    this.containerEl.appendChild(this.extractAllBtn);
-    doc.body.appendChild(this.containerEl);
   }
   createButton(iconName, label) {
-    const btn = this.targetDocument().createElement("button");
+    var _a;
+    const btn = ((_a = this.containerEl) != null ? _a : this.targetDocument().body).createEl("button");
     (0, import_obsidian.setIcon)(btn, iconName);
     if (this.plugin.settings.showTooltips) {
       btn.setAttribute("aria-label", label);
@@ -2969,7 +2960,7 @@ var HighlightEditModal = class extends import_obsidian4.Modal {
     const colorText = inputRow.createEl("input", {
       type: "text",
       cls: "highlight-edit-color-text",
-      attr: { placeholder: "#RRGGBB" }
+      attr: { placeholder: "Hex color like #ff0000" }
     });
     colorText.value = this.state.color || "";
     colorText.oninput = (e) => {
@@ -3092,7 +3083,7 @@ var BulkRecolorModal = class extends import_obsidian5.Modal {
       });
     });
     this.fromSetting = new import_obsidian5.Setting(contentEl).setName("From color").setDesc("Only used when the limit toggle is enabled.").addText((text) => {
-      text.setPlaceholder("#RRGGBB");
+      text.setPlaceholder("Hex color like #ff0000");
       text.setValue(this.state.fromColor);
       text.onChange((value) => {
         this.state.fromColor = (value || "").trim();
@@ -3111,7 +3102,7 @@ var BulkRecolorModal = class extends import_obsidian5.Modal {
       if (textInput) textInput.value = this.state.fromColor;
     };
     this.toSetting = new import_obsidian5.Setting(contentEl).setName("To color").setDesc("Target color to apply.").addText((text) => {
-      text.setPlaceholder("#RRGGBB");
+      text.setPlaceholder("Hex color like #ff0000");
       text.setValue(this.state.toColor);
       text.onChange((value) => {
         this.state.toColor = (value || "").trim();
@@ -3351,35 +3342,26 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
     }
     stats.createSpan({ text: statsText });
     const list = container.createDiv({ cls: "highlight-navigator-list" });
-    const fragment = activeDocument.createDocumentFragment();
+    const fragment = createFragment();
     filteredItems.forEach((item, index) => {
-      const el = activeDocument.createElement("div");
-      el.addClass("highlight-navigator-item");
+      const el = fragment.createDiv({ cls: "highlight-navigator-item" });
       if (type === "highlights") {
         const highlight = item;
         if (highlight.color) {
-          const colorDot = activeDocument.createElement("span");
-          colorDot.addClass("highlight-color-dot");
+          const colorDot = el.createSpan({ cls: "highlight-color-dot" });
           colorDot.setCssStyles({ backgroundColor: highlight.color });
-          el.appendChild(colorDot);
         } else {
-          const colorDot = activeDocument.createElement("span");
-          colorDot.addClass("highlight-color-dot", "highlight-default");
-          el.appendChild(colorDot);
+          el.createSpan({ cls: "highlight-color-dot highlight-default" });
         }
       } else {
         const footnote = item;
-        const idSpan = activeDocument.createElement("span");
-        idSpan.addClass("footnote-id");
+        const idSpan = el.createSpan({ cls: "footnote-id" });
         idSpan.textContent = footnote.displayNumber != null ? `${footnote.displayNumber} ` : `[^${footnote.id}] `;
         idSpan.setAttribute("title", `[^${footnote.id}]`);
         idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
-        el.appendChild(idSpan);
       }
-      const textSpan = activeDocument.createElement("span");
-      textSpan.addClass("highlight-text");
+      const textSpan = el.createSpan({ cls: "highlight-text" });
       textSpan.textContent = this.stripMarkdown(item.text);
-      el.appendChild(textSpan);
       const openMenu = (e) => {
         if (type === "highlights") {
           this.openHighlightActionsMenu(item, e);
@@ -3387,8 +3369,7 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
           this.openFootnoteActionsMenu(item, e);
         }
       };
-      const menuBtn = activeDocument.createElement("button");
-      menuBtn.addClass("highlight-item-menu");
+      const menuBtn = el.createEl("button", { cls: "highlight-item-menu" });
       menuBtn.setAttribute("aria-label", type === "highlights" ? "Highlight actions" : "Annotation actions");
       menuBtn.textContent = "\u22EF";
       menuBtn.onclick = (e) => {
@@ -3396,12 +3377,9 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
         e.stopPropagation();
         openMenu(e);
       };
-      el.appendChild(menuBtn);
       if (type === "highlights") {
-        const numberBadge = activeDocument.createElement("span");
-        numberBadge.addClass("highlight-number");
+        const numberBadge = el.createSpan({ cls: "highlight-number" });
         numberBadge.textContent = `${index + 1}`;
-        el.appendChild(numberBadge);
       }
       el.oncontextmenu = (e) => {
         e.preventDefault();
@@ -3417,7 +3395,6 @@ var HighlightNavigatorView = class extends import_obsidian6.ItemView {
           void this.jumpToLine(item.line);
         }
       };
-      fragment.appendChild(el);
     });
     list.appendChild(fragment);
   }

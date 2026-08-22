@@ -130,66 +130,58 @@ export class FloatingManager {
         if (this.containerEl) return;
 
         const doc = this.targetDocument();
-        this.containerEl = doc.createElement("div");
-        this.containerEl.addClass("reading-highlighter-float-container");
+        // Created through the target document's own body, so the toolbar lands
+        // in the window holding the note rather than whichever has focus.
+        this.containerEl = doc.body.createDiv({ cls: "reading-highlighter-float-container" });
 
         // Main highlight button
         this.highlightBtn = this.createButton("highlighter", "Highlight selection");
-        this.containerEl.appendChild(this.highlightBtn);
 
         // Semantic Color palette (only if enabled)
         if (this.plugin.settings.enableColorPalette) {
-            this.paletteContainer = doc.createElement("div");
-            this.paletteContainer.addClass("reading-highlighter-palette");
+            this.paletteContainer = this.containerEl.createDiv({ cls: "reading-highlighter-palette" });
 
             for (const { item, index } of this.visiblePaletteColors()) {
-                const colorBtn = doc.createElement("button");
-                colorBtn.addClass("reading-highlighter-color-btn");
+                const colorBtn = this.paletteContainer.createEl("button", {
+                    cls: "reading-highlighter-color-btn",
+                });
                 colorBtn.setCssStyles({ backgroundColor: item.color });
                 colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
                 colorBtn.setAttribute("data-color-index", index.toString());
                 this.colorButtons.push(colorBtn);
-                this.paletteContainer.appendChild(colorBtn);
             }
-
-            this.containerEl.appendChild(this.paletteContainer);
         }
 
         // Tag button
         if (this.plugin.settings.showTagButton) {
             this.tagBtn = this.createButton("tag", "Tag selection");
-            this.containerEl.appendChild(this.tagBtn);
         }
 
         // Quote button
         if (this.plugin.settings.showQuoteButton) {
             this.quoteBtn = this.createButton("quote", "Copy as quote");
-            this.containerEl.appendChild(this.quoteBtn);
         }
 
         // Annotation button
         if (this.plugin.settings.enableAnnotations && this.plugin.settings.showAnnotationButton) {
             this.annotateBtn = this.createButton("message-square", "Add annotation");
-            this.containerEl.appendChild(this.annotateBtn);
         }
 
         // Remove button
         if (this.plugin.settings.showRemoveButton) {
             this.removeBtn = this.createButton("trash-2", "Remove highlights");
             this.removeBtn.addClass("reading-highlighter-remove-btn");
-            this.containerEl.appendChild(this.removeBtn);
         }
 
         // PDF Extract All Button (Special)
         this.extractAllBtn = this.createButton("file-text", "Extract All PDF Text");
         this.extractAllBtn.addClass("pdf-only-btn");
-        this.containerEl.appendChild(this.extractAllBtn);
-
-        doc.body.appendChild(this.containerEl);
     }
 
     createButton(iconName: string, label: string): HTMLButtonElement {
-        const btn = this.targetDocument().createElement("button");
+        // Parented to the toolbar, so the element is created in the same
+        // document the toolbar lives in.
+        const btn = (this.containerEl ?? this.targetDocument().body).createEl("button");
         setIcon(btn, iconName);
         // Only add tooltip if enabled in settings
         if (this.plugin.settings.showTooltips) {

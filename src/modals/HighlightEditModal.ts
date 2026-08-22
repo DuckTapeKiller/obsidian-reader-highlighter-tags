@@ -166,7 +166,7 @@ export class HighlightEditModal extends Modal {
         const colorText = inputRow.createEl("input", {
             type: "text",
             cls: "highlight-edit-color-text",
-            attr: { placeholder: "#RRGGBB" },
+            attr: { placeholder: "Hex color like #ff0000" },
         });
         colorText.value = this.state.color || "";
         colorText.oninput = (e) => {

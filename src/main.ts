@@ -840,7 +840,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
         sanitized = sanitized.replace(/(\w)-\n(\w)/g, "$1$2");
         sanitized = sanitized.replace(/\n\n+/g, "[[PAR_BREAK]]");
         sanitized = sanitized.replace(/\n(?=[ \t]*[-*+] |[ \t]*\d+[.)] )/g, "[[LIST_BREAK]]");
-        sanitized = sanitized.replace(/(?<![.!?/:;])\n/g, " ");
+        // A newline that does not follow sentence-ending punctuation is a soft
+        // wrap, so it becomes a space. Written with a replacer rather than a
+        // lookbehind: lookbehind is a parse error on iOS before 16.4, which
+        // would stop the whole plugin from loading there.
+        sanitized = sanitized.replace(/\n/g, (match, offset: number, full: string) =>
+            offset > 0 && ".!?/:;".includes(full[offset - 1]) ? match : " "
+        );
         sanitized = sanitized.replace(/\[\[PAR_BREAK\]\]/g, "\n\n");
         sanitized = sanitized.replace(/\[\[LIST_BREAK\]\]/g, "\n");
         return sanitized.replace(/[ \t]+/g, " ").trim();

@@ -4928,7 +4928,10 @@ ${appendString}`;
     sanitized = sanitized.replace(/(\w)-\n(\w)/g, "$1$2");
     sanitized = sanitized.replace(/\n\n+/g, "[[PAR_BREAK]]");
     sanitized = sanitized.replace(/\n(?=[ \t]*[-*+] |[ \t]*\d+[.)] )/g, "[[LIST_BREAK]]");
-    sanitized = sanitized.replace(/(?<![.!?/:;])\n/g, " ");
+    sanitized = sanitized.replace(
+      /\n/g,
+      (match, offset, full) => offset > 0 && ".!?/:;".includes(full[offset - 1]) ? match : " "
+    );
     sanitized = sanitized.replace(/\[\[PAR_BREAK\]\]/g, "\n\n");
     sanitized = sanitized.replace(/\[\[LIST_BREAK\]\]/g, "\n");
     return sanitized.replace(/[ \t]+/g, " ").trim();

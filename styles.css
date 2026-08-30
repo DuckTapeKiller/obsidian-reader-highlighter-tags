@@ -448,7 +448,15 @@ body .highlight-navigator-container .highlight-navigator-btn-group {
     background: var(--background-modifier-hover);
 }
 
-.nav-btn.is-active {
+/* Obsidian adds .mobile-tap on click/tap, and its
+   `button:not(.clickable-icon).mobile-tap` rule (0,2,1) outranks a plain
+   `.nav-btn.is-active` (0,2,0). That replaced the selected segment's
+   background with --interactive-hover while the text kept --text-on-accent,
+   giving dark-on-dark in dark mode and white-on-white in light mode, and on
+   touch it held for as long as the finger was down. Naming .mobile-tap here
+   takes the specificity back. */
+.nav-btn.is-active,
+.nav-btn.is-active.mobile-tap {
     background: var(--interactive-accent);
     color: var(--text-on-accent);
 }

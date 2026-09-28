@@ -1098,7 +1098,7 @@ var FloatingManager = class {
   }
   /** Internal: actually process the current selection state. */
   _doHandleSelection() {
-    var _a, _b;
+    var _a, _b, _c, _d;
     let view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
     let isPdf = false;
     if (!view || view.getMode() !== "preview") {
@@ -1110,8 +1110,9 @@ var FloatingManager = class {
       isPdf = true;
     }
     (_a = this.containerEl) == null ? void 0 : _a.toggleClass("is-pdf-view", isPdf);
-    const sel = window.getSelection();
-    const snippet = (_b = sel == null ? void 0 : sel.toString()) != null ? _b : "";
+    const targetDoc = this.targetDocument();
+    const sel = (_c = (_b = targetDoc.defaultView) == null ? void 0 : _b.getSelection()) != null ? _c : window.getSelection();
+    const snippet = (_d = sel == null ? void 0 : sel.toString()) != null ? _d : "";
     if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
       if (activeDocument.querySelector(".modal-container, .modal-bg")) {
         this.hide();
@@ -1139,7 +1140,7 @@ var FloatingManager = class {
   }
   show(rect) {
     if (!this.containerEl || !rect) return;
-    if (this.containerEl.ownerDocument !== this.targetDocument()) {
+    if (this.containerEl.ownerDocument !== this.targetDocument() || this.plugin.settings.enableColorPalette && !this.paletteContainer) {
       this.refresh();
       if (!this.containerEl) return;
     }
@@ -4346,6 +4347,12 @@ var ReadingHighlighterPlugin = class extends import_obsidian9.Plugin {
     this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
     this.registerCommands();
     this.registerDomEvent(activeDocument, "selectionchange", () => {
+      this.floatingManager.handleSelection();
+    });
+    this.registerDomEvent(activeDocument, "mouseup", () => {
+      this.floatingManager.handleSelection();
+    });
+    this.registerDomEvent(activeDocument, "keyup", () => {
       this.floatingManager.handleSelection();
     });
     this.registerEvent(

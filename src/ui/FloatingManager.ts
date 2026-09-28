@@ -364,7 +364,8 @@ export class FloatingManager {
 
         this.containerEl?.toggleClass("is-pdf-view", isPdf);
 
-        const sel = window.getSelection();
+        const targetDoc = this.targetDocument();
+        const sel = targetDoc.defaultView?.getSelection() ?? window.getSelection();
         const snippet = sel?.toString() ?? "";
 
         if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
@@ -405,7 +406,11 @@ export class FloatingManager {
         if (!this.containerEl || !rect) return;
         // A note can be moved to a popout window after the toolbar was built.
         // Rebuild into the right document rather than showing it in the old one.
-        if (this.containerEl.ownerDocument !== this.targetDocument()) {
+        // Also refresh if the colour palette was enabled after initial element creation.
+        if (
+            this.containerEl.ownerDocument !== this.targetDocument() ||
+            (this.plugin.settings.enableColorPalette && !this.paletteContainer)
+        ) {
             this.refresh();
             if (!this.containerEl) return;
         }

@@ -79,4 +79,16 @@ describe("floating toolbar survives a settings change", () => {
         expect(all).toHaveLength(1);
         expect(visible(ctx)).toBe(true);
     });
+
+    it("rebuilds paletteContainer when enableColorPalette is toggled on after initial creation", async () => {
+        const ctx = await setup();
+        expect(ctx.plugin.floatingManager.paletteContainer).toBeNull();
+
+        ctx.plugin.settings.enableColorPalette = true;
+        selectText(ctx);
+
+        expect(visible(ctx)).toBe(true);
+        expect(ctx.plugin.floatingManager.paletteContainer).not.toBeNull();
+        expect(ctx.doc.querySelectorAll(".reading-highlighter-color-btn").length).toBeGreaterThan(0);
+    });
 });

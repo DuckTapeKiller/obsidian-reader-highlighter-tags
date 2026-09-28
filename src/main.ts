@@ -188,6 +188,14 @@ export default class ReadingHighlighterPlugin extends Plugin {
             this.floatingManager.handleSelection();
         });
 
+        this.registerDomEvent(activeDocument, "mouseup", () => {
+            this.floatingManager.handleSelection();
+        });
+
+        this.registerDomEvent(activeDocument, "keyup", () => {
+            this.floatingManager.handleSelection();
+        });
+
         this.registerEvent(
             this.app.workspace.on("active-leaf-change", () => {
                 this.floatingManager.handleSelection();

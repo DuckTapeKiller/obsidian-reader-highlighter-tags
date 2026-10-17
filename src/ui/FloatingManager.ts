@@ -179,8 +179,11 @@ export class FloatingManager {
         }
 
         // Tag button
+        // Tagging, annotating and erasing write into a note, so a PDF view
+        // hides them (markdown-only-btn); its highlights go to a companion note.
         if (this.plugin.settings.showTagButton) {
             this.tagBtn = this.createButton("tag", "Tag selection");
+            this.tagBtn.addClass("markdown-only-btn");
         }
 
         // Quote button
@@ -191,12 +194,13 @@ export class FloatingManager {
         // Annotation button
         if (this.plugin.settings.enableAnnotations && this.plugin.settings.showAnnotationButton) {
             this.annotateBtn = this.createButton("message-square", "Add annotation");
+            this.annotateBtn.addClass("markdown-only-btn");
         }
 
         // Remove button
         if (this.plugin.settings.showRemoveButton) {
             this.removeBtn = this.createButton("trash-2", "Remove highlights");
-            this.removeBtn.addClass("reading-highlighter-remove-btn");
+            this.removeBtn.addClass("reading-highlighter-remove-btn", "markdown-only-btn");
         }
 
         // PDF Extract All Button (Special)

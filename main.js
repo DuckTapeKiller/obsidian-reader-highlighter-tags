@@ -1088,16 +1088,18 @@ var FloatingManager = class {
     }
     if (this.plugin.settings.showTagButton) {
       this.tagBtn = this.createButton("tag", "Tag selection");
+      this.tagBtn.addClass("markdown-only-btn");
     }
     if (this.plugin.settings.showQuoteButton) {
       this.quoteBtn = this.createButton("quote", "Copy as quote");
     }
     if (this.plugin.settings.enableAnnotations && this.plugin.settings.showAnnotationButton) {
       this.annotateBtn = this.createButton("message-square", "Add annotation");
+      this.annotateBtn.addClass("markdown-only-btn");
     }
     if (this.plugin.settings.showRemoveButton) {
       this.removeBtn = this.createButton("trash-2", "Remove highlights");
-      this.removeBtn.addClass("reading-highlighter-remove-btn");
+      this.removeBtn.addClass("reading-highlighter-remove-btn", "markdown-only-btn");
     }
     this.extractAllBtn = this.createButton("file-text", "Extract all PDF text");
     this.extractAllBtn.addClass("pdf-only-btn");
@@ -2865,10 +2867,16 @@ var TagSuggestModal = class extends import_obsidian2.Modal {
    * 3. Frontmatter tags
    */
   getSuggestedTags() {
-    var _a;
+    var _a, _b;
     const suggestions = [];
+    for (const tag of (_a = this.plugin.settings.recentTags) != null ? _a : []) {
+      const cleanTag = asText(tag).replace(/^#/, "");
+      if (cleanTag && !suggestions.includes(cleanTag)) {
+        suggestions.push(cleanTag);
+      }
+    }
     const activeFile = this.app.workspace.getActiveFile();
-    if (((_a = activeFile == null ? void 0 : activeFile.parent) == null ? void 0 : _a.name) && activeFile.parent.name !== "/") {
+    if (((_b = activeFile == null ? void 0 : activeFile.parent) == null ? void 0 : _b.name) && activeFile.parent.name !== "/") {
       const folderTag = activeFile.parent.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-_]/g, "");
       if (folderTag && !suggestions.includes(folderTag)) {
         suggestions.push(folderTag);
@@ -4027,7 +4035,12 @@ var ResearchView = class extends import_obsidian8.ItemView {
       }
     } else {
       const totalFileCount = this.scanResults.length;
-      statsRow.textContent = `${totalHighlights} highlights across ${totalFileCount} files.`;
+      if (allHighlights.length !== totalHighlights) {
+        const fileCount = new Set(allHighlights.map((h) => h.file.path)).size;
+        statsRow.textContent = `${allHighlights.length} of ${totalHighlights} highlights, in ${fileCount} of ${totalFileCount} files.`;
+      } else {
+        statsRow.textContent = `${totalHighlights} highlights across ${totalFileCount} files.`;
+      }
       const listEl = this.contentEl.createDiv({ cls: "research-highlight-list research-flat-list" });
       for (const h of allHighlights) {
         const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
@@ -5319,9 +5332,8 @@ ${appendString}`;
       new import_obsidian10.Notice("No text selected.");
       return;
     }
-    const quotedText = request.snippet.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
     const frontmatter = ((_a = this.app.metadataCache.getFileCache(view.file)) == null ? void 0 : _a.frontmatter) || {};
-    const quote = this.expandQuoteTemplate(view.file, quotedText, frontmatter);
+    const quote = this.expandQuoteTemplate(view.file, request.snippet, frontmatter);
     const copied = await this.writeClipboardText(quote);
     if (!copied) {
       new import_obsidian10.Notice("Failed to copy quote.");
@@ -5413,14 +5425,22 @@ ${appendString}`;
     });
     void this.app.workspace.revealLeaf(leaf);
   }
-  expandQuoteTemplate(file, quotedText, frontmatter = {}) {
+  /**
+   * Fill the quote template.
+   *
+   * Whatever precedes `{{text}}` on its line (`> ` in the default) starts
+   * every line of the selection, so a quote of several lines stays one
+   * blockquote. The selection used to arrive already quoted, which with the
+   * default template nested its first line one level deeper (`> > `). A
+   * template with no `>` before `{{text}}` still gets each line quoted.
+   */
+  expandQuoteTemplate(file, text, frontmatter = {}) {
     const sourceUrl = toDisplayString(frontmatter.url || frontmatter.source || frontmatter.link).replace(
       /#:~:text=[^&]+(&|$)/,
       ""
     );
     const timestamp = this.formatTimestamp(/* @__PURE__ */ new Date());
     const variables = {
-      text: quotedText,
       file: file.basename,
       path: file.path,
       date: timestamp.split("T")[0],
@@ -5430,10 +5450,12 @@ ${appendString}`;
         frontmatter.author || frontmatter.authors || frontmatter.creator || ""
       )
     };
-    return this.settings.quoteTemplate.replace(
-      /{{(text|file|path|date|time|domain|author)}}/g,
-      (_match, key) => variables[key] || ""
-    );
+    const lines = text.split(/\r?\n/);
+    return this.settings.quoteTemplate.replace(/{{(file|path|date|time|domain|author)}}/g, (_match, key) => variables[key] || "").replace(/^(.*?){{text}}/gm, (_match, prefix) => {
+      if (/>\s*$/.test(prefix)) return prefix + lines.join(`
+${prefix}`);
+      return prefix + lines.map((line) => `> ${line}`).join("\n");
+    });
   }
   async writeClipboardText(text) {
     try {

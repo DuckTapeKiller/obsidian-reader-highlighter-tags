@@ -342,7 +342,14 @@ export class ResearchView extends ItemView {
         } else {
             // Default: simplified flat list of all highlights
             const totalFileCount = this.scanResults.length;
-            statsRow.textContent = `${totalHighlights} highlights across ${totalFileCount} files.`;
+            // With a colour or property filter on, count what is listed, not
+            // the whole vault.
+            if (allHighlights.length !== totalHighlights) {
+                const fileCount = new Set(allHighlights.map((h) => h.file.path)).size;
+                statsRow.textContent = `${allHighlights.length} of ${totalHighlights} highlights, in ${fileCount} of ${totalFileCount} files.`;
+            } else {
+                statsRow.textContent = `${totalHighlights} highlights across ${totalFileCount} files.`;
+            }
 
             const listEl = this.contentEl.createDiv({ cls: "research-highlight-list research-flat-list" });
 

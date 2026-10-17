@@ -32,6 +32,24 @@ body.is-phone .reading-highlighter-float-container {
     box-shadow: var(--menu-shadow);
 }
 
+/* With the palette showing, the bar is wider than a phone screen, so the
+   colours take a row of their own below the actions. */
+body.is-phone .reading-highlighter-float-container:not(.reading-highlighter-vertical) {
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 20px);
+}
+
+body.is-phone .reading-highlighter-float-container:not(.reading-highlighter-vertical) .reading-highlighter-palette {
+    order: 1;
+    flex-basis: 100%;
+    justify-content: center;
+}
+
+body.is-phone .reading-highlighter-float-container:not(.reading-highlighter-vertical) .reading-highlighter-separator {
+    display: none;
+}
+
 body .reading-highlighter-float-container.reading-highlighter-vertical {
     flex-direction: column;
 }
@@ -589,8 +607,11 @@ body .highlight-navigator-container .highlight-navigator-footer {
     border-top: 1px solid var(--background-modifier-border);
 }
 
+/* The buttons share the row and wrap onto a second one when the sidebar is
+   too narrow for their labels, rather than clipping them. */
 body .highlight-navigator-container .highlight-navigator-footer-buttons {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     width: calc(100% - 16px);
     margin: 0 auto;
@@ -598,10 +619,10 @@ body .highlight-navigator-container .highlight-navigator-footer-buttons {
 }
 
 .highlight-navigator-footer-buttons button {
-    flex: 1;
+    flex: 1 1 auto;
     border-radius: var(--button-radius);
     font-size: 0.85em;
-    min-width: 0;
+    white-space: nowrap;
 }
 
 /* === Highlight Flash Effect === */
@@ -1252,6 +1273,10 @@ body .reading-highlighter-float-container button.pdf-only-btn {
 body .reading-highlighter-float-container.is-pdf-view button.pdf-only-btn {
     display: flex;
     color: var(--interactive-accent);
+}
+
+body .reading-highlighter-float-container.is-pdf-view button.markdown-only-btn {
+    display: none;
 }
 
 /* Settings tab section headings (rendered as styled divs instead of raw

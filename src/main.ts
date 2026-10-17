@@ -1264,13 +1264,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
             new Notice("No text selected.");
             return;
         }
-        const quotedText = request.snippet
-            .split(/\r?\n/)
-            .map((line) => `> ${line}`)
-            .join("\n");
         const frontmatter =
             (this.app.metadataCache.getFileCache(view.file)?.frontmatter as Record<string, unknown>) || {};
-        const quote = this.expandQuoteTemplate(view.file, quotedText, frontmatter);
+        const quote = this.expandQuoteTemplate(view.file, request.snippet, frontmatter);
         const copied = await this.writeClipboardText(quote);
         if (!copied) {
             new Notice("Failed to copy quote.");
@@ -1375,14 +1371,22 @@ export default class ReadingHighlighterPlugin extends Plugin {
         void this.app.workspace.revealLeaf(leaf);
     }
 
-    expandQuoteTemplate(file: TFile, quotedText: string, frontmatter: Record<string, unknown> = {}) {
+    /**
+     * Fill the quote template.
+     *
+     * Whatever precedes `{{text}}` on its line (`> ` in the default) starts
+     * every line of the selection, so a quote of several lines stays one
+     * blockquote. The selection used to arrive already quoted, which with the
+     * default template nested its first line one level deeper (`> > `). A
+     * template with no `>` before `{{text}}` still gets each line quoted.
+     */
+    expandQuoteTemplate(file: TFile, text: string, frontmatter: Record<string, unknown> = {}) {
         const sourceUrl = toDisplayString(frontmatter.url || frontmatter.source || frontmatter.link).replace(
             /#:~:text=[^&]+(&|$)/,
             ""
         );
         const timestamp = this.formatTimestamp(new Date());
         const variables: Record<string, string> = {
-            text: quotedText,
             file: file.basename,
             path: file.path,
             date: timestamp.split("T")[0],
@@ -1392,10 +1396,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 frontmatter.author || frontmatter.authors || frontmatter.creator || ""
             ),
         };
-        return this.settings.quoteTemplate.replace(
-            /{{(text|file|path|date|time|domain|author)}}/g,
-            (_match: string, key: string) => variables[key] || ""
-        );
+        const lines = text.split(/\r?\n/);
+        return this.settings.quoteTemplate
+            .replace(/{{(file|path|date|time|domain|author)}}/g, (_match: string, key: string) => variables[key] || "")
+            .replace(/^(.*?){{text}}/gm, (_match: string, prefix: string) => {
+                if (/>\s*$/.test(prefix)) return prefix + lines.join(`\n${prefix}`);
+                return prefix + lines.map((line) => `> ${line}`).join("\n");
+            });
     }
 
     async writeClipboardText(text: string) {

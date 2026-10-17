@@ -127,6 +127,15 @@ export class TagSuggestModal extends Modal {
     getSuggestedTags(): string[] {
         const suggestions: string[] = [];
 
+        // 0. Recently used tags, most recent first. They were recorded on
+        // every tagging but never offered back.
+        for (const tag of this.plugin.settings.recentTags ?? []) {
+            const cleanTag = asText(tag).replace(/^#/, "");
+            if (cleanTag && !suggestions.includes(cleanTag)) {
+                suggestions.push(cleanTag);
+            }
+        }
+
         // 1. Folder-based suggestion
         const activeFile = this.app.workspace.getActiveFile();
         if (activeFile?.parent?.name && activeFile.parent.name !== "/") {

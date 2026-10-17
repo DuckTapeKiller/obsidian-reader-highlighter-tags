@@ -12,7 +12,7 @@ function harness(raw) {
     const refreshed = [];
     const ctx = {
         currentFile: { path: "n.md" },
-        plugin: { saveUndoState: async () => {} },
+        plugin: { saveUndoState: async () => {}, recordUndoResult: async () => {} },
         app: {
             vault: {
                 process: async (_f, fn) => {

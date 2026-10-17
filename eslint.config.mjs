@@ -6,16 +6,14 @@ import tsparser from "@typescript-eslint/parser";
 import obsidianmd from "eslint-plugin-obsidianmd";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 
-// NOTE: The general TypeScript rules below run without type information, since
-// type-aware linting surfaces hundreds of `no-unsafe-*` / `no-explicit-any`
-// warnings that do not block the Obsidian community store. The obsidianmd
-// recommended set is a separate block that DOES enable the type-aware program,
-// because several of its rules require it.
+// The general rules below run without type information. The obsidianmd
+// recommended set, spread after them, is type-aware for TypeScript.
 
 const sharedLanguageOptions = {
     globals: {
+        // Browser globals only, as the review bot sees the code: a Node
+        // global must be declared where a build script uses it.
         ...globals.browser,
-        ...globals.node,
         document: "readonly",
         window: "readonly",
         Node: "readonly",
@@ -28,8 +26,9 @@ const sharedLanguageOptions = {
 
 export default defineConfig(
     {
-        // replacement for .eslintignore (keep lint runs fast/clean)
-        ignores: ["main.js", "node_modules/**"],
+        // Real build output only: the committed bundle and the stale copy in
+        // build/. Everything else the obsidianmd preset targets is linted.
+        ignores: ["main.js", "build/**", "node_modules/**"],
     },
     {
         files: ["**/*.{js,mjs,cjs}"],
@@ -42,7 +41,6 @@ export default defineConfig(
     },
     {
         files: ["**/*.{ts,tsx,cts,mts}"],
-        // Parse TS syntax only — no `project`, so no type-aware rules run.
         languageOptions: { ...sharedLanguageOptions, parser: tsparser },
         extends: [js.configs.recommended, tseslint.configs.recommended],
         rules: {
@@ -61,18 +59,12 @@ export default defineConfig(
             "prefer-const": "off",
         },
     },
+    // The full, current obsidianmd ruleset, spread as published: it carries
+    // its own globs for TS, JS and package.json, so they are not narrowed.
+    ...obsidianmd.configs.recommended,
     {
-        // The full, current obsidianmd ruleset. Its own config already targets
-        // TS, JS and package.json in separate blocks, so `files` here is kept
-        // wide enough not to intersect any of those away — but it must exclude
-        // other JSON, since several blocks in the preset carry no file scope of
-        // their own and would otherwise run JavaScript rules against
-        // manifest.json. Several rules are type-aware; the program is enabled
-        // in the block below.
-        files: ["src/**/*.{ts,js}", "package.json"],
-        extends: [obsidianmd.configs.recommended],
-    },
-    {
+        // Several obsidianmd rules are type-aware, so TypeScript gets the
+        // program.
         files: ["**/*.{ts,tsx,cts,mts}"],
         languageOptions: {
             parserOptions: {
@@ -80,6 +72,11 @@ export default defineConfig(
                 tsconfigRootDir: import.meta.dirname,
             },
         },
+    },
+    {
+        // The plain .mjs configs are not part of the TypeScript program.
+        files: ["**/*.mjs"],
+        extends: [tseslint.configs.disableTypeChecked],
     },
     {
         // `recommended` ships this one switched off. The code already uses

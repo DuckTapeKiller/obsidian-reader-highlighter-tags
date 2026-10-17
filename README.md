@@ -35,7 +35,7 @@ Evolve your highlights into a structured knowledge base with the **Global Resear
 - **Vault-Wide Scanning**: Search and aggregate highlights across your entire vault in a single, high-performance view.
 - **Advanced Property Filtering**: Filter your research by _any_ Obsidian property field (frontmatter). Select keys like `Autor`, `tags`, `category`, or `status` and filter by specific values.
 - **Smart Tag Support**: Intelligently handles Obsidian's array and string tag formats, supporting partial matches (e.g., filtering for "research" finds notes tagged `#research`).
-- **Semantic Color Filtering**: Toggle 15 dedicated color chips to isolate highlights by their assigned meanings (e.g., "Show me only 'Vocabulary' highlights").
+- **Semantic Color Filtering**: Toggle a chip for each highlight colour you have given a meaning to isolate those highlights (e.g., "Show me only 'Vocabulary' highlights").
 
 ### Visual Knowledge Mapping (Canvas Integration)
 
@@ -61,7 +61,7 @@ Generate highlight notebooks that never get out of date.
 ### Tagging and Metadata
 
 - **Frontmatter Integration**: Optionally applies highlight tags directly to the note's YAML frontmatter. Existing tags are checked to prevent duplicates.
-- **Semantic Taxonomy**: Assign custom "meanings" to a palette of 15 UI-optimized colors in the settings for precise categorization.
+- **Semantic Taxonomy**: Assign custom "meanings" to Obsidian's six highlight colours in the settings for precise categorization.
 - **Contextual Suggestions**: Fuzzy-search tagging modal suggests tags based on recent usage, folder names, and existing file metadata.
 
 ### Workflow Tools
@@ -73,7 +73,7 @@ Generate highlight notebooks that never get out of date.
 
 ### UI and Performance
 
-- **Aesthetic Toolbar**: A glassmorphism-inspired floating toolbar with wrapped semantic color grids.
+- **Themed Toolbar**: The floating toolbar is built as one of Obsidian's own menus, so your theme and its presets style it the way they style their context menus.
 - **Mobile Optimization**: Includes haptic feedback, keyboard-aware modals, and long-press shortcuts for mobile reading efficiency.
 - **Performance**: Asynchronous vault scanning and safe regex execution prevent browser freezes even in massive vaults.
 
@@ -81,8 +81,10 @@ Generate highlight notebooks that never get out of date.
 
 ### Highlighting
 
-- **15-Color Palette**: Use a fixed, meticulously chosen semantic taxonomy. Assign "Meanings" (e.g. Pink = "Insight", Blue = "Vocabulary") to colors for global filtering.
-- **Color Highlighting**: Toggle between standard Obsidian `==` syntax and HTML `<mark>` tags for persistent, theme-independent colors.
+- **Native Highlight Colours**: Highlights are always plain Markdown. Colours use Obsidian's own highlight colours (Obsidian 1.14 or later), written as an emoji after the opening marker: `==🟡text==`. No HTML is written into your notes.
+- **Highlight Colour**: The colour the highlight button writes, or the theme's default.
+- **Colour Palette**: Show the six colours in the toolbar and assign "Meanings" (e.g. Red = "Insight", Blue = "Vocabulary") for global filtering.
+- **Converting Older Notes**: "Convert HTML highlights to native highlights in note" turns the `<mark>` and background `<span>` highlights older versions wrote into native ones, in the nearest colour.
 
 ### Toolbar
 

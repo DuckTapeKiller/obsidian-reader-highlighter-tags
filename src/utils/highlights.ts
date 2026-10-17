@@ -1,3 +1,5 @@
+import { colorAt, nearestHighlightColor, stripHighlightMarkers, wrapHighlight, type HighlightColor } from "./colors";
+
 export type HighlightType = "markdown" | "html";
 export type FootnotePlacement = "after" | "inside";
 
@@ -6,7 +8,11 @@ export interface Highlight {
     text: string;
     line: number;
     type: HighlightType;
-    color?: string | null;
+    /**
+     * The native colour, or null for the theme's default. An HTML highlight
+     * left by an older version reports the native colour nearest its own.
+     */
+    color: HighlightColor | null;
     start: number;
     end: number;
     innerStart: number;
@@ -70,6 +76,26 @@ function escapeRegex(text: string): string {
 
 function detectNewline(raw: string): string {
     return raw.includes("\r\n") ? "\r\n" : "\n";
+}
+
+/**
+ * Which lines sit inside a fenced code block, fences included. A fence opened
+ * with backticks only closes on backticks, and at least as many of them.
+ */
+function fencedLines(lines: string[]): boolean[] {
+    const result: boolean[] = [];
+    let fence: string | null = null;
+    for (const line of lines) {
+        const marker = line.match(/^[ \t]{0,3}(?:>[ \t]?)*(`{3,}|~{3,})/)?.[1] ?? null;
+        if (fence === null) {
+            if (marker) fence = marker;
+            result.push(fence !== null);
+        } else {
+            result.push(true);
+            if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+        }
+    }
+    return result;
 }
 
 function extractStyleAttribute(openTag: string): StyleAttr | null {
@@ -145,9 +171,16 @@ export function parseHighlights(raw: string): ParsedHighlights {
     const lines = raw.split(/\r?\n/);
     let lineOffset = 0;
 
+    const inFence = fencedLines(lines);
+
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
         const line = lines[lineIdx];
-        let matchIndex = 0;
+
+        // `==` inside a code block is code (`a == b`), not a highlight.
+        if (inFence[lineIdx]) {
+            lineOffset += line.length + (lineIdx < lines.length - 1 ? newline.length : 0);
+            continue;
+        }
 
         const markdownPattern = /==(.*?)==/g;
         const htmlPattern = /<mark\b[^>]*>(.*?)<\/mark>/gi;
@@ -156,7 +189,11 @@ export function parseHighlights(raw: string): ParsedHighlights {
         while ((match = markdownPattern.exec(line)) !== null) {
             const start = lineOffset + match.index;
             const end = start + match[0].length;
-            const innerStart = start + 2;
+            // A colour emoji straight after the opening marker belongs to the
+            // marker: Obsidian reads it as the colour and never shows it.
+            const colour = colorAt(match[1] ?? "");
+            const innerText = (match[1] ?? "").slice(colour.length);
+            const innerStart = start + 2 + colour.length;
             const innerEnd = end - 2;
 
             const { tagsText, tagsStart, tagsEnd } = extractLeadingTagsRange(line, lineOffset, match.index);
@@ -164,15 +201,16 @@ export function parseHighlights(raw: string): ParsedHighlights {
                 line,
                 lineOffset,
                 wrapperEndInLine: match.index + match[0].length,
-                innerText: match[1],
+                innerText,
                 innerStart,
             });
 
             highlights.push({
-                id: `${lineIdx}:${matchIndex}`,
-                text: (match[1] ?? "").trim(),
+                id: "",
+                text: innerText.trim(),
                 line: lineIdx,
                 type: "markdown",
+                color: colour.color,
                 start,
                 end,
                 innerStart,
@@ -190,8 +228,6 @@ export function parseHighlights(raw: string): ParsedHighlights {
                 footnotePlacement: footnote?.placement ?? null,
                 annotation: footnote?.id ? (footnotes.get(footnote.id)?.text ?? "") : "",
             });
-
-            matchIndex++;
         }
 
         while ((match = htmlPattern.exec(line)) !== null) {
@@ -210,7 +246,7 @@ export function parseHighlights(raw: string): ParsedHighlights {
             const innerEnd = end - closeTagLength;
 
             const styleAttr = extractStyleAttribute(openTag);
-            const color = styleAttr ? extractBackgroundFromStyle(styleAttr.value) : null;
+            const color = nearestHighlightColor(styleAttr ? extractBackgroundFromStyle(styleAttr.value) : null);
 
             const { tagsText, tagsStart, tagsEnd } = extractLeadingTagsRange(line, lineOffset, match.index);
             const footnote = detectFootnoteForHighlight({
@@ -222,11 +258,11 @@ export function parseHighlights(raw: string): ParsedHighlights {
             });
 
             highlights.push({
-                id: `${lineIdx}:${matchIndex}`,
+                id: "",
                 text: (match[1] ?? "").trim(),
                 line: lineIdx,
                 type: "html",
-                color: color ? color.trim() : null,
+                color,
                 start,
                 end,
                 innerStart,
@@ -245,14 +281,20 @@ export function parseHighlights(raw: string): ParsedHighlights {
                 footnotePlacement: footnote?.placement ?? null,
                 annotation: footnote?.id ? (footnotes.get(footnote.id)?.text ?? "") : "",
             });
-
-            matchIndex++;
         }
 
         lineOffset += line.length + (lineIdx < lines.length - 1 ? newline.length : 0);
     }
 
     highlights.sort((a, b) => a.start - b.start);
+    // Ids count by position within the line, not by syntax, so converting an
+    // HTML highlight to a native one leaves every id on the line unchanged.
+    const perLine = new Map<number, number>();
+    for (const highlight of highlights) {
+        const n = perLine.get(highlight.line) ?? 0;
+        highlight.id = `${highlight.line}:${n}`;
+        perLine.set(highlight.line, n + 1);
+    }
     return { highlights, footnotes };
 }
 
@@ -351,61 +393,33 @@ export function updateHighlightTagsInRaw(raw: string, highlight: Highlight | nul
     return raw.slice(0, highlight.openTagStart) + replacement + raw.slice(highlight.openTagStart);
 }
 
-function buildUpdatedOpenTag(openTag: string, newColor: string): string {
-    const styleAttr = extractStyleAttribute(openTag);
-    if (!styleAttr) {
-        return openTag.replace(/^<mark\b/i, `<mark style="background: ${newColor}; color: black;"`);
-    }
-
-    const styleValue = styleAttr.value;
-    const decls = styleValue
-        .split(";")
-        .map((part) => part.trim())
-        .filter(Boolean);
-    const updated: string[] = [];
-    let replaced = false;
-
-    for (const decl of decls) {
-        const colon = decl.indexOf(":");
-        if (colon === -1) {
-            updated.push(decl);
-            continue;
-        }
-        const key = decl.slice(0, colon).trim();
-        const value = decl.slice(colon + 1).trim();
-        const keyLc = key.toLowerCase();
-        if (keyLc === "background" || keyLc === "background-color") {
-            updated.push(`${key}: ${newColor}`);
-            replaced = true;
-        } else {
-            updated.push(`${key}: ${value}`);
-        }
-    }
-
-    if (!replaced) {
-        updated.unshift(`background: ${newColor}`);
-    }
-
-    const newStyleValue = updated.join("; ") + (updated.length ? ";" : "");
-    const quoted = `${styleAttr.quote}${newStyleValue}${styleAttr.quote}`;
-
-    return openTag.replace(/\sstyle=(["'])([\s\S]*?)\1/i, ` style=${quoted}`);
+/**
+ * Give a highlight a native colour, or none for the theme's default.
+ *
+ * An HTML highlight left by an older version becomes a native one: the plugin
+ * no longer writes HTML into notes.
+ */
+export function updateHighlightColorInRaw(
+    raw: string,
+    highlight: Highlight | null,
+    newColor: HighlightColor | null
+): string {
+    if (!highlight) return raw;
+    // Markers nested inside would end up inside the new pair, so drop them.
+    const inner = stripHighlightMarkers(
+        raw.slice(highlight.innerStart, highlight.innerEnd).replace(/<mark\b[^>]*>|<\/mark>/gi, "")
+    );
+    return raw.slice(0, highlight.openTagStart) + wrapHighlight(inner, newColor) + raw.slice(highlight.closeTagEnd);
 }
 
-export function updateHighlightColorInRaw(raw: string, highlight: Highlight | null, newColor: string): string {
-    if (!highlight) return raw;
-    if (!newColor) return raw;
-
-    if (highlight.type === "html") {
-        const openTag = raw.slice(highlight.openTagStart, highlight.openTagEnd);
-        const updatedOpenTag = buildUpdatedOpenTag(openTag, newColor);
-        return raw.slice(0, highlight.openTagStart) + updatedOpenTag + raw.slice(highlight.openTagEnd);
-    }
-
-    // Markdown highlight -> convert to HTML mark
-    const inner = raw.slice(highlight.innerStart, highlight.innerEnd);
-    const replacement = `<mark style="background: ${newColor}; color: black;">${inner}</mark>`;
-    return raw.slice(0, highlight.openTagStart) + replacement + raw.slice(highlight.closeTagEnd);
+/** Highlights that do not sit inside another one, so each can be rewritten whole. */
+function outermost(highlights: Highlight[]): Highlight[] {
+    return highlights.filter(
+        (h) =>
+            !highlights.some(
+                (other) => other !== h && other.openTagStart <= h.openTagStart && other.closeTagEnd >= h.closeTagEnd
+            )
+    );
 }
 
 function nextNumericFootnoteId(raw: string): string {
@@ -599,6 +613,9 @@ export function mergeAdjacentHighlightsInRaw(raw: string): { raw: string; merged
             const between = updated.slice(a.closeTagEnd, b.openTagStart);
             if (!/^\s*$/.test(between)) continue;
 
+            // Joining two highlights keeps the first one's opening marker, so
+            // they must look the same: same colour, and for HTML the same tag.
+            if (a.color !== b.color) continue;
             if (a.type === "html") {
                 const aOpen = updated.slice(a.openTagStart, a.openTagEnd);
                 const bOpen = updated.slice(b.openTagStart, b.openTagEnd);
@@ -619,57 +636,78 @@ export function mergeAdjacentHighlightsInRaw(raw: string): { raw: string; merged
     return { raw: updated, mergedCount };
 }
 
-export function recolorMarkHighlightsInRaw(
+/** Which highlights a recolour applies to. */
+export type RecolorSource = "any" | "default" | HighlightColor;
+
+/**
+ * Recolour every highlight in the note whose colour is `from`. HTML highlights
+ * count by their nearest native colour and come out native.
+ */
+export function recolorHighlightsInRaw(
     raw: string,
-    { fromColor = "", toColor = "" }: { fromColor?: string; toColor?: string } = {}
+    { from = "any", to = null }: { from?: RecolorSource; to?: HighlightColor | null } = {}
 ): { raw: string; changedCount: number } {
     let updated = String(raw ?? "");
-    const targetColor = String(toColor || "").trim();
-    if (!targetColor) {
-        return { raw: updated, changedCount: 0 };
-    }
-
-    const from = String(fromColor || "")
-        .trim()
-        .toLowerCase();
-    const parsed = parseHighlights(updated);
-    const candidates = parsed.highlights
-        .filter((h) => h.type === "html")
-        .filter((h) => {
-            if (!from) return true;
-            return (
-                String(h.color || "")
-                    .trim()
-                    .toLowerCase() === from
-            );
-        })
+    const candidates = outermost(parseHighlights(updated).highlights)
+        .filter((h) => from === "any" || (from === "default" ? h.color === null : h.color === from))
         .sort((a, b) => b.openTagStart - a.openTagStart);
 
     let changedCount = 0;
     for (const highlight of candidates) {
         const before = updated;
-        updated = updateHighlightColorInRaw(updated, highlight, targetColor);
+        updated = updateHighlightColorInRaw(updated, highlight, to);
         if (updated !== before) changedCount++;
     }
 
     return { raw: updated, changedCount };
 }
 
-export function migrateSpanHighlightsInRaw(raw: string): { raw: string; changedCount: number } {
-    let updated = String(raw ?? "");
+/**
+ * Turn the HTML highlights older versions wrote, `<mark style="background:
+ * …">` and background-coloured `<span>`s, into native `==` highlights in the
+ * nearest native colour. Code blocks are left alone.
+ */
+export function convertHtmlHighlightsInRaw(raw: string): { raw: string; changedCount: number } {
+    const source = String(raw ?? "");
+    const newline = detectNewline(source);
+    const lines = source.split(/\r?\n/);
+    const inFence = fencedLines(lines);
     let changedCount = 0;
 
-    // Convert <span style="background...">...</span> into <mark style="background...">...</mark>
-    // This is intentionally conservative: only spans with a background/background-color declaration are migrated.
-    const spanRe = /<span\b([^>]*)>([\s\S]*?)<\/span>/gi;
-    updated = updated.replace(spanRe, (full, attrs: string, inner: string) => {
-        const styleMatch = String(attrs || "").match(/\sstyle=(["'])([\s\S]*?)\1/i);
-        if (!styleMatch) return full;
-        const background = extractBackgroundFromStyle(styleMatch[2]);
-        if (!background) return full;
-        changedCount++;
-        return `<mark style="background: ${background}; color: black;">${inner}</mark>`;
+    const converted = lines.map((line, index) => {
+        if (inFence[index]) return line;
+        return line
+            .replace(/<mark\b([^>]*)>(.*?)<\/mark>/gi, (_full, attrs: string, inner: string) => {
+                changedCount++;
+                const style = extractStyleAttribute(` ${attrs}`);
+                const color = nearestHighlightColor(style ? extractBackgroundFromStyle(style.value) : null);
+                return wrapHighlight(stripHighlightMarkers(inner), color);
+            })
+            .replace(/<span\b([^>]*)>(.*?)<\/span>/gi, (full: string, attrs: string, inner: string) => {
+                const style = extractStyleAttribute(` ${attrs}`);
+                const background = style ? extractBackgroundFromStyle(style.value) : null;
+                if (!background) return full;
+                changedCount++;
+                return wrapHighlight(stripHighlightMarkers(inner), nearestHighlightColor(background));
+            });
     });
 
-    return { raw: updated, changedCount };
+    return { raw: converted.join(newline), changedCount };
+}
+
+/**
+ * Remove every highlight in the note, keeping its text. Works from the parsed
+ * highlights rather than a blanket `==` replace, so code (`a == b`) and lone
+ * markers are left as they are.
+ */
+export function removeAllHighlightsFromRaw(raw: string): { raw: string; removedCount: number } {
+    const source = String(raw ?? "");
+    const highlights = parseHighlights(source).highlights;
+    // Every marker is deleted in one pass, so a highlight nested in another
+    // cannot be thrown off by offsets that shifted under it.
+    const deletions = highlights.flatMap((h) => [
+        { start: h.openTagStart, end: h.openTagEnd },
+        { start: h.closeTagStart, end: h.closeTagEnd },
+    ]);
+    return { raw: applyDeletions(source, deletions), removedCount: highlights.length };
 }

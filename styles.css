@@ -2,142 +2,117 @@
    Reader Highlighter Tags - Styles
    ======================================== */
 
-/* === Floating Toolbar === */
-.reading-highlighter-float-container {
+/* === Floating Toolbar ===
+   The toolbar is one of Obsidian's own menus: off phones the container
+   carries `.menu` and every button is a `.clickable-icon`, so the theme and
+   its presets draw the surface, border, radius, shadow, icon and hover
+   colours exactly as on their context menus. Nothing here sets a colour of
+   its own. Phones draw `.menu` as a bottom sheet, so there the container
+   takes the same look from the menu variables. Only layout lives here, at
+   (0,1,1) so it holds against `.menu` and `.clickable-icon` (0,1,0). */
+body .reading-highlighter-float-container {
+    --rht-button-size: 30px;
+    --rht-swatch-size: var(--icon-s, 16px);
+    --icon-size: var(--icon-m, 18px);
     position: fixed;
-    z-index: 9999;
-    display: none;
-    gap: 8px;
+    z-index: var(--layer-menu);
     flex-direction: row;
     align-items: center;
-    /* No background - individual glass buttons */
-    padding: 0;
-    background: transparent;
-    border: none;
-    box-shadow: none;
+    gap: var(--size-2-1);
+    padding: var(--size-2-2);
+    max-height: none;
+    max-width: none;
+    overflow: visible;
 }
 
-.reading-highlighter-vertical {
+body.is-phone .reading-highlighter-float-container {
+    background-color: var(--menu-background);
+    border: var(--menu-border-width) solid var(--menu-border-color);
+    border-radius: var(--menu-radius);
+    box-shadow: var(--menu-shadow);
+}
+
+body .reading-highlighter-float-container.reading-highlighter-vertical {
     flex-direction: column;
 }
 
-/* High-Visibility Milky Blur (Uniform across themes) */
-.reading-highlighter-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: var(--button-radius);
-    padding: 8px;
-
-    /* Dark Mode: Suburban Border added */
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-
-    /* Dark Mode: Lighter grey to ensure visibility against dark bg */
-    background: rgba(80, 80, 80, 0.85);
-
-    /* High blur to smooth things out without sparkle (opacity helps) */
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-
-    /* Standard Shadow */
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    color: var(--text-normal);
-    transition: transform 0.1s ease-in-out, background-color 0.15s;
+body .reading-highlighter-float-container .reading-highlighter-btn {
+    width: var(--rht-button-size);
+    height: var(--rht-button-size);
+    padding: 0;
+    flex: 0 0 auto;
 }
 
-.reading-highlighter-btn svg,
-.reading-highlighter-btn .svg-icon {
-    width: 18px;
-    height: 18px;
+body .reading-highlighter-float-container .reading-highlighter-btn svg {
+    width: var(--icon-size);
+    height: var(--icon-size);
+}
+
+/* Erasing is the one destructive action, so it takes the theme's error
+   colour on hover, as a warning item does in Obsidian's menus. */
+body .reading-highlighter-float-container .reading-highlighter-remove-btn:hover {
+    color: var(--text-error);
+    --icon-color-hover: var(--text-error);
+}
+
+body .reading-highlighter-float-container .reading-highlighter-separator {
+    flex: none;
+    align-self: stretch;
+    width: var(--border-width, 1px);
+    margin: var(--size-2-1) var(--size-2-1);
+    background-color: var(--background-modifier-border);
+}
+
+body .reading-highlighter-float-container.reading-highlighter-vertical .reading-highlighter-separator {
+    width: auto;
+    height: var(--border-width, 1px);
+}
+
+/* === Native highlight colours ===
+   Obsidian's six highlight colours, drawn from the theme's own --color-*
+   variables like the swatches in Obsidian's highlight menu. Declared here as
+   well so they also show on versions before 1.14. */
+.reading-highlighter-swatch {
+    display: block;
     flex-shrink: 0;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgba(var(--mono-rgb-100), 0.1);
 }
 
-/* Light Mode Consistency */
-.theme-light .reading-highlighter-btn {
-    /* Match the Erase Button look EXACTLY: rgba(200, 200, 200, 0.95) */
-    background: rgba(200, 200, 200, 0.95);
-    color: var(--text-normal);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    /* Remove the border in light mode if erase doesn't have it */
-    border: none;
+.reading-highlighter-swatch[data-highlight="red"] {
+    background-color: var(--color-red);
 }
 
-.reading-highlighter-btn:hover {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-    transform: scale(1.05);
+.reading-highlighter-swatch[data-highlight="orange"] {
+    background-color: var(--color-orange);
 }
 
-.theme-light .reading-highlighter-btn:hover {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
+.reading-highlighter-swatch[data-highlight="yellow"] {
+    background-color: var(--color-yellow);
 }
 
-.reading-highlighter-btn:active {
-    transform: scale(0.95);
+.reading-highlighter-swatch[data-highlight="green"] {
+    background-color: var(--color-green);
 }
 
-.reading-highlighter-remove-btn {
-    background: rgba(80, 80, 80, 0.95);
+.reading-highlighter-swatch[data-highlight="blue"] {
+    background-color: var(--color-blue);
 }
 
-.theme-light .reading-highlighter-remove-btn {
-    background: rgba(200, 200, 200, 0.95);
-    border: none;
+.reading-highlighter-swatch[data-highlight="purple"] {
+    background-color: var(--color-purple);
 }
 
-/* Standardised Erase Hover - Red in BOTH modes */
-body .reading-highlighter-remove-btn:hover,
-body.theme-light .reading-highlighter-remove-btn:hover {
-    background: rgba(239, 83, 80, 1);
-    color: white;
-}
-
-/* === Color Palette === */
-.reading-highlighter-palette {
+body .reading-highlighter-palette {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 6px;
-    padding: 0;
-    border: none;
-    margin-left: 0;
-    max-width: 170px;
+    flex-direction: inherit;
+    align-items: center;
+    gap: inherit;
 }
 
-.reading-highlighter-color-btn {
-    width: 22px;
-    height: 22px;
-    border-radius: var(--button-radius);
-    border: 2px solid rgba(255, 255, 255, 0.4);
-    cursor: pointer;
-    transition: transform 0.1s, box-shadow 0.15s;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.theme-light .reading-highlighter-color-btn {
-    border: 2px solid rgba(0, 0, 0, 0.2);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.reading-highlighter-color-btn:hover {
-    transform: scale(1.15);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-}
-
-.reading-highlighter-color-btn:active {
-    transform: scale(0.95);
-}
-
-/* Vertical layout adjustments */
-.reading-highlighter-vertical .reading-highlighter-palette {
-    flex-direction: column;
-    border: none;
-    margin: 0;
-    padding: 0;
+body .reading-highlighter-float-container .reading-highlighter-btn .reading-highlighter-swatch {
+    width: var(--rht-swatch-size);
+    height: var(--rht-swatch-size);
 }
 
 /* === Tag Modal === */
@@ -543,7 +518,7 @@ body .highlight-navigator-container .highlight-navigator-list {
 .highlight-color-dot {
     width: 12px;
     height: 12px;
-    border-radius: var(--button-radius);
+    border-radius: 50%;
     flex-shrink: 0;
     margin-top: 4px;
 }
@@ -646,20 +621,6 @@ body .highlight-navigator-container .highlight-navigator-footer-buttons {
 
 /* === Mobile Adjustments === */
 @media (max-width: 768px) {
-    .reading-highlighter-float-container {
-        gap: 10px;
-    }
-
-    .reading-highlighter-btn {
-        width: 44px;
-        height: 44px;
-    }
-
-    .reading-highlighter-color-btn {
-        width: 32px;
-        height: 32px;
-    }
-
     .highlight-navigator-item {
         padding: 14px 12px;
     }
@@ -683,50 +644,12 @@ body .highlight-navigator-container .highlight-navigator-footer-buttons {
     }
 }
 
-/* === Android-Specific Enhancements === */
-/* Larger touch targets and higher contrast for Android devices */
-.is-android .reading-highlighter-float-container {
-    gap: 10px;
-    /* Subtle container background so buttons stand out better */
-    background: rgba(30, 30, 30, 0.45);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-radius: var(--radius-l);
-    padding: 6px 10px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-}
-
-.is-android.theme-light .reading-highlighter-float-container {
-    background: rgba(240, 240, 240, 0.7);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-}
-
-.is-android .reading-highlighter-btn {
-    width: 48px;
-    height: 48px;
-    /* Higher opacity for better visibility */
-    background: rgba(80, 80, 80, 0.95);
-}
-
-.is-android.theme-light .reading-highlighter-btn {
-    background: rgba(200, 200, 200, 0.98);
-}
-
-.is-android .reading-highlighter-color-btn {
-    width: 36px;
-    height: 36px;
-}
-
-.is-android .reading-highlighter-btn svg,
-.is-android .reading-highlighter-btn .svg-icon {
-    width: 22px;
-    height: 22px;
-}
-
-/* Vertical layout: also apply container styling */
-.is-android .reading-highlighter-vertical {
-    border-radius: var(--radius-l);
-    padding: 10px 6px;
+/* === Touch: larger targets === */
+body.is-mobile .reading-highlighter-float-container {
+    --rht-button-size: 40px;
+    --rht-swatch-size: 20px;
+    --icon-size: var(--icon-l, 20px);
+    gap: var(--size-2-2);
 }
 
 /* === Mobile: Push annotation modal to top when keyboard is open === */
@@ -1356,12 +1279,9 @@ body .reading-highlighter-float-container.is-pdf-view button.pdf-only-btn {
     margin: 1.33em 0 0.5em;
 }
 
-/* Colour swatch shown beside each semantic colour in settings. The colour
-   itself is applied inline, since it is user data rather than styling. */
-.rht-color-swatch {
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    margin-right: 10px;
-    flex-shrink: 0;
+/* Colour swatch shown beside each palette colour in settings. */
+.setting-item-control .rht-color-swatch {
+    width: 18px;
+    height: 18px;
+    margin-right: var(--size-4-2);
 }

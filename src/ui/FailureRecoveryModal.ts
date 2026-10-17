@@ -87,12 +87,7 @@ export class FailureRecoveryModal extends Modal {
                         new Notice("Please provide the corrected text.");
                         return;
                     }
-                    let finalTarget = this.correction;
-                    const markerMatch = this.correction.match(/==([\s\S]*?)==/);
-                    if (markerMatch) {
-                        finalTarget = markerMatch[1].trim();
-                    }
-                    void this.onSubmit(finalTarget, null);
+                    void this.onSubmit(this.target(), null);
                     this.close();
                 })
             )
@@ -106,14 +101,7 @@ export class FailureRecoveryModal extends Modal {
                             return;
                         }
 
-                        let finalTarget = this.correction;
-
-                        // Manual Marker Recognition: Extract text between the first pair of ==
-                        const markerMatch = this.correction.match(/==([\s\S]*?)==/);
-                        if (markerMatch) {
-                            finalTarget = markerMatch[1].trim();
-                        }
-
+                        const finalTarget = this.target();
                         const rule = this.deriveRule(this.report.rawSnippet, finalTarget);
                         // Pass the target even if rule.error exists (non-blocking)
                         void this.onSubmit(finalTarget, rule.error ? null : rule);
@@ -122,12 +110,20 @@ export class FailureRecoveryModal extends Modal {
             );
     }
 
+    /** The text to highlight: what sits between the first pair of `==`, or all of it. */
+    target(): string {
+        const markerMatch = this.correction.match(/==([\s\S]*?)==/);
+        return markerMatch ? markerMatch[1].trim() : this.correction;
+    }
+
     updatePreview(container: HTMLElement) {
         if (!this.correction || this.correction.length < 10) {
             container.setText("");
             return;
         }
-        const rule = this.deriveRule(this.report.rawSnippet, this.correction);
+        // Derived from the same text "Apply & learn" uses, markers removed, so
+        // the preview tells the truth about what will be learned.
+        const rule = this.deriveRule(this.report.rawSnippet, this.target());
         if (rule.error) {
             container.setText(`📝 Note: Highlight will apply, but no rule learned (Reason: ${rule.error})`);
             container.setCssStyles({ color: "var(--text-muted)" });

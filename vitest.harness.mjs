@@ -1,10 +1,10 @@
 import { defineConfig } from "vitest/config";
-import path from "node:path";
 
 export default defineConfig({
-    resolve: { alias: { obsidian: path.resolve("./tests/obsidian-stub.js") } },
+    resolve: { alias: { obsidian: new URL("./tests/obsidian-stub.js", import.meta.url).pathname } },
     test: {
         include: ["vaultharness/**/*.test.js"],
+        environment: "jsdom",
         setupFiles: ["./tests/setup.js"],
         testTimeout: 300000,
         hookTimeout: 300000,

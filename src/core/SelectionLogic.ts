@@ -1,6 +1,7 @@
 import { App, TFile, MarkdownView } from "obsidian";
 import { BlockKind, SourceBlock, splitSourceBlocks, findBlockAt } from "../utils/sourceBlocks";
 import type { SelectionHint } from "../utils/blockOccurrence";
+import { colorAt } from "../utils/colors";
 
 interface LearnedRule {
     stripPattern?: string;
@@ -127,6 +128,9 @@ const MARKDOWN_PREFIX_ONLY_RE =
 // Those are handled by the Structural Filter (for source) and should be literal-matchable when present.
 const INLINE_DECORATION_RE =
     /<mark[^>]*>|<\/mark>|%%[^%]*%%|==|\*\*|~~|\*|_|`|\[\[|\]\]|\\\$|\\\^|\\\\|\\\{|\\\}|\\\|/g;
+// Highlight markup the structural filter removes. Shared, so the filter can
+// recognise it and treat colour emoji specially.
+const HIGHLIGHT_MARKUP_RE = /==|<mark[^>]*>|<\/mark>/g;
 
 export class SelectionLogic {
     app: App;
@@ -555,7 +559,7 @@ export class SelectionLogic {
             // Block IDs: ^abc123 (hidden in reading view)
             /[ \t]\^[a-zA-Z0-9-]+(?=\s|$)/g,
             // Plugin-injected highlighting
-            /==|<mark[^>]*>|<\/mark>/g,
+            HIGHLIGHT_MARKUP_RE,
             // Table alignment rows
             /(?:^|\n)[ \t]*\|?[ \t:|-]+\|[ \t:|-]*(?=\n|$)/g,
             // Link URL portion: ](https://...)
@@ -590,8 +594,27 @@ export class SelectionLogic {
             regex.lastIndex = 0;
             const matches: { start: number; end: number; length: number }[] = [];
 
-            // Special handling for footnotes
-            if (regex.source === "\\[\\^[^\\]]+\\]") {
+            if (regex === HIGHLIGHT_MARKUP_RE) {
+                // An opening `==` may carry a colour emoji (`==🟡text==`) that
+                // Reading view never shows, so it goes with the marker. Markers
+                // pair left to right within a line, as Obsidian reads them; an
+                // emoji after a closing marker is visible text and stays.
+                let open = false;
+                let previousEnd = 0;
+                while ((match = regex.exec(currentText)) !== null) {
+                    let length = match[0].length;
+                    if (match[0] === "==") {
+                        const newlineBetween = currentText.indexOf("\n", previousEnd);
+                        if (newlineBetween !== -1 && newlineBetween < match.index) open = false;
+                        if (!open) length += colorAt(currentText, match.index + 2).length;
+                        open = !open;
+                    }
+                    previousEnd = match.index + length;
+                    regex.lastIndex = previousEnd;
+                    matches.push({ start: match.index, end: previousEnd, length });
+                }
+            } else if (regex.source === "\\[\\^[^\\]]+\\]") {
+                // Special handling for footnotes
                 while ((match = regex.exec(currentText)) !== null) {
                     const content = match[0].substring(2, match[0].length - 1);
                     // ONLY strip citations (numbers, separators, syms, NO letters)

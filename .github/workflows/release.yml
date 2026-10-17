@@ -26,8 +26,19 @@ jobs:
       - name: Check formatting (Prettier)
         run: npm run format:check
 
+      # Lint with the newest Obsidian ruleset, not just the version in the
+      # lockfile: the review bot uses the current release, so a new rule
+      # should fail here first.
+      - name: Use the latest Obsidian ESLint rules
+        run: |
+          npm install --no-save --legacy-peer-deps eslint-plugin-obsidianmd@latest
+          echo "eslint-plugin-obsidianmd $(node -p "require('eslint-plugin-obsidianmd/package.json').version")"
+
       - name: Lint (ESLint + Obsidian plugin rules)
-        run: npm run lint
+        run: npx eslint . --max-warnings=0
+
+      - name: Lint as the review bot does (obsidianmd recommended only)
+        run: npx eslint . -c eslint.review.config.mjs --max-warnings=0
 
       - name: Test
         run: npm test

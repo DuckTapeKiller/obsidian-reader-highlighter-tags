@@ -5,8 +5,18 @@
 import { App, TFile } from "obsidian";
 import type { Highlight } from "./highlights";
 import { formatDate } from "./time";
+import type { HighlightColor } from "./colors";
 
 export type HighlightWithFile = Highlight & { file: TFile };
+
+const CANVAS_COLORS: Record<HighlightColor, string> = {
+    red: "1",
+    orange: "2",
+    yellow: "3",
+    green: "4",
+    blue: "5",
+    purple: "6",
+};
 
 interface CanvasNode {
     id: string;
@@ -76,29 +86,8 @@ export async function exportHighlightsToCanvas(app: App, allHighlights: Highligh
         for (const h of group.highlights) {
             const hNodeId = generateId();
 
-            // Try to map a semantic color to a canvas color index if available
-            // Canvas colors: 1:red, 2:orange, 3:yellow, 4:green, 5:cyan, 6:purple
-            let canvasColor = "";
-            if (h.color) {
-                const colorMap: Record<string, string> = {
-                    "#ffcdd2": "1",
-                    "#f8bbd0": "6",
-                    "#e1bee7": "6",
-                    "#d1c4e9": "6",
-                    "#c5cae9": "6",
-                    "#bbdefb": "5",
-                    "#b3e5fc": "5",
-                    "#b2ebf2": "5",
-                    "#b2dfdb": "4",
-                    "#c8e6c9": "4",
-                    "#dcedc8": "4",
-                    "#f0f4c0": "3",
-                    "#fff9c4": "3",
-                    "#ffecb3": "2",
-                    "#ffe0b2": "2",
-                };
-                canvasColor = colorMap[h.color.toLowerCase()] || "";
-            }
+            // Canvas colours: 1 red, 2 orange, 3 yellow, 4 green, 5 cyan, 6 purple.
+            const canvasColor = h.color ? CANVAS_COLORS[h.color] : "";
 
             nodes.push({
                 id: hNodeId,

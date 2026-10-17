@@ -79,7 +79,12 @@ export class Notice {
 }
 Notice.messages = [];
 
-export const Platform = { isMobile: false, isDesktop: true, isIosApp: false };
+export const Platform = { isMobile: false, isPhone: false, isDesktop: true, isIosApp: false };
+export function normalizePath(path) {
+    return String(path)
+        .replace(/[\\/]+/g, "/")
+        .replace(/^\/|\/$/g, "");
+}
 export function setIcon() {}
 export async function loadPdfJs() {
     return {};

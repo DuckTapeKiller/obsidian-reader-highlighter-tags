@@ -3,6 +3,7 @@ import type ReadingHighlighterPlugin from "../main";
 import { VaultScanner, type ScanResult } from "../core/VaultScanner";
 import { exportHighlightsToCanvas } from "../utils/canvas";
 import type { Highlight } from "../utils/highlights";
+import type { HighlightColor } from "../utils/colors";
 
 export const RESEARCH_VIEW = "reader-research-view";
 
@@ -28,7 +29,7 @@ export class ResearchView extends ItemView {
     filterKey: string;
     filterValue: string;
     allPropertyKeys: Set<string>;
-    activeColors: Set<string>;
+    activeColors: Set<HighlightColor>;
     isScanning: boolean;
     expandedFiles: Set<string>;
     progressEl: HTMLElement | null;
@@ -132,18 +133,16 @@ export class ResearchView extends ItemView {
                 });
 
                 // Dot indicator
-                const dot = chip.createSpan({ cls: "research-color-dot" });
-                dot.setCssStyles({ backgroundColor: colorItem.color });
+                this.colorDot(chip, colorItem.color);
 
                 chip.createSpan({ text: colorItem.meaning });
 
                 chip.onclick = () => {
-                    const lcColor = colorItem.color.toLowerCase();
-                    if (this.activeColors.has(lcColor)) {
-                        this.activeColors.delete(lcColor);
+                    if (this.activeColors.has(colorItem.color)) {
+                        this.activeColors.delete(colorItem.color);
                         chip.removeClass("is-active");
                     } else {
-                        this.activeColors.add(lcColor);
+                        this.activeColors.add(colorItem.color);
                         chip.addClass("is-active");
                     }
                     this.renderContent();
@@ -293,10 +292,7 @@ export class ResearchView extends ItemView {
 
         // Apply color filter
         if (this.activeColors.size > 0) {
-            allHighlights = allHighlights.filter((h) => {
-                if (!h.color) return false;
-                return this.activeColors.has(h.color.toLowerCase());
-            });
+            allHighlights = allHighlights.filter((h) => h.color !== null && this.activeColors.has(h.color));
         }
 
         // Stats summary
@@ -333,10 +329,7 @@ export class ResearchView extends ItemView {
                 group.highlights.forEach((h) => {
                     const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
 
-                    if (h.color) {
-                        const dot = itemEl.createSpan({ cls: "research-color-dot" });
-                        dot.setCssStyles({ backgroundColor: h.color });
-                    }
+                    if (h.color) this.colorDot(itemEl, h.color);
 
                     itemEl.createSpan({ cls: "research-item-text", text: h.text });
 
@@ -357,10 +350,7 @@ export class ResearchView extends ItemView {
                 const itemEl = listEl.createDiv({ cls: "research-highlight-item" });
 
                 // Color dot
-                if (h.color) {
-                    const dot = itemEl.createSpan({ cls: "research-color-dot" });
-                    dot.setCssStyles({ backgroundColor: h.color });
-                }
+                if (h.color) this.colorDot(itemEl, h.color);
 
                 // Highlight text (truncated for readability)
                 const displayText = h.text.length > 120 ? h.text.substring(0, 120) + "..." : h.text;
@@ -376,6 +366,14 @@ export class ResearchView extends ItemView {
                 };
             }
         }
+    }
+
+    /** A dot in the native colour, drawn from the theme's own colour variables. */
+    colorDot(parent: HTMLElement, color: HighlightColor) {
+        parent.createSpan({
+            cls: "research-color-dot highlight-swatch reading-highlighter-swatch",
+            attr: { "data-highlight": color },
+        });
     }
 
     async jumpToHighlight(file: TFile, line: number) {
@@ -402,10 +400,7 @@ export class ResearchView extends ItemView {
         }
 
         if (this.activeColors.size > 0) {
-            allHighlights = allHighlights.filter((h) => {
-                if (!h.color) return false;
-                return this.activeColors.has(h.color.toLowerCase());
-            });
+            allHighlights = allHighlights.filter((h) => h.color !== null && this.activeColors.has(h.color));
         }
 
         if (allHighlights.length === 0) {

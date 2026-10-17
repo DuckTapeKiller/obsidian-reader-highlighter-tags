@@ -3,13 +3,13 @@ import { describe, it, expect } from "vitest";
 import ReadingHighlighterPlugin from "../src/main";
 import { SelectionLogic } from "../src/core/SelectionLogic";
 import { TFile } from "./obsidian-stub.js";
-import { createObsidianWindow } from "./dom-helpers.js";
+import { createObsidianWindow, renderHtml } from "./dom-helpers.js";
 
 export async function setup(raw, html) {
     const window = createObsidianWindow();
     const doc = window.document;
     const content = doc.getElementById("content");
-    content.innerHTML = html;
+    renderHtml(content, html);
 
     const file = new TFile("note.md");
     let current = raw;

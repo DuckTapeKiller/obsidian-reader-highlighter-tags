@@ -10,6 +10,7 @@ import {
     TFile,
     WorkspaceLeaf,
     loadPdfJs,
+    normalizePath,
     type SettingDefinitionItem,
 } from "obsidian";
 import { FloatingManager, type SelectionSnapshot } from "./ui/FloatingManager";
@@ -24,17 +25,28 @@ import { FailureRecoveryModal, type DerivedRule } from "./ui/FailureRecoveryModa
 import {
     parseHighlights,
     mergeAdjacentHighlightsInRaw,
-    migrateSpanHighlightsInRaw,
-    recolorMarkHighlightsInRaw,
+    convertHtmlHighlightsInRaw,
+    recolorHighlightsInRaw,
+    removeAllHighlightsFromRaw,
     removeFootnoteFromRaw,
     removeAllFootnotesFromRaw,
+    type RecolorSource,
 } from "./utils/highlights";
+import {
+    COLOR_LABELS,
+    HIGHLIGHT_COLORS,
+    isHighlightColor,
+    nearestHighlightColor,
+    stripHighlightMarkers,
+    wrapHighlight,
+    type HighlightColor,
+} from "./utils/colors";
 import { getSelectedOccurrence, type SelectionHint } from "./utils/blockOccurrence";
 import { kindForTag, type BlockKind } from "./utils/sourceBlocks";
 import { BulkRecolorModal } from "./modals/BulkRecolorModal";
 
 export interface SemanticColor {
-    color: string;
+    color: HighlightColor;
     meaning: string;
 }
 
@@ -42,10 +54,17 @@ interface LearnedNormRule {
     stripPattern: string;
 }
 
+/** Settings written by versions that coloured highlights with HTML. */
+interface LegacyColorSettings {
+    enableColorHighlighting?: boolean;
+    highlightColor?: string;
+    semanticColors?: { color?: string; meaning?: string }[];
+}
+
 interface ReadingHighlighterSettings {
     toolbarPosition: string;
-    enableColorHighlighting: boolean;
-    highlightColor: string;
+    /** Colour the plain highlight button writes; empty for the theme's default. */
+    defaultHighlightColor: HighlightColor | "";
     defaultTagPrefix: string;
     enableHaptics: boolean;
     showTagButton: boolean;
@@ -77,8 +96,7 @@ const FRONTMATTER_RESERVED_RE = /^(true|false|null|yes|no|on|off)$/i;
 
 const DEFAULT_SETTINGS: ReadingHighlighterSettings = {
     toolbarPosition: "right",
-    enableColorHighlighting: false,
-    highlightColor: "",
+    defaultHighlightColor: "",
     defaultTagPrefix: "",
     enableHaptics: true,
     showTagButton: true,
@@ -86,23 +104,7 @@ const DEFAULT_SETTINGS: ReadingHighlighterSettings = {
     showQuoteButton: true,
     enableColorPalette: false,
     showOnlyAssignedColors: true,
-    semanticColors: [
-        { color: "#FFCDD2", meaning: "Important" },
-        { color: "#F8BBD0", meaning: "" },
-        { color: "#E1BEE7", meaning: "" },
-        { color: "#D1C4E9", meaning: "" },
-        { color: "#C5CAE9", meaning: "" },
-        { color: "#BBDEFB", meaning: "Vocabulary" },
-        { color: "#B3E5FC", meaning: "" },
-        { color: "#B2EBF2", meaning: "" },
-        { color: "#B2DFDB", meaning: "" },
-        { color: "#C8E6C9", meaning: "Key Concept" },
-        { color: "#DCEDC8", meaning: "" },
-        { color: "#F0F4C0", meaning: "" },
-        { color: "#FFF9C4", meaning: "General" },
-        { color: "#FFECB3", meaning: "" },
-        { color: "#FFE0B2", meaning: "" },
-    ],
+    semanticColors: HIGHLIGHT_COLORS.map((color) => ({ color, meaning: "" })),
     quoteTemplate: "> {{text}}\n>\n> — [[{{file}}]]",
     enableAnnotations: true,
     showAnnotationButton: true,
@@ -118,6 +120,26 @@ const DEFAULT_SETTINGS: ReadingHighlighterSettings = {
     enableSmartParagraphSelection: false,
     learnedNormRules: [],
 };
+
+/**
+ * The palette, one entry per native colour in Obsidian's order.
+ *
+ * Older versions kept fifteen hex colours. Each meaning the reader gave one of
+ * those moves to the native colour nearest it, so a taxonomy survives the
+ * switch; two meanings landing on one colour are joined rather than lost.
+ */
+function migratePalette(saved: LegacyColorSettings["semanticColors"]): SemanticColor[] {
+    const palette: SemanticColor[] = HIGHLIGHT_COLORS.map((color) => ({ color, meaning: "" }));
+    for (const entry of saved ?? []) {
+        const meaning = (entry?.meaning ?? "").trim();
+        const color = isHighlightColor(entry?.color) ? entry.color : nearestHighlightColor(entry?.color);
+        if (!meaning || !color) continue;
+        const target = palette[HIGHLIGHT_COLORS.indexOf(color)];
+        const existing = target.meaning.split(" / ").filter(Boolean);
+        if (!existing.includes(meaning)) target.meaning = [...existing, meaning].join(" / ");
+    }
+    return palette;
+}
 
 // Stringify an unknown frontmatter value the same way `String(value || "")`
 // did, but in a form the type-checker is happy with.
@@ -168,8 +190,16 @@ export default class ReadingHighlighterPlugin extends Plugin {
     settings: ReadingHighlighterSettings;
     floatingManager: FloatingManager;
     logic: SelectionLogic;
-    lastModification: { file: TFile; original: string } | null = null;
+    /**
+     * What "Undo last highlight" restores. `after` is the note as the plugin
+     * left it; undo refuses once the note no longer reads that way, since
+     * restoring `original` would throw away whatever was written since.
+     */
+    lastModification: { file: TFile; original: string; after?: string } | null = null;
     lastScrollPosition: ScrollPosition | null = null;
+    /** A reading position waiting to be saved once scrolling settles. */
+    pendingProgress: { view: MarkdownView; file: TFile } | null = null;
+    progressTimer: number | null = null;
 
     async onload() {
         await this.loadSettings();
@@ -184,9 +214,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
         this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
         this.registerCommands();
 
-        this.registerDomEvent(activeDocument, "selectionchange", () => {
-            this.floatingManager.handleSelection();
-        });
+        this.registerWindowEvents(activeDocument);
+        // A popout window has a document of its own, which fires its own
+        // selection and scroll events.
+        this.registerEvent(this.app.workspace.on("window-open", (win) => this.registerWindowEvents(win.doc)));
 
         this.registerEvent(
             this.app.workspace.on("active-leaf-change", () => {
@@ -196,9 +227,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         this.registerEvent(
             this.app.workspace.on("active-leaf-change", () => {
-                if (this.settings.enableReadingProgress) {
-                    this.saveReadingProgress();
-                }
+                // The position waiting to be saved belongs to the note being left.
+                this.flushReadingProgress();
             })
         );
 
@@ -391,8 +421,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
         });
 
         this.addCommand({
-            id: "recolor-mark-highlights",
-            name: "Recolor <mark> highlights in note…",
+            id: "recolor-highlights",
+            name: "Recolour highlights in note…",
             checkCallback: (checking) => {
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (!view || !view.file) return false;
@@ -403,13 +433,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
         });
 
         this.addCommand({
-            id: "migrate-span-highlights",
-            name: "Migrate <span> highlights to <mark> in note",
+            id: "convert-html-highlights",
+            name: "Convert HTML highlights to native highlights in note",
             checkCallback: (checking) => {
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (!view || !view.file) return false;
                 if (checking) return true;
-                void this.migrateSpanHighlightsInFile(view.file);
+                void this.convertHtmlHighlightsInFile(view.file);
                 return true;
             },
         });
@@ -426,12 +456,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
             },
         });
 
-        for (let i = 0; i < 9; i++) {
+        // The ids keep their old numbering, so hotkeys bound to the first six
+        // still work; each now names the native colour it applies.
+        HIGHLIGHT_COLORS.forEach((color, i) => {
             this.addCommand({
                 id: `apply-color-${i + 1}`,
-                name: `Apply highlight color ${i + 1}`,
+                name: `Apply ${COLOR_LABELS[color].toLowerCase()} highlight`,
                 checkCallback: (checking) => {
-                    if (!this.settings.enableColorPalette) return false;
                     const view = this.getActiveReadingView();
                     if (!view) return false;
                     if (checking) return true;
@@ -439,7 +470,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                     return true;
                 },
             });
-        }
+        });
     }
 
     async activateResearchView() {
@@ -456,14 +487,30 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     onunload() {
+        this.flushReadingProgress();
         this.floatingManager.unload();
     }
 
-    async loadSettings() {
-        const loaded = ((await this.loadData()) as Partial<ReadingHighlighterSettings>) || {};
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded, {
-            semanticColors: loaded.semanticColors?.length ? loaded.semanticColors : DEFAULT_SETTINGS.semanticColors,
+    registerWindowEvents(doc: Document) {
+        this.registerDomEvent(doc, "selectionchange", () => {
+            this.floatingManager.handleSelection();
         });
+        // Scroll does not bubble, so listen in the capture phase.
+        this.registerDomEvent(doc, "scroll", (evt) => this.onReadingScroll(evt), { capture: true, passive: true });
+    }
+
+    async loadSettings() {
+        const loaded = ((await this.loadData()) as Partial<ReadingHighlighterSettings> & LegacyColorSettings) || {};
+        const { enableColorHighlighting, highlightColor, ...current } = loaded;
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, current, {
+            semanticColors: migratePalette(loaded.semanticColors),
+        });
+        if (!isHighlightColor(this.settings.defaultHighlightColor)) {
+            // A default colour chosen when highlights were HTML becomes the
+            // nearest native one.
+            this.settings.defaultHighlightColor =
+                (enableColorHighlighting && nearestHighlightColor(highlightColor)) || "";
+        }
     }
 
     async saveSettings() {
@@ -612,13 +659,28 @@ export default class ReadingHighlighterPlugin extends Plugin {
         };
     }
 
+    /** Record the note as a change left it, so undo can tell if it was edited since. */
+    async recordUndoResult(file: TFile, content?: string) {
+        const last = this.lastModification;
+        if (!last || last.file !== file) return;
+        last.after = content ?? (await this.app.vault.read(file));
+    }
+
     async undoLastHighlight() {
-        if (!this.lastModification) {
+        const last = this.lastModification;
+        // Without a recorded result the change was never written (a tag or
+        // annotation dialog that was cancelled), so there is nothing to undo.
+        if (!last || last.after === undefined) {
             new Notice("Nothing to undo.");
             return;
         }
         try {
-            await this.app.vault.modify(this.lastModification.file, this.lastModification.original);
+            const current = await this.app.vault.read(last.file);
+            if (current !== last.after) {
+                new Notice("The note has changed since, so undoing would lose those changes.");
+                return;
+            }
+            await this.app.vault.modify(last.file, last.original);
             new Notice("Undone last highlight.");
             this.lastModification = null;
         } catch (err) {
@@ -714,12 +776,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
         const scrollPos = getScroll(view);
 
-        let mode = "highlight";
-        let payload = "";
-        if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-            mode = "color";
-            payload = this.settings.highlightColor;
-        }
+        const mode = "highlight";
+        const payload = "";
 
         // A selection spanning several blocks is handled one block at a time.
         // Matching a whole article as a single snippet asks the engine to align
@@ -787,7 +845,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
         snippet = this.sanitizePdfText(snippet);
         const pdfName = view.file.basename;
-        const companionFile = `${view.file.parent?.path}/${pdfName} - Highlights.md`;
+        // normalizePath, because a PDF at the vault root has the parent path
+        // "/" and the joined path would start with "//".
+        const companionFile = normalizePath(`${view.file.parent?.path ?? ""}/${pdfName} - Highlights.md`);
         const fileExists = this.app.vault.getAbstractFileByPath(companionFile);
 
         let highlightOutput = snippet.trim();
@@ -795,7 +855,11 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const index = typeof payload === "number" ? payload : parseInt(payload);
             const palette = this.settings.semanticColors[index];
             if (palette) {
-                highlightOutput = `<mark style="background: ${palette.color}">${highlightOutput}</mark>`;
+                // One highlight per line: a pair cannot span the quote's lines.
+                highlightOutput = highlightOutput
+                    .split("\n")
+                    .map((line) => wrapHighlight(line, palette.color))
+                    .join("\n");
             }
         } else if (mode === "action") {
             if (payload === "highlightSelection") {
@@ -1026,6 +1090,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         let newContent = beforeSelection + footnoteRef + afterSelection;
         newContent = newContent.trimEnd() + footnoteDef + "\n";
         await this.app.vault.modify(file, newContent);
+        await this.recordUndoResult(file, newContent);
     }
 
     async removeHighlightSelection(view: MarkdownView, selectionSnapshot?: SelectionSnapshot | null) {
@@ -1061,11 +1126,19 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     async removeAllHighlights(view: MarkdownView) {
-        await this.saveUndoState(view.file);
-        let raw = await this.app.vault.read(view.file);
-        raw = raw.replace(/==(.*?)==/gs, "$1");
-        raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/gs, "$1");
-        await this.app.vault.modify(view.file, raw);
+        await this.removeAllHighlightsInFile(view.file);
+    }
+
+    async removeAllHighlightsInFile(file: TFile) {
+        await this.saveUndoState(file);
+        const raw = await this.app.vault.read(file);
+        const result = removeAllHighlightsFromRaw(raw);
+        if (!result.removedCount) {
+            new Notice("No highlights to remove.");
+            return;
+        }
+        await this.app.vault.modify(file, result.raw);
+        await this.recordUndoResult(file, result.raw);
         new Notice("All highlights removed.");
     }
 
@@ -1078,6 +1151,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             return;
         }
         await this.app.vault.modify(file, result.raw);
+        await this.recordUndoResult(file, result.raw);
         new Notice("Annotation removed.");
     }
 
@@ -1090,6 +1164,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             return;
         }
         await this.app.vault.modify(file, result.raw);
+        await this.recordUndoResult(file, result.raw);
         new Notice(`Removed ${result.removedCount} annotation${result.removedCount === 1 ? "" : "s"}.`);
     }
 
@@ -1104,41 +1179,40 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
 
         await this.app.vault.modify(file, result.raw);
+        await this.recordUndoResult(file, result.raw);
         new Notice(`Merged ${result.mergedCount} highlight${result.mergedCount === 1 ? "" : "s"}.`);
     }
 
-    async recolorMarkHighlightsInFile(file: TFile, fromColor: string, toColor: string) {
-        const targetColor = String(toColor || "").trim();
-        if (!targetColor) {
-            new Notice("Choose a target color first.");
-            return;
-        }
-
+    async recolorHighlightsInFile(file: TFile, from: RecolorSource, to: HighlightColor | null) {
         await this.saveUndoState(file);
         const raw = await this.app.vault.read(file);
-        const result = recolorMarkHighlightsInRaw(raw, { fromColor, toColor: targetColor });
+        const result = recolorHighlightsInRaw(raw, { from, to });
 
         if (!result.changedCount) {
-            new Notice("No matching <mark> highlights to recolor.");
+            new Notice("No matching highlights to recolour.");
             return;
         }
 
         await this.app.vault.modify(file, result.raw);
-        new Notice(`Recolored ${result.changedCount} highlight${result.changedCount === 1 ? "" : "s"}.`);
+        await this.recordUndoResult(file, result.raw);
+        new Notice(`Recoloured ${result.changedCount} highlight${result.changedCount === 1 ? "" : "s"}.`);
     }
 
-    async migrateSpanHighlightsInFile(file: TFile) {
+    async convertHtmlHighlightsInFile(file: TFile) {
         await this.saveUndoState(file);
         const raw = await this.app.vault.read(file);
-        const result = migrateSpanHighlightsInRaw(raw);
+        const result = convertHtmlHighlightsInRaw(raw);
 
         if (!result.changedCount) {
-            new Notice("No <span> background highlights found to migrate.");
+            new Notice("No HTML highlights in this note.");
             return;
         }
 
         await this.app.vault.modify(file, result.raw);
-        new Notice(`Migrated ${result.changedCount} highlight${result.changedCount === 1 ? "" : "s"} to <mark>.`);
+        await this.recordUndoResult(file, result.raw);
+        new Notice(
+            `Converted ${result.changedCount} HTML highlight${result.changedCount === 1 ? "" : "s"} to native highlights.`
+        );
     }
 
     async exportHighlights(view: MarkdownView) {
@@ -1208,7 +1282,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     async applyColorHighlight(
         view: MarkdownView,
-        color: string,
+        color: HighlightColor,
         autoTag = "",
         selectionSnapshot?: SelectionSnapshot | null
     ) {
@@ -1239,14 +1313,42 @@ export default class ReadingHighlighterPlugin extends Plugin {
         new Notice("Highlighted!");
     }
 
-    saveReadingProgress() {
+    /**
+     * Note where the active reading view has scrolled to, once it stops.
+     *
+     * Saving on `active-leaf-change` alone read the note being *opened*, not
+     * the one being left, and missed navigation within a tab altogether.
+     */
+    onReadingScroll(evt: Event) {
+        if (!this.settings.enableReadingProgress) return;
         const view = this.getActiveReadingView();
-        if (!view || !view.file) return;
-        const pos = getScroll(view);
-        if (pos && pos.y > 0) {
-            this.settings.readingPositions[view.file.path] = pos.y;
-            void this.saveData(this.settings);
+        const target = evt.target as Node | null;
+        if (!view?.file || !target || !view.containerEl.contains(target)) return;
+        this.pendingProgress = { view, file: view.file };
+        if (this.progressTimer !== null) window.clearTimeout(this.progressTimer);
+        this.progressTimer = window.setTimeout(() => this.flushReadingProgress(), 800);
+    }
+
+    flushReadingProgress() {
+        if (this.progressTimer !== null) {
+            window.clearTimeout(this.progressTimer);
+            this.progressTimer = null;
         }
+        const pending = this.pendingProgress;
+        this.pendingProgress = null;
+        // A tab that has moved on to another note scrolls for that note now.
+        if (!pending || pending.view.file !== pending.file || !this.settings.enableReadingProgress) return;
+        let y = 0;
+        try {
+            y = getScroll(pending.view).y;
+        } catch {
+            return;
+        }
+        const path = pending.file.path;
+        if (y > 0) this.settings.readingPositions[path] = y;
+        else if (path in this.settings.readingPositions) delete this.settings.readingPositions[path];
+        else return;
+        void this.saveData(this.settings);
     }
 
     async resumeReading(view: MarkdownView) {
@@ -1453,18 +1555,14 @@ export default class ReadingHighlighterPlugin extends Plugin {
         selectionStart: number,
         selectionEnd: number,
         mode: string,
-        payload: string
+        color: HighlightColor | null
     ): string {
         const cells = this.splitTableCells(line);
         const pieces: string[] = [];
 
         cells.forEach((cell, index) => {
             const text = line.substring(cell.start, cell.end);
-            const stripped = text
-                .replace(/<mark[^>]*>/g, "")
-                .replace(/<\/mark>/g, "")
-                .split("==")
-                .join("");
+            const stripped = stripHighlightMarkers(text.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, ""));
             const trimmed = stripped.trim();
 
             // The fragments outside the outer pipes are not cells.
@@ -1484,16 +1582,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 return;
             }
 
-            const leadWS = stripped.match(/^(\s*)/)?.[1] ?? "";
-            const trailWS = stripped.match(/(\s*)$/)?.[1] ?? "";
-            let wrapped: string;
-            if (mode === "color" || (this.settings.enableColorHighlighting && this.settings.highlightColor)) {
-                const color = mode === "color" ? payload : this.settings.highlightColor;
-                wrapped = `<mark style="background: ${color}; color: black;">${trimmed}</mark>`;
-            } else {
-                wrapped = `==${trimmed}==`;
-            }
-            pieces.push(`${leadWS}${wrapped}${trailWS}`);
+            pieces.push(wrapHighlight(stripped, color));
         });
 
         return pieces.join("|");
@@ -1562,14 +1651,28 @@ export default class ReadingHighlighterPlugin extends Plugin {
         // the range to the union of the selection and every highlight it touches;
         // the interior markers are then stripped as usual and a single pair is
         // written around the whole span.
+        // The first highlight merged in lends its colour, so extending or
+        // tagging a coloured highlight keeps it coloured.
+        let mergedColor: HighlightColor | null = null;
+        let mergedAny = false;
         if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
             for (const existing of parseHighlights(raw).highlights) {
                 const overlaps = existing.openTagStart < expandedEnd && existing.closeTagEnd > expandedStart;
                 if (!overlaps) continue;
+                if (!mergedAny) mergedColor = existing.color;
+                mergedAny = true;
                 expandedStart = Math.min(expandedStart, existing.openTagStart);
                 expandedEnd = Math.max(expandedEnd, existing.closeTagEnd);
             }
         }
+        // A colour button sets the colour; the plain button and tagging keep
+        // what is there, or fall back to the default colour.
+        const color: HighlightColor | null =
+            mode === "color" && isHighlightColor(payload)
+                ? payload
+                : mergedAny
+                  ? mergedColor
+                  : this.settings.defaultHighlightColor || null;
 
         const initiallySelectedText = raw.substring(expandedStart, expandedEnd);
         if (/\r?\n/.test(initiallySelectedText)) {
@@ -1629,10 +1732,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
             let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
             if (this.isTableAlignmentRow(line)) return line;
             if (this.isTableDataRow(line)) {
-                return this.applyToTableRow(line, lineOffsets[lineIndex], selectionStart, selectionEnd, mode, payload);
+                return this.applyToTableRow(line, lineOffsets[lineIndex], selectionStart, selectionEnd, mode, color);
             }
             if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
-                cleanLine = cleanLine.split("==").join("");
+                cleanLine = stripHighlightMarkers(cleanLine);
             } else if (mode === "bold") {
                 cleanLine = cleanLine.split("**").join("");
             } else if (mode === "italic") {
@@ -1652,14 +1755,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const tagStr = fullTag ? `${fullTag} ` : "";
             let wrappedContent = actualContent;
 
-            if (mode === "highlight" || mode === "tag") {
-                if (this.settings.enableColorHighlighting && this.settings.highlightColor) {
-                    wrappedContent = `<mark style="background: ${this.settings.highlightColor}; color: black;">${actualContent}</mark>`;
-                } else {
-                    wrappedContent = `==${actualContent}==`;
-                }
-            } else if (mode === "color") {
-                wrappedContent = `<mark style="background: ${payload}; color: black;">${actualContent}</mark>`;
+            if (mode === "highlight" || mode === "tag" || mode === "color") {
+                wrappedContent = wrapHighlight(actualContent, color);
             } else if (mode === "bold") {
                 wrappedContent = `**${actualContent}**`;
             } else if (mode === "italic") {
@@ -1706,6 +1803,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 }
             }
         }
+        // Read back rather than reuse newContent: the frontmatter step above
+        // may have written to the note again.
+        await this.recordUndoResult(file);
     }
 
     restoreScroll(view: MarkdownView, pos: ScrollPosition) {
@@ -1737,8 +1837,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 }
             }
             const mockSnapshot = { text: correctedText, range: null };
-            if (actionType === "applyColorHighlight") {
-                await this.applyColorHighlight(view, payload ?? "", "", mockSnapshot);
+            if (actionType === "applyColorHighlight" && isHighlightColor(payload)) {
+                await this.applyColorHighlight(view, payload, "", mockSnapshot);
             } else if (actionType === "highlightSelection") {
                 await this.highlightSelection(view, mockSnapshot);
             } else if (actionType === "tagSelection") {
@@ -1751,6 +1851,11 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }).open();
     }
 }
+
+const HIGHLIGHT_COLOUR_DESC =
+    "Colour the highlight button writes, as an Obsidian highlight colour (==🟡text==). Extending a highlight keeps its colour.";
+const PALETTE_DESC =
+    "Show Obsidian's six highlight colours in the toolbar. Highlight colours need Obsidian 1.14 or later; older versions show the colour emoji.";
 
 class ReadingHighlighterSettingTab extends PluginSettingTab {
     plugin: ReadingHighlighterPlugin;
@@ -1778,11 +1883,12 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
     getSettingDefinitions(): SettingDefinitionItem[] {
         const s = this.plugin.settings;
         const colourMeanings: SettingDefinitionItem[] = s.semanticColors.map((item, index) => ({
-            name: `Color ${index + 1}`,
-            desc: item.color,
+            name: COLOR_LABELS[item.color],
             aliases: item.meaning ? [item.meaning] : [],
             control: { type: "text", key: `semanticColors.${index}.meaning`, placeholder: "Meaning (e.g. Disagree)" },
         }));
+        const colourOptions: Record<string, string> = { "": "Theme default" };
+        for (const color of HIGHLIGHT_COLORS) colourOptions[color] = COLOR_LABELS[color];
 
         return [
             {
@@ -1805,19 +1911,13 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                         },
                     },
                     {
-                        name: "Enable color highlighting",
-                        desc: "Use HTML <mark> tags with specific colors instead of == syntax.",
-                        control: { type: "toggle", key: "enableColorHighlighting" },
+                        name: "Highlight colour",
+                        desc: HIGHLIGHT_COLOUR_DESC,
+                        control: { type: "dropdown", key: "defaultHighlightColor", options: colourOptions },
                     },
                     {
-                        name: "Highlight color",
-                        desc: "Hex code for the default highlight color.",
-                        visible: () => this.plugin.settings.enableColorHighlighting,
-                        control: { type: "color", key: "highlightColor" },
-                    },
-                    {
-                        name: "Enable color palette",
-                        desc: "Show the semantic colour palette in the toolbar for quick selection.",
+                        name: "Show colour palette",
+                        desc: PALETTE_DESC,
                         control: { type: "toggle", key: "enableColorPalette" },
                     },
                     {
@@ -2010,6 +2110,8 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
             settings[key] = asText.replace(/\s+/g, "_").replace(/^#/, "");
         } else if (key === "frontmatterTag") {
             settings[key] = asText.replace(/^#/, "");
+        } else if (key === "defaultHighlightColor") {
+            settings[key] = isHighlightColor(asText) ? asText : "";
         } else {
             settings[key] = value;
         }
@@ -2052,29 +2154,19 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
             );
         this.sectionHeading("Highlighting", "h3");
         new Setting(containerEl)
-            .setName("Enable color highlighting")
-            .setDesc("Use HTML <mark> tags with specific colors instead of == syntax.")
-            .addToggle((toggle) =>
-                toggle.setValue(this.plugin.settings.enableColorHighlighting).onChange(async (value) => {
-                    this.plugin.settings.enableColorHighlighting = value;
+            .setName("Highlight colour")
+            .setDesc(HIGHLIGHT_COLOUR_DESC)
+            .addDropdown((dropdown) => {
+                dropdown.addOption("", "Theme default");
+                for (const color of HIGHLIGHT_COLORS) dropdown.addOption(color, COLOR_LABELS[color]);
+                dropdown.setValue(this.plugin.settings.defaultHighlightColor).onChange(async (value) => {
+                    this.plugin.settings.defaultHighlightColor = isHighlightColor(value) ? value : "";
                     await this.plugin.saveSettings();
-                    this.render();
-                })
-            );
-        if (this.plugin.settings.enableColorHighlighting) {
-            new Setting(containerEl)
-                .setName("Highlight color")
-                .setDesc("Hex code for the default highlight color.")
-                .addColorPicker((color) =>
-                    color.setValue(this.plugin.settings.highlightColor || "#FFEE58").onChange(async (value) => {
-                        this.plugin.settings.highlightColor = value;
-                        await this.plugin.saveSettings();
-                    })
-                );
-        }
+                });
+            });
         new Setting(containerEl)
-            .setName("Enable color palette")
-            .setDesc("Show the semantic colour palette in the toolbar for quick selection.")
+            .setName("Show colour palette")
+            .setDesc(PALETTE_DESC)
             .addToggle((toggle) =>
                 toggle.setValue(this.plugin.settings.enableColorPalette).onChange(async (value) => {
                     this.plugin.settings.enableColorPalette = value;
@@ -2097,9 +2189,11 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
 
             this.sectionHeading("Semantic colour meanings", "h4");
             this.plugin.settings.semanticColors.forEach((item, index) => {
-                const setting = new Setting(containerEl).setName(`Color ${index + 1}`);
-                const colorPreview = setting.controlEl.createDiv({ cls: "rht-color-swatch" });
-                colorPreview.setCssStyles({ backgroundColor: item.color });
+                const setting = new Setting(containerEl).setName(COLOR_LABELS[item.color]);
+                setting.controlEl.createSpan({
+                    cls: "highlight-swatch reading-highlighter-swatch rht-color-swatch",
+                    attr: { "data-highlight": item.color },
+                });
                 setting.addText((text) =>
                     text
                         .setPlaceholder("Meaning (e.g. Disagree)")

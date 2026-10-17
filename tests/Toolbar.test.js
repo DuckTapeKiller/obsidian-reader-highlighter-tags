@@ -3,13 +3,13 @@
 import { describe, it, expect } from "vitest";
 import ReadingHighlighterPlugin from "../src/main";
 import { FloatingManager } from "../src/ui/FloatingManager";
-import { createObsidianWindow } from "./dom-helpers.js";
+import { createObsidianWindow, renderHtml } from "./dom-helpers.js";
 
 async function setup() {
     const window = createObsidianWindow();
     const doc = window.document;
     const content = doc.getElementById("content");
-    content.innerHTML = "<p>Some text to select in reading view.</p>";
+    renderHtml(content, "<p>Some text to select in reading view.</p>");
 
     const view = {
         file: { path: "n.md" },

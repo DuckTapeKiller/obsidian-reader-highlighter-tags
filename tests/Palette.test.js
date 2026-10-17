@@ -29,7 +29,38 @@ function makeManager(colors, showOnlyAssignedColors) {
     return { manager: new FloatingManager(plugin), applied, window };
 }
 
-const palette = (meanings) => meanings.map((meaning, i) => ({ color: `#00000${i}`, meaning }));
+const COLORS = ["red", "orange", "yellow", "green", "blue", "purple", "red", "orange"];
+const palette = (meanings) => meanings.map((meaning, i) => ({ color: COLORS[i], meaning }));
+
+describe("toolbar palette swatches", () => {
+    it("draws each button as the native colour it applies, with its name as the label", () => {
+        const { manager } = makeManager(palette(["", "", "", "", "", ""]), true);
+        manager.createElements();
+        const buttons = [...manager.paletteContainer.querySelectorAll("button")];
+        expect(
+            buttons.map((b) => b.querySelector(".reading-highlighter-swatch").getAttribute("data-highlight"))
+        ).toEqual(["red", "orange", "yellow", "green", "blue", "purple"]);
+        expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual([
+            "Red",
+            "Orange",
+            "Yellow",
+            "Green",
+            "Blue",
+            "Purple",
+        ]);
+        // No inline colour: the theme's --color-* variables paint them.
+        expect(buttons.every((b) => !b.getAttribute("style"))).toBe(true);
+    });
+
+    it("builds the toolbar as a menu of icon buttons, so the theme styles it", () => {
+        const { manager } = makeManager(palette(["", ""]), true);
+        manager.createElements();
+        expect(manager.containerEl.classList.contains("menu")).toBe(true);
+        const buttons = [...manager.containerEl.querySelectorAll("button")];
+        expect(buttons.length).toBeGreaterThan(0);
+        expect(buttons.every((b) => b.classList.contains("clickable-icon"))).toBe(true);
+    });
+});
 
 describe("toolbar palette filtering", () => {
     let full;

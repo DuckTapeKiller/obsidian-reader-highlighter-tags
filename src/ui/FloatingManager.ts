@@ -1,6 +1,7 @@
 import { setIcon, MarkdownView, Platform, View, App } from "obsidian";
 import type ReadingHighlighterPlugin from "../main";
 import type { SemanticColor } from "../main";
+import { COLOR_LABELS } from "../utils/colors";
 
 type ActionName =
     | "highlightSelection"
@@ -126,6 +127,17 @@ export class FloatingManager {
         return named.length > 0 ? named : all;
     }
 
+    /**
+     * Build the toolbar as one of Obsidian's own menus.
+     *
+     * The container carries the `menu` class and every button is a
+     * `clickable-icon`, so each theme and preset draws the toolbar the way it
+     * draws its context menus and icon buttons: surface, border, radius,
+     * shadow, icon and hover colours. styles.css only lays it out. Phones are
+     * the exception: there a `.menu` is a bottom sheet, pinned to the screen's
+     * foot by Obsidian's own rules, so the container takes the menu's look from
+     * its variables instead.
+     */
     createElements() {
         if (this.containerEl) return;
 
@@ -133,23 +145,37 @@ export class FloatingManager {
         // Created through the target document's own body, so the toolbar lands
         // in the window holding the note rather than whichever has focus.
         this.containerEl = doc.body.createDiv({ cls: "reading-highlighter-float-container" });
+        if (!Platform.isPhone) this.containerEl.addClass("menu");
+        this.hide();
 
         // Main highlight button
         this.highlightBtn = this.createButton("highlighter", "Highlight selection");
 
-        // Semantic Color palette (only if enabled)
+        // Obsidian's native highlight colours (only if enabled)
         if (this.plugin.settings.enableColorPalette) {
             this.paletteContainer = this.containerEl.createDiv({ cls: "reading-highlighter-palette" });
 
             for (const { item, index } of this.visiblePaletteColors()) {
                 const colorBtn = this.paletteContainer.createEl("button", {
-                    cls: "reading-highlighter-color-btn",
+                    cls: "clickable-icon reading-highlighter-btn reading-highlighter-color-btn",
                 });
-                colorBtn.setCssStyles({ backgroundColor: item.color });
-                colorBtn.setAttribute("aria-label", item.meaning || "Color " + (index + 1));
+                colorBtn.createSpan({
+                    cls: "highlight-swatch reading-highlighter-swatch",
+                    attr: { "data-highlight": item.color },
+                });
+                colorBtn.setAttribute("aria-label", item.meaning?.trim() || COLOR_LABELS[item.color]);
                 colorBtn.setAttribute("data-color-index", index.toString());
                 this.colorButtons.push(colorBtn);
             }
+        }
+
+        const showsMore =
+            this.plugin.settings.showTagButton ||
+            this.plugin.settings.showQuoteButton ||
+            (this.plugin.settings.enableAnnotations && this.plugin.settings.showAnnotationButton) ||
+            this.plugin.settings.showRemoveButton;
+        if (this.paletteContainer && showsMore) {
+            this.containerEl.createDiv({ cls: "reading-highlighter-separator" });
         }
 
         // Tag button
@@ -174,7 +200,7 @@ export class FloatingManager {
         }
 
         // PDF Extract All Button (Special)
-        this.extractAllBtn = this.createButton("file-text", "Extract All PDF Text");
+        this.extractAllBtn = this.createButton("file-text", "Extract all PDF text");
         this.extractAllBtn.addClass("pdf-only-btn");
     }
 
@@ -187,7 +213,7 @@ export class FloatingManager {
         if (this.plugin.settings.showTooltips) {
             btn.setAttribute("aria-label", label);
         }
-        btn.addClass("reading-highlighter-btn");
+        btn.addClass("clickable-icon", "reading-highlighter-btn");
         return btn;
     }
 
@@ -289,7 +315,11 @@ export class FloatingManager {
         // behaviour and causes partial (single-word) highlights.
         if (!Platform.isIosApp) return;
 
-        activeDocument.addEventListener(
+        // Registered through the plugin so they go when it unloads. Added
+        // directly, they outlived a disable and re-enable, and every touch
+        // then fired the long-press highlight once per copy.
+        this.plugin.registerDomEvent(
+            activeDocument,
             "touchstart",
             () => {
                 this.longPressTimer = window.setTimeout(() => {
@@ -305,7 +335,8 @@ export class FloatingManager {
             { passive: true }
         );
 
-        activeDocument.addEventListener(
+        this.plugin.registerDomEvent(
+            activeDocument,
             "touchmove",
             () => {
                 if (this.longPressTimer) {
@@ -316,7 +347,8 @@ export class FloatingManager {
             { passive: true }
         );
 
-        activeDocument.addEventListener(
+        this.plugin.registerDomEvent(
+            activeDocument,
             "touchend",
             () => {
                 if (this.longPressTimer) {
@@ -367,7 +399,12 @@ export class FloatingManager {
         const sel = window.getSelection();
         const snippet = sel?.toString() ?? "";
 
-        if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
+        // Only a selection inside the note itself. Text selected in a hover
+        // preview, the sidebar or a dialog belongs to something else, and
+        // highlighting it would go looking for it in this note.
+        const inView = !!sel?.anchorNode && view.containerEl.contains(sel.anchorNode);
+
+        if (inView && snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
             // Guard: never show the toolbar inside code blocks, and never while
             // a dialog is open — the note's selection stays live behind the
             // settings dialog, and the toolbar would float on top of it.
@@ -410,15 +447,22 @@ export class FloatingManager {
             if (!this.containerEl) return;
         }
 
+        const pos = this.plugin.settings.toolbarPosition || "text";
+        const vertical = pos === "left" || pos === "right";
+
         // Show + reset dynamic styles & classes
         this.containerEl.setCssStyles({ display: "flex", top: "", bottom: "", left: "", right: "", transform: "" });
-        this.containerEl.removeClass("reading-highlighter-vertical");
-
-        const pos = this.plugin.settings.toolbarPosition || "text";
+        this.containerEl.toggleClass("reading-highlighter-vertical", vertical);
 
         if (pos === "text") {
-            const containerHeight = 50;
-            const containerWidth = this.plugin.settings.enableColorPalette ? 320 : 180;
+            // Measured rather than assumed: the width depends on the buttons
+            // and swatches shown and on the theme's padding and borders.
+            const containerHeight = this.containerEl.offsetHeight || 50;
+            const containerWidth = this.containerEl.offsetWidth || 180;
+            const win = this.containerEl.ownerDocument.defaultView ?? window;
+            const margin = 10;
+            const clampLeft = (left: number) =>
+                Math.max(margin, Math.min(left, win.innerWidth - containerWidth - margin));
 
             if (Platform.isAndroidApp) {
                 // ── Android: place toolbar BELOW the selection ──
@@ -427,29 +471,22 @@ export class FloatingManager {
                 // to avoid being hidden behind it.
                 const gap = 12;
                 let top = rect.bottom + gap;
-                let left = rect.left + rect.width / 2 - containerWidth / 2;
 
                 // If not enough room below, try above with extra clearance
                 // for the native menu (~50px for the menu itself)
-                if (top + containerHeight > window.innerHeight - 10) {
+                if (top + containerHeight > win.innerHeight - margin) {
                     top = rect.top - containerHeight - 60;
                 }
-                if (top < 10) top = 10;
-                if (left < 10) left = 10;
-                if (left + containerWidth > window.innerWidth - 10) {
-                    left = window.innerWidth - containerWidth - 10;
-                }
+                if (top < margin) top = margin;
 
+                const left = clampLeft(rect.left + rect.width / 2 - containerWidth / 2);
                 this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
             } else {
                 // ── iOS / Desktop: place toolbar ABOVE the selection (original) ──
-                let top = rect.top - containerHeight - 10;
-                let left = rect.left + rect.width / 2 - containerWidth / 2;
+                let top = rect.top - containerHeight - margin;
+                if (top < margin) top = rect.bottom + margin;
 
-                if (top < 10) top = rect.bottom + 10;
-                if (left < 10) left = 10;
-                if (left + containerWidth > window.innerWidth - 10) left = window.innerWidth - containerWidth - 10;
-
+                const left = clampLeft(rect.left + rect.width / 2 - containerWidth / 2);
                 this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
             }
         } else if (pos === "top") {
@@ -458,10 +495,8 @@ export class FloatingManager {
             this.containerEl.setCssStyles({ bottom: "100px", left: "50%", transform: "translateX(-50%)" });
         } else if (pos === "left") {
             this.containerEl.setCssStyles({ top: "50%", left: "10px", transform: "translateY(-50%)" });
-            this.containerEl.addClass("reading-highlighter-vertical");
         } else if (pos === "right") {
             this.containerEl.setCssStyles({ top: "50%", right: "10px", transform: "translateY(-50%)" });
-            this.containerEl.addClass("reading-highlighter-vertical");
         }
     }
 

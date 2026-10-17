@@ -2,6 +2,7 @@
 // can be exercised in Node exactly as written.
 
 import { JSDOM } from "jsdom";
+import { vi } from "vitest";
 
 /**
  * jsdom has no innerText. Reading view runs in Chromium, where innerText turns
@@ -124,20 +125,30 @@ export function createObsidianWindow(html = "<!doctype html><html><body><div id=
     polyfillObsidianDom(dom.window);
     polyfillGeometry(dom.window);
     const { window } = dom;
-    globalThis.window = window;
-    globalThis.activeWindow = window;
-    globalThis.activeDocument = window.document;
-    globalThis.Node = window.Node;
-    globalThis.NodeFilter = window.NodeFilter;
-    globalThis.Range = window.Range;
+    vi.stubGlobal("window", window);
+    vi.stubGlobal("activeWindow", window);
+    vi.stubGlobal("activeDocument", window.document);
+    vi.stubGlobal("Node", window.Node);
+    vi.stubGlobal("NodeFilter", window.NodeFilter);
+    vi.stubGlobal("Range", window.Range);
     // Obsidian exposes its element helpers as globals too, not only on Node.
-    globalThis.createEl = (tag, opts) => window.document.body.createEl(tag, opts);
-    globalThis.createDiv = (opts) => window.document.body.createDiv(opts);
-    globalThis.createSpan = (opts) => window.document.body.createSpan(opts);
-    globalThis.createFragment = (cb) => {
+    vi.stubGlobal("createEl", (tag, opts) => window.document.body.createEl(tag, opts));
+    vi.stubGlobal("createDiv", (opts) => window.document.body.createDiv(opts));
+    vi.stubGlobal("createSpan", (opts) => window.document.body.createSpan(opts));
+    vi.stubGlobal("createFragment", (cb) => {
         const frag = window.document.createDocumentFragment();
         if (cb) cb(frag);
         return frag;
-    };
+    });
     return window;
+}
+
+/**
+ * Fill `container` with rendered-note fixture markup, parsed rather than
+ * assigned through innerHTML.
+ */
+export function renderHtml(container, html) {
+    const doc = container.ownerDocument;
+    const parsed = new doc.defaultView.DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+    container.replaceChildren(...Array.from(parsed.body.childNodes, (node) => doc.importNode(node, true)));
 }

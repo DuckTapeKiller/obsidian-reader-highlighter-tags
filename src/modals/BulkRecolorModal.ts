@@ -1,33 +1,26 @@
 import { Modal, Setting, TFile } from "obsidian";
 import type ReadingHighlighterPlugin from "../main";
+import { COLOR_LABELS, HIGHLIGHT_COLORS, isHighlightColor, type HighlightColor } from "../utils/colors";
+import type { RecolorSource } from "../utils/highlights";
 
 interface BulkRecolorState {
-    limitFrom: boolean;
-    fromColor: string;
-    toColor: string;
+    from: RecolorSource;
+    to: HighlightColor | null;
 }
 
+/** Recolour a note's highlights at once, in Obsidian's native colours. */
 export class BulkRecolorModal extends Modal {
     plugin: ReadingHighlighterPlugin;
     file: TFile;
     onApplied: () => void;
     state: BulkRecolorState;
-    fromSetting?: Setting;
-    toSetting?: Setting;
-    fromColorInput?: HTMLInputElement;
-    toColorInput?: HTMLInputElement;
 
     constructor(plugin: ReadingHighlighterPlugin, file: TFile, onApplied: () => void = () => {}) {
         super(plugin.app);
         this.plugin = plugin;
         this.file = file;
         this.onApplied = onApplied;
-
-        this.state = {
-            limitFrom: false,
-            fromColor: "#ffff00",
-            toColor: "#ffff00",
-        };
+        this.state = { from: "any", to: "yellow" };
     }
 
     onOpen() {
@@ -37,69 +30,37 @@ export class BulkRecolorModal extends Modal {
         modalEl.addClass("reading-highlighter-bulk-recolor-modal");
         contentEl.addClass("reading-highlighter-bulk-recolor-modal");
 
-        contentEl.createEl("h2", { text: "Recolor <mark> highlights" });
+        contentEl.createEl("h2", { text: "Recolour highlights" });
 
         contentEl.createDiv({
             cls: "setting-item-description",
-            text: "This only affects colored highlights stored as <mark>…</mark> (not == == highlights).",
+            text: "Applies to every highlight in this note with the chosen colour. HTML highlights from older versions become native highlights.",
         });
 
         new Setting(contentEl)
-            .setName("Limit by existing color")
-            .setDesc("Optional: only recolor highlights that currently have this exact color.")
-            .addToggle((toggle) => {
-                toggle.setValue(this.state.limitFrom);
-                toggle.onChange((value) => {
-                    this.state.limitFrom = value;
-                    this.updateEnabledState();
+            .setName("From")
+            .setDesc("Which highlights to recolour.")
+            .addDropdown((drop) => {
+                drop.addOption("any", "Any colour");
+                drop.addOption("default", "Theme default");
+                for (const color of HIGHLIGHT_COLORS) drop.addOption(color, COLOR_LABELS[color]);
+                drop.setValue(this.state.from);
+                drop.onChange((value) => {
+                    this.state.from = value === "default" || isHighlightColor(value) ? value : "any";
                 });
             });
 
-        this.fromSetting = new Setting(contentEl)
-            .setName("From color")
-            .setDesc("Only used when the limit toggle is enabled.")
-            .addText((text) => {
-                text.setPlaceholder("Hex color like #ff0000");
-                text.setValue(this.state.fromColor);
-                text.onChange((value) => {
-                    this.state.fromColor = (value || "").trim();
-                    if (this.fromColorInput && /^#[0-9a-fA-F]{6}$/.test(this.state.fromColor)) {
-                        this.fromColorInput.value = this.state.fromColor;
-                    }
+        new Setting(contentEl)
+            .setName("To")
+            .setDesc("The colour they get.")
+            .addDropdown((drop) => {
+                drop.addOption("", "Theme default");
+                for (const color of HIGHLIGHT_COLORS) drop.addOption(color, COLOR_LABELS[color]);
+                drop.setValue(this.state.to ?? "");
+                drop.onChange((value) => {
+                    this.state.to = isHighlightColor(value) ? value : null;
                 });
             });
-
-        const fromControl = this.fromSetting.controlEl;
-        this.fromColorInput = fromControl.createEl("input", { type: "color" });
-        this.fromColorInput.value = this.state.fromColor;
-        this.fromColorInput.oninput = (e) => {
-            this.state.fromColor = (e.target as HTMLInputElement).value;
-            const textInput = this.fromSetting?.controlEl.querySelector<HTMLInputElement>("input[type='text']");
-            if (textInput) textInput.value = this.state.fromColor;
-        };
-
-        this.toSetting = new Setting(contentEl)
-            .setName("To color")
-            .setDesc("Target color to apply.")
-            .addText((text) => {
-                text.setPlaceholder("Hex color like #ff0000");
-                text.setValue(this.state.toColor);
-                text.onChange((value) => {
-                    this.state.toColor = (value || "").trim();
-                    if (this.toColorInput && /^#[0-9a-fA-F]{6}$/.test(this.state.toColor)) {
-                        this.toColorInput.value = this.state.toColor;
-                    }
-                });
-            });
-
-        const toControl = this.toSetting.controlEl;
-        this.toColorInput = toControl.createEl("input", { type: "color" });
-        this.toColorInput.value = this.state.toColor;
-        this.toColorInput.oninput = (e) => {
-            this.state.toColor = (e.target as HTMLInputElement).value;
-            const textInput = this.toSetting?.controlEl.querySelector<HTMLInputElement>("input[type='text']");
-            if (textInput) textInput.value = this.state.toColor;
-        };
 
         const footer = contentEl.createDiv({ cls: "modal-footer" });
         const cancelBtn = footer.createEl("button", { text: "Cancel" });
@@ -108,25 +69,10 @@ export class BulkRecolorModal extends Modal {
         const applyBtn = footer.createEl("button", { text: "Apply", cls: "mod-cta" });
         applyBtn.onclick = () =>
             void (async () => {
-                const from = this.state.limitFrom ? this.state.fromColor : "";
-                await this.plugin.recolorMarkHighlightsInFile(this.file, from, this.state.toColor);
+                await this.plugin.recolorHighlightsInFile(this.file, this.state.from, this.state.to);
                 this.onApplied();
                 this.close();
             })();
-
-        this.updateEnabledState();
-    }
-
-    updateEnabledState() {
-        const enabled = !!this.state.limitFrom;
-        const fromColor = this.fromColorInput;
-        if (fromColor) fromColor.disabled = !enabled;
-
-        // Disable the text input as well.
-        if (this.fromSetting !== undefined) {
-            const textInput = this.fromSetting.controlEl.querySelector<HTMLInputElement>("input[type='text']");
-            if (textInput) textInput.disabled = !enabled;
-        }
     }
 
     onClose() {

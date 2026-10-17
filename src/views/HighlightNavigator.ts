@@ -320,8 +320,10 @@ export class HighlightNavigatorView extends ItemView {
                 const highlight = item as Highlight;
                 // Color indicator
                 if (highlight.color) {
-                    const colorDot = el.createSpan({ cls: "highlight-color-dot" });
-                    colorDot.setCssStyles({ backgroundColor: highlight.color });
+                    el.createSpan({
+                        cls: "highlight-color-dot highlight-swatch reading-highlighter-swatch",
+                        attr: { "data-highlight": highlight.color },
+                    });
                 } else {
                     el.createSpan({ cls: "highlight-color-dot highlight-default" });
                 }
@@ -434,18 +436,7 @@ export class HighlightNavigatorView extends ItemView {
                 .setIcon("eraser")
                 .setWarning(true)
                 .onClick(async () => {
-                    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                    if (!view || !view.file || view.file.path !== currentFile.path) {
-                        // Still allow removal even if user isn't in preview; operate on file directly.
-                        await this.plugin.saveUndoState(currentFile);
-                        let raw = await this.app.vault.read(currentFile);
-                        raw = raw.replace(/==(.*?)==/gs, "$1");
-                        raw = raw.replace(/<mark[^>]*>(.*?)<\/mark>/gs, "$1");
-                        await this.app.vault.modify(currentFile, raw);
-                        await this.refresh(true);
-                        return;
-                    }
-                    await this.plugin.removeAllHighlights(view);
+                    await this.plugin.removeAllHighlightsInFile(currentFile);
                     await this.refresh(true);
                 });
         });
@@ -464,12 +455,13 @@ export class HighlightNavigatorView extends ItemView {
         try {
             await this.plugin.saveUndoState(currentFile);
             let found = false;
-            await this.app.vault.process(currentFile, (data) => {
+            const result = await this.app.vault.process(currentFile, (data) => {
                 const highlight = findHighlightById(parseHighlights(data), item.id);
                 if (!highlight) return data;
                 found = true;
                 return removeHighlightFromRaw(data, highlight);
             });
+            if (found) await this.plugin.recordUndoResult(currentFile, result);
             if (!found) {
                 new Notice("Highlight not found (it may have moved).");
             }
@@ -533,7 +525,7 @@ export class HighlightNavigatorView extends ItemView {
         });
 
         menu.addItem((mi: MenuItem) => {
-            mi.setTitle("Recolor <mark> highlights (note)…")
+            mi.setTitle("Recolour highlights (note)…")
                 .setIcon("palette")
                 .onClick(() => {
                     new BulkRecolorModal(this.plugin, currentFile, () => {
@@ -545,10 +537,10 @@ export class HighlightNavigatorView extends ItemView {
         menu.addSeparator();
 
         menu.addItem((mi: MenuItem) => {
-            mi.setTitle("Migrate <span> highlights to <mark> (note)")
+            mi.setTitle("Convert HTML highlights to native (note)")
                 .setIcon("wand")
                 .onClick(async () => {
-                    await this.plugin.migrateSpanHighlightsInFile(currentFile);
+                    await this.plugin.convertHtmlHighlightsInFile(currentFile);
                     void this.refresh(true);
                 });
         });

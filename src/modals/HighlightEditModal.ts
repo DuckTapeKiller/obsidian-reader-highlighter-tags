@@ -9,10 +9,10 @@ import {
     updateHighlightColorInRaw,
     updateHighlightTagsInRaw,
 } from "../utils/highlights";
+import { COLOR_LABELS, HIGHLIGHT_COLORS, isHighlightColor, type HighlightColor } from "../utils/colors";
 
 interface EditState {
-    style: string;
-    color: string;
+    color: HighlightColor | null;
     tags: string;
     annotation: string;
 }
@@ -23,11 +23,8 @@ export class HighlightEditModal extends Modal {
     highlightId: string;
     onApplied: (raw: string) => void;
     state: EditState;
-    colorSettingEl!: HTMLElement;
     tagsInput!: HTMLInputElement;
     annotationInput!: HTMLTextAreaElement;
-    colorInput!: HTMLInputElement;
-    colorTextInput!: HTMLInputElement;
 
     constructor(
         plugin: ReadingHighlighterPlugin,
@@ -42,8 +39,7 @@ export class HighlightEditModal extends Modal {
         this.onApplied = onApplied;
 
         this.state = {
-            style: "default",
-            color: "",
+            color: null,
             tags: "",
             annotation: "",
         };
@@ -74,8 +70,7 @@ export class HighlightEditModal extends Modal {
             return;
         }
 
-        this.state.style = highlight.type === "html" ? "color" : "default";
-        this.state.color = highlight.type === "html" ? highlight.color || "" : "";
+        this.state.color = highlight.color;
         this.state.tags = highlight.tagsText || "";
         this.state.annotation = highlight.annotation || "";
 
@@ -83,21 +78,26 @@ export class HighlightEditModal extends Modal {
         preview.createDiv({ cls: "highlight-edit-preview-label", text: "Preview" });
         preview.createDiv({ cls: "highlight-edit-preview-text", text: highlight.text || "" });
 
+        const meaningOf = (color: HighlightColor) =>
+            this.plugin.settings.semanticColors.find((item) => item.color === color)?.meaning?.trim() ?? "";
         new Setting(contentEl)
-            .setName("Style")
-            .setDesc("Default uses == ==. Colored uses <mark>.")
+            .setName("Colour")
+            .setDesc(
+                highlight.type === "html"
+                    ? "This is an HTML highlight from an older version. Applying turns it into a native highlight."
+                    : "Written as an Obsidian highlight colour, e.g. ==🟡text==."
+            )
             .addDropdown((drop) => {
-                drop.addOption("default", "Default (==)");
-                drop.addOption("color", "Colored (<mark>)");
-                drop.setValue(this.state.style);
+                drop.addOption("", "Theme default");
+                for (const color of HIGHLIGHT_COLORS) {
+                    const meaning = meaningOf(color);
+                    drop.addOption(color, meaning ? `${COLOR_LABELS[color]} — ${meaning}` : COLOR_LABELS[color]);
+                }
+                drop.setValue(this.state.color ?? "");
                 drop.onChange((value) => {
-                    this.state.style = value;
-                    this.updateColorControls();
+                    this.state.color = isHighlightColor(value) ? value : null;
                 });
             });
-
-        this.colorSettingEl = contentEl.createDiv({ cls: "highlight-edit-color-setting" });
-        this.renderColorControls();
 
         const tagsSetting = new Setting(contentEl)
             .setName("Tags")
@@ -142,70 +142,6 @@ export class HighlightEditModal extends Modal {
 
         const applyBtn = footer.createEl("button", { text: "Apply", cls: "mod-cta" });
         applyBtn.onclick = () => void this.applyEdits({ remove: false });
-
-        this.updateColorControls();
-    }
-
-    renderColorControls() {
-        this.colorSettingEl.empty();
-
-        const wrapper = this.colorSettingEl.createDiv({ cls: "highlight-edit-color-wrapper" });
-
-        const titleRow = wrapper.createDiv({ cls: "highlight-edit-color-title" });
-        titleRow.createSpan({ text: "Color" });
-
-        const inputRow = wrapper.createDiv({ cls: "highlight-edit-color-row" });
-
-        this.colorInput = inputRow.createEl("input", {
-            type: "color",
-            cls: "highlight-edit-color-input",
-        });
-        const safeColor = this.state.color && /^#[0-9a-fA-F]{6}$/.test(this.state.color) ? this.state.color : "#ffff00";
-        this.colorInput.value = safeColor;
-
-        const colorText = inputRow.createEl("input", {
-            type: "text",
-            cls: "highlight-edit-color-text",
-            attr: { placeholder: "Hex color like #ff0000" },
-        });
-        colorText.value = this.state.color || "";
-        colorText.oninput = (e) => {
-            const next = (e.target as HTMLInputElement).value.trim();
-            this.state.color = next;
-            if (/^#[0-9a-fA-F]{6}$/.test(next)) {
-                this.colorInput.value = next;
-            }
-        };
-        this.colorTextInput = colorText;
-        this.colorInput.oninput = (e) => {
-            const next = (e.target as HTMLInputElement).value;
-            this.state.color = next;
-            this.colorTextInput.value = next;
-        };
-
-        if (this.plugin.settings.enableColorPalette) {
-            const palette = wrapper.createDiv({ cls: "highlight-edit-palette" });
-            this.plugin.settings.semanticColors.forEach((item) => {
-                const btn = palette.createEl("button", {
-                    cls: "highlight-edit-palette-btn",
-                    attr: { "aria-label": item.meaning || item.color },
-                });
-                btn.setCssStyles({ backgroundColor: item.color });
-                btn.onclick = (evt) => {
-                    evt.preventDefault();
-                    this.state.color = item.color;
-                    this.colorInput.value = item.color;
-                    this.colorTextInput.value = item.color;
-                };
-            });
-        }
-    }
-
-    updateColorControls() {
-        const enabled = this.state.style === "color";
-        this.colorSettingEl.setCssStyles({ display: enabled ? "" : "none" });
-        if (this.colorInput) this.colorInput.disabled = !enabled;
-        if (this.colorTextInput) this.colorTextInput.disabled = !enabled;
     }
 
     async applyEdits({ remove }: { remove: boolean }) {
@@ -234,19 +170,10 @@ export class HighlightEditModal extends Modal {
                     throw new Error("Highlight not found after tag update.");
                 }
 
-                if (this.state.style === "default" && updatedHighlight.type === "html") {
-                    // Convert HTML -> markdown
-                    const inner = raw.slice(updatedHighlight.innerStart, updatedHighlight.innerEnd);
-                    raw =
-                        raw.slice(0, updatedHighlight.openTagStart) +
-                        `==${inner}==` +
-                        raw.slice(updatedHighlight.closeTagEnd);
-                } else if (this.state.style === "color") {
-                    const color = String(this.state.color || "").trim();
-                    if (!color) {
-                        throw new Error("Choose a color first.");
-                    }
-                    raw = updateHighlightColorInRaw(raw, updatedHighlight, color);
+                // Only rewrite the markers when something changes, so a plain
+                // edit of tags or annotation leaves the highlight byte for byte.
+                if (updatedHighlight.type === "html" || updatedHighlight.color !== this.state.color) {
+                    raw = updateHighlightColorInRaw(raw, updatedHighlight, this.state.color);
                 }
 
                 updatedParsed = parseHighlights(raw);
@@ -259,6 +186,7 @@ export class HighlightEditModal extends Modal {
                 return raw;
             });
 
+            await this.plugin.recordUndoResult(this.file, finalRaw);
             this.onApplied(finalRaw);
             this.close();
             new Notice(remove ? "Highlight removed." : "Highlight updated.");

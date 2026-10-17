@@ -8,41 +8,39 @@ export interface ScrollPosition {
     y: number;
 }
 
-// The preview's scroll helpers are not part of the public typings in a way that
-// matches how this plugin uses them, so describe the shape we rely on.
-interface PreviewScroll {
-    getScroll?: () => ScrollPosition;
-    applyScroll?: (pos: ScrollPosition) => void;
-}
-
-function getPreview(view: MarkdownView): PreviewScroll {
-    return view.previewMode as PreviewScroll;
-}
-
+// Reading view's scroll, as Obsidian exposes it: a single number in its own
+// unit, which only means anything when handed back to `applyScroll`. It was
+// once read here as an `{x, y}` object, so `y` was always undefined and
+// reading progress was never saved.
 export function getScroll(view: MarkdownView): ScrollPosition {
-    const preview = getPreview(view);
-    return typeof preview?.getScroll === "function" ? preview.getScroll() : getFallbackScroll(view);
+    const preview = view.previewMode;
+    if (typeof preview?.getScroll === "function") {
+        const scroll = preview.getScroll();
+        return { x: 0, y: typeof scroll === "number" && Number.isFinite(scroll) ? scroll : 0 };
+    }
+    return getFallbackScroll(view);
 }
 
 export function applyScroll(view: MarkdownView, pos: ScrollPosition): void {
-    const preview = getPreview(view);
+    const preview = view.previewMode;
     if (typeof preview?.applyScroll === "function") {
-        preview.applyScroll(pos);
+        preview.applyScroll(pos.y);
     } else {
         setFallbackScroll(view, pos);
     }
 }
 
+// The element that actually scrolls is the preview view inside the reading
+// view, not the reading view itself.
+function scroller(view: MarkdownView): HTMLElement | null {
+    return view.containerEl.querySelector<HTMLElement>(".markdown-reading-view .markdown-preview-view");
+}
+
 function getFallbackScroll(view: MarkdownView): ScrollPosition {
-    const el =
-        view.containerEl.querySelector<HTMLElement>(".markdown-reading-view") ??
-        view.containerEl.querySelector<HTMLElement>(".markdown-preview-view");
-    return { x: 0, y: el?.scrollTop ?? 0 };
+    return { x: 0, y: scroller(view)?.scrollTop ?? 0 };
 }
 
 function setFallbackScroll(view: MarkdownView, { y }: ScrollPosition): void {
-    const el =
-        view.containerEl.querySelector<HTMLElement>(".markdown-reading-view") ??
-        view.containerEl.querySelector<HTMLElement>(".markdown-preview-view");
+    const el = scroller(view);
     if (el) el.scrollTop = y;
 }

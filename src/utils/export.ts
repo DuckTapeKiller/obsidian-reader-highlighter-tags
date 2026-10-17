@@ -2,7 +2,7 @@
  * Export highlights from a file to a new markdown file.
  * Finds all ==text== and <mark>text</mark> elements and creates a summary.
  */
-import { App, TFile } from "obsidian";
+import { App, TFile, normalizePath } from "obsidian";
 import { parseHighlights, type Highlight } from "./highlights";
 import { formatDate } from "./time";
 
@@ -36,6 +36,21 @@ interface EnsuredBlockIds {
     lineToBlockId: Map<number, string>;
 }
 
+const BLOCK_ID_AT_END = /\s(\^[a-zA-Z0-9-]+)$/;
+const BLOCK_ID_LINE = /^\s*(\^[a-zA-Z0-9-]+)\s*$/;
+const isTableLine = (line: string) => /^\s*\|/.test(line);
+
+function newBlockId(): string {
+    return "^" + Math.random().toString(36).substring(2, 8);
+}
+
+/**
+ * Give every line holding a highlight a block id, so it can be embedded.
+ *
+ * A table row cannot carry one — text after its last pipe becomes a stray cell
+ * — so a table gets a single id on the line after it, which is where Obsidian
+ * looks for a table's block id.
+ */
 function ensureBlockIdsForHighlightLines(raw: string, highlights: Highlight[]): EnsuredBlockIds {
     const newline = detectNewline(raw);
     const lines = raw.split(/\r?\n/);
@@ -43,80 +58,84 @@ function ensureBlockIdsForHighlightLines(raw: string, highlights: Highlight[]): 
 
     let changed = false;
     const lineToBlockId = new Map<number, string>();
+    // Lines after which a new block-id line goes: the last row of a table.
+    const insertAfter = new Map<number, string>();
 
     for (const lineIdx of lineSet) {
         if (lineIdx < 0 || lineIdx >= lines.length) continue;
         const line = lines[lineIdx];
-        const blockMatch = line.match(/\s(\^[a-zA-Z0-9-]+)$/);
+
+        if (isTableLine(line)) {
+            let end = lineIdx;
+            while (end + 1 < lines.length && isTableLine(lines[end + 1])) end++;
+            const existing = insertAfter.get(end) ?? lines[end + 1]?.match(BLOCK_ID_LINE)?.[1];
+            const blockId = existing ?? newBlockId();
+            if (!existing) {
+                insertAfter.set(end, blockId);
+                changed = true;
+            }
+            lineToBlockId.set(lineIdx, blockId);
+            continue;
+        }
+
+        const blockMatch = line.match(BLOCK_ID_AT_END);
         if (blockMatch) {
             lineToBlockId.set(lineIdx, blockMatch[1]);
             continue;
         }
-        const blockId = "^" + Math.random().toString(36).substring(2, 8);
+        const blockId = newBlockId();
         lines[lineIdx] = line + " " + blockId;
         lineToBlockId.set(lineIdx, blockId);
         changed = true;
     }
 
+    const out: string[] = [];
+    lines.forEach((line, index) => {
+        out.push(line);
+        const blockId = insertAfter.get(index);
+        if (blockId) out.push(blockId);
+    });
+
     return {
-        raw: lines.join(newline),
+        raw: out.join(newline),
         changed,
         lineToBlockId,
     };
 }
 
-function parentPath(file: TFile): string {
-    return file.parent?.path ?? "";
+/**
+ * `<folder>/<basename> - Highlights<suffix>.<ext>`, beside the note. A note at
+ * the vault root has the parent path "/", so the path is normalised rather
+ * than left starting with "//".
+ */
+function exportPathFor(file: TFile, ext: string, suffix = ""): string {
+    return normalizePath(`${file.parent?.path ?? ""}/${file.basename} - Highlights${suffix}.${ext}`);
+}
+
+/** The export path, or a timestamped one if that file already exists. */
+function freeExportPath(app: App, file: TFile, ext: string): string {
+    const path = exportPathFor(file, ext);
+    if (!app.vault.getAbstractFileByPath(path)) return path;
+    return exportPathFor(file, ext, ` ${formatDate("YYYYMMDD-HHmmss")}`);
 }
 
 export async function exportHighlightsToMD(app: App, file: TFile): Promise<string> {
-    const raw = await app.vault.read(file);
-    let changed = false;
-
-    const lines = raw.split("\n");
-    const highlights: { text: string }[] = [];
-
-    const markdownPattern = /==(.*?)==/g;
-    const htmlPattern = /<mark[^>]*>(.*?)<\/mark>/g;
-
-    lines.forEach((line, lineIdx) => {
-        let hasHighlight = false;
-
-        // reset regex state if not creating new ones per line
-        const mdRegex = new RegExp(markdownPattern);
-        while (mdRegex.exec(line) !== null) {
-            hasHighlight = true;
-        }
-
-        const htmlRegex = new RegExp(htmlPattern);
-        while (htmlRegex.exec(line) !== null) {
-            hasHighlight = true;
-        }
-
-        if (hasHighlight) {
-            const blockMatch = lines[lineIdx].match(/\s(\^[a-zA-Z0-9-]+)$/);
-            let blockId = "";
-            if (blockMatch) {
-                blockId = blockMatch[1];
-            } else {
-                blockId = "^" + Math.random().toString(36).substring(2, 8);
-                lines[lineIdx] = lines[lineIdx] + " " + blockId;
-                changed = true;
-            }
-
-            highlights.push({
-                text: `![[${file.basename}#${blockId}]]`,
-            });
-        }
-    });
-
-    if (highlights.length === 0) {
+    let raw = await app.vault.read(file);
+    const parsed = parseHighlights(raw);
+    if (!parsed.highlights.length) {
         throw new Error("No highlights found in this file.");
     }
 
-    if (changed) {
-        await app.vault.modify(file, lines.join("\n"));
+    // One embed per line holding highlights, in note order. The shared helper
+    // keeps CRLF notes intact and reuses a block id the line already has.
+    const ensured = ensureBlockIdsForHighlightLines(raw, parsed.highlights);
+    raw = ensured.raw;
+    if (ensured.changed) {
+        await app.vault.modify(file, raw);
     }
+    // Rows of one table share its block id, so embed each id once.
+    const blockIds = [...ensured.lineToBlockId.entries()].sort(([a], [b]) => a - b).map(([, id]) => id);
+    const highlights = [...new Set(blockIds)].map((blockId) => ({ text: `![[${file.basename}#${blockId}]]` }));
 
     // Get current date
     const date = formatDate("YYYY-MM-DD HH:mm");
@@ -137,16 +156,7 @@ ${highlights.map((h, i) => `${i + 1}. ${h.text}`).join("\n\n")}
 *Exported by Reader Highlighter Tags*
 `;
 
-    // Create unique filename
-    let exportPath = `${parentPath(file)}/${file.basename} - Highlights.md`;
-
-    // Check if file exists, if so add timestamp
-    const existingFile = app.vault.getAbstractFileByPath(exportPath);
-    if (existingFile) {
-        const timestamp = formatDate("YYYYMMDD-HHmmss");
-        exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.md`;
-    }
-
+    const exportPath = freeExportPath(app, file, "md");
     await app.vault.create(exportPath, exportContent);
 
     return exportPath;
@@ -197,12 +207,7 @@ export async function exportHighlightsToJSON(app: App, file: TFile): Promise<str
         }),
     };
 
-    let exportPath = `${parentPath(file)}/${file.basename} - Highlights.json`;
-    const existingFile = app.vault.getAbstractFileByPath(exportPath);
-    if (existingFile) {
-        const timestamp = formatDate("YYYYMMDD-HHmmss");
-        exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.json`;
-    }
+    const exportPath = freeExportPath(app, file, "json");
 
     await app.vault.create(exportPath, JSON.stringify(exportData, null, 2));
     return exportPath;
@@ -257,12 +262,7 @@ export async function exportHighlightsToCSV(app: App, file: TFile): Promise<stri
 
     const csv = [header, ...rows].join("\n");
 
-    let exportPath = `${parentPath(file)}/${file.basename} - Highlights.csv`;
-    const existingFile = app.vault.getAbstractFileByPath(exportPath);
-    if (existingFile) {
-        const timestamp = formatDate("YYYYMMDD-HHmmss");
-        exportPath = `${parentPath(file)}/${file.basename} - Highlights ${timestamp}.csv`;
-    }
+    const exportPath = freeExportPath(app, file, "csv");
 
     await app.vault.create(exportPath, csv);
     return exportPath;

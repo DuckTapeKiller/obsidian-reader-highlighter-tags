@@ -1,15 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import ReadingHighlighterPlugin from "../src/main";
 import { FloatingManager } from "../src/ui/FloatingManager";
 import { Platform } from "./obsidian-stub.js";
-import { createObsidianWindow } from "./dom-helpers.js";
+import { createObsidianWindow, renderHtml } from "./dom-helpers.js";
 import { JSDOM } from "jsdom";
 
 async function setup(opts = {}) {
     const window = createObsidianWindow();
     const doc = window.document;
     const content = doc.getElementById("content");
-    content.innerHTML = "<p>Some text to select in reading view.</p>";
+    renderHtml(content, "<p>Some text to select in reading view.</p>");
     let mode = opts.mode || "preview";
     const view = {
         file: { path: "n.md" },
@@ -46,6 +46,22 @@ const visible = (ctx) => {
 };
 
 describe("scenarios", () => {
+    it("I: text selected outside the note, in a hover preview, leaves the toolbar hidden", async () => {
+        const ctx = await setup();
+        const popover = ctx.doc.body.createDiv({ cls: "popover hover-popover" });
+        popover.createEl("p", { text: "Text from another note, previewed on hover." });
+        const range = ctx.doc.createRange();
+        range.setStart(popover.querySelector("p").firstChild, 0);
+        range.setEnd(popover.querySelector("p").firstChild, 9);
+        const sel = ctx.window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        ctx.doc.dispatchEvent(new ctx.window.Event("selectionchange"));
+        expect(visible(ctx)).toBe(false);
+        select(ctx);
+        expect(visible(ctx)).toBe(true);
+    });
+
     it("A: refresh while toolbar is visible, then re-select", async () => {
         const ctx = await setup();
         select(ctx);
@@ -138,13 +154,13 @@ describe("scenarios", () => {
         // Obsidian 1.13 opens preferences as its own OS window, and
         // `activeDocument` follows focus.
         const settingsWindow = new JSDOM("<!doctype html><html><body></body></html>").window;
-        const previous = globalThis.activeDocument;
-        globalThis.activeDocument = settingsWindow.document;
+        const previous = activeDocument;
+        vi.stubGlobal("activeDocument", settingsWindow.document);
         try {
             ctx.plugin.settings.enableColorPalette = true;
             await ctx.plugin.saveSettings();
         } finally {
-            globalThis.activeDocument = previous;
+            vi.stubGlobal("activeDocument", previous);
         }
 
         // Nothing may be built into the settings window...

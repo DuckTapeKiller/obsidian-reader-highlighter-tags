@@ -1,28 +1,15 @@
-import globals from "globals";
-import js from "@eslint/js";
 import { defineConfig } from "eslint/config";
-import tseslint from "typescript-eslint";
 import tsparser from "@typescript-eslint/parser";
 import obsidianmd from "eslint-plugin-obsidianmd";
-import eslintConfigPrettier from "eslint-config-prettier/flat";
 
-// The general rules below run without type information. The obsidianmd
-// recommended set, spread after them, is type-aware for TypeScript.
-
-const sharedLanguageOptions = {
-    globals: {
-        // Browser globals only, as the review bot sees the code: a Node
-        // global must be declared where a build script uses it.
-        ...globals.browser,
-        document: "readonly",
-        window: "readonly",
-        Node: "readonly",
-        activeDocument: "readonly",
-        activeWindow: "readonly",
-    },
-    ecmaVersion: 2022,
-    sourceType: "module",
-};
+// The obsidianmd recommended config, as its README sets it up, plus two
+// additions. It already carries ESLint's and typescript-eslint's recommended
+// rules, so they are not added here: registering typescript-eslint a second
+// time crashes ESLint ("Cannot redefine plugin") whenever the two copies
+// differ, which a newer obsidianmd release can bring about.
+//
+// eslint.review.config.mjs is the same config without the additions: the
+// community review bot's view. The build and CI run both.
 
 export default defineConfig(
     {
@@ -30,53 +17,19 @@ export default defineConfig(
         // build/. Everything else the obsidianmd preset targets is linted.
         ignores: ["main.js", "build/**", "node_modules/**"],
     },
-    {
-        files: ["**/*.{js,mjs,cjs}"],
-        languageOptions: sharedLanguageOptions,
-        extends: [js.configs.recommended],
-        rules: {
-            "no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
-            "no-undef": "off",
-        },
-    },
-    {
-        files: ["**/*.{ts,tsx,cts,mts}"],
-        languageOptions: { ...sharedLanguageOptions, parser: tsparser },
-        extends: [js.configs.recommended, tseslint.configs.recommended],
-        rules: {
-            "@typescript-eslint/no-unused-vars": [
-                "warn",
-                {
-                    argsIgnorePattern: "^_",
-                    varsIgnorePattern: "^_",
-                    caughtErrorsIgnorePattern: "^_",
-                },
-            ],
-            "no-unused-vars": "off",
-            "no-undef": "off",
-            "@typescript-eslint/no-explicit-any": "off",
-            "@typescript-eslint/no-require-imports": "off",
-            "prefer-const": "off",
-        },
-    },
     // The full, current obsidianmd ruleset, spread as published: it carries
     // its own globs for TS, JS and package.json, so they are not narrowed.
     ...obsidianmd.configs.recommended,
     {
-        // Several obsidianmd rules are type-aware, so TypeScript gets the
-        // program.
-        files: ["**/*.{ts,tsx,cts,mts}"],
+        // Several obsidianmd rules are type-aware, so they get the program.
+        // tsconfig.json includes the tests and .mjs configs as well.
+        files: ["**/*.{ts,tsx,cts,mts,js,mjs,cjs}"],
         languageOptions: {
             parserOptions: {
                 projectService: true,
                 tsconfigRootDir: import.meta.dirname,
             },
         },
-    },
-    {
-        // The plain .mjs configs are not part of the TypeScript program.
-        files: ["**/*.mjs"],
-        extends: [tseslint.configs.disableTypeChecked],
     },
     {
         // `recommended` ships this one switched off. The code already uses
@@ -103,6 +56,5 @@ export default defineConfig(
         rules: {
             "obsidianmd/validate-manifest": "error",
         },
-    },
-    eslintConfigPrettier
+    }
 );

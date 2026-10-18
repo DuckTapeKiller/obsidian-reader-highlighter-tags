@@ -20,8 +20,10 @@ jobs:
         with:
           node-version: "22"
 
+      # npm ci, as the community review bot installs: it fails if
+      # package-lock.json has drifted from package.json.
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci
 
       - name: Check formatting (Prettier)
         run: npm run format:check
@@ -31,7 +33,7 @@ jobs:
       # should fail here first.
       - name: Use the latest Obsidian ESLint rules
         run: |
-          npm install --no-save --legacy-peer-deps eslint-plugin-obsidianmd@latest
+          npm install --no-save eslint-plugin-obsidianmd@latest
           echo "eslint-plugin-obsidianmd $(node -p "require('eslint-plugin-obsidianmd/package.json').version")"
 
       - name: Lint (ESLint + Obsidian plugin rules)

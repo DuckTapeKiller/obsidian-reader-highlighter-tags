@@ -8,6 +8,8 @@
 
 # Reader Highlighter Tags
 
+<a href="https://community.obsidian.md/plugins/reader-highlighter-tags"><img alt="Get it on Obsidian" src="assets/get-it-on-obsidian.svg"></a>
+
 **Highlight, colour, tag and annotate your notes without leaving Reading view.** Select a passage, pick a colour, keep reading. Every highlight is plain Markdown, written into the note at the exact spot you selected, in Obsidian's own highlight colours.
 
 <p align="center">

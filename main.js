@@ -206,8 +206,8 @@ function extractBackgroundFromStyle(styleValue) {
   return null;
 }
 function normalizeTagsText(tagsText) {
-  const tokens = String(tagsText || "").split(/\s+/).map((token) => token.trim()).filter(Boolean);
-  const cleaned = tokens.map((token) => token.replace(/^#/, "")).filter(Boolean).map((token) => `#${token}`);
+  const tokens2 = String(tagsText || "").split(/\s+/).map((token) => token.trim()).filter(Boolean);
+  const cleaned = tokens2.map((token) => token.replace(/^#/, "")).filter(Boolean).map((token) => `#${token}`);
   return cleaned.join(" ");
 }
 function parseFootnotes(raw) {
@@ -1248,7 +1248,7 @@ var FloatingManager = class {
   }
   /** Internal: actually process the current selection state. */
   _doHandleSelection() {
-    var _a, _b;
+    var _a, _b, _c, _d;
     let view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
     let isPdf = false;
     if (!view || view.getMode() !== "preview") {
@@ -1260,8 +1260,8 @@ var FloatingManager = class {
       isPdf = true;
     }
     (_a = this.containerEl) == null ? void 0 : _a.toggleClass("is-pdf-view", isPdf);
-    const sel = window.getSelection();
-    const snippet = (_b = sel == null ? void 0 : sel.toString()) != null ? _b : "";
+    const sel = (_c = (_b = this.targetDocument().defaultView) == null ? void 0 : _b.getSelection()) != null ? _c : window.getSelection();
+    const snippet = (_d = sel == null ? void 0 : sel.toString()) != null ? _d : "";
     const inView = !!(sel == null ? void 0 : sel.anchorNode) && view.containerEl.contains(sel.anchorNode);
     if (inView && snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
       if (activeDocument.querySelector(".modal-container, .modal-bg")) {
@@ -4343,6 +4343,45 @@ function getSelectedOccurrence(block, range, snippet) {
   return computeOccurrenceOrdinal(read.text, read.caret, snippet);
 }
 
+// src/utils/inlineBoundaries.ts
+var DELIMITERS = ["**", "~~", "`", "*", "_"];
+var TOKEN = /\*\*|~~|`|\*|_/g;
+function tokens(text) {
+  return [...text.matchAll(TOKEN)].map((m) => ({ value: m[0], start: m.index, end: m.index + m[0].length }));
+}
+function extractInlineBoundaries(content) {
+  let core = content;
+  let leading = "";
+  let trailing = "";
+  let peeled = true;
+  while (peeled) {
+    peeled = false;
+    const found = tokens(core);
+    if (found.length === 0) break;
+    const first = found[0];
+    const last = found[found.length - 1];
+    const atStart = first.start === 0 ? first.value : null;
+    const atEnd = last.end === core.length ? last.value : null;
+    for (const delimiter of DELIMITERS) {
+      if (found.filter((t) => t.value === delimiter).length % 2 === 0) continue;
+      if (atStart === delimiter && core.length > delimiter.length) {
+        leading += delimiter;
+        core = core.slice(delimiter.length);
+        peeled = true;
+        break;
+      }
+      if (atEnd === delimiter && core.length > delimiter.length) {
+        trailing = delimiter + trailing;
+        core = core.slice(0, core.length - delimiter.length);
+        peeled = true;
+        break;
+      }
+    }
+  }
+  if (!core.trim()) return { leading: "", core: content, trailing: "" };
+  return { leading, core, trailing };
+}
+
 // src/main.ts
 var SMART_SELECTION_TAGS = /* @__PURE__ */ new Set(["P", "LI", "BLOCKQUOTE", "PRE", "H1", "H2", "H3", "H4", "H5", "H6", "TD", "TH"]);
 var FRONTMATTER_NEEDS_QUOTES_RE = new RegExp("[:\\s{}\\[\\],&*#?|<>=!%@\\\\-]");
@@ -4683,6 +4722,16 @@ var ReadingHighlighterPlugin = class extends import_obsidian10.Plugin {
     const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
     return view && view.getMode() === "preview" ? view : null;
   }
+  /**
+   * The selection of the window holding `view`. A note moved to a popout
+   * window has its own selection, which `window.getSelection()` — the main
+   * window's — never sees.
+   */
+  selectionFor(view) {
+    var _a, _b, _c;
+    const win = (_c = (_b = (_a = view == null ? void 0 : view.containerEl) == null ? void 0 : _a.ownerDocument) == null ? void 0 : _b.defaultView) != null ? _c : window;
+    return win.getSelection();
+  }
   getSelectionContext(selectionSnapshot) {
     var _a;
     const view = this.getActiveReadingView();
@@ -4691,7 +4740,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian10.Plugin {
     const blocks = this.getAllowedBlocksInRange(range, view.contentEl);
     const fallbackBlock = this.getClosestAllowedBlock(range.commonAncestorContainer, view.contentEl);
     const contextElement = blocks[0] || fallbackBlock || null;
-    const rawSnippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || ((_a = window.getSelection()) == null ? void 0 : _a.toString()) || "";
+    const rawSnippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || ((_a = this.selectionFor(view)) == null ? void 0 : _a.toString()) || "";
     let snippet = rawSnippet;
     if (this.settings.enableSmartParagraphSelection && blocks.length === 1) {
       const blockText = this.getElementText(blocks[0]);
@@ -4710,7 +4759,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian10.Plugin {
     if (selectionSnapshot == null ? void 0 : selectionSnapshot.range) {
       return selectionSnapshot.range.cloneRange();
     }
-    const selection = window.getSelection();
+    const selection = this.selectionFor(this.getActiveReadingView());
     if (!selection || selection.rangeCount === 0) {
       return null;
     }
@@ -4744,7 +4793,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian10.Plugin {
     return ((element == null ? void 0 : element.innerText) || (element == null ? void 0 : element.textContent) || "").replace(/\s+/g, " ").trim();
   }
   buildSelectionRequest(view, selectionSnapshot) {
-    const sel = window.getSelection();
+    const sel = this.selectionFor(view);
     const selectionContext = this.getSelectionContext(selectionSnapshot);
     const snippet = (selectionContext == null ? void 0 : selectionContext.snippet) || (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
     if (!snippet.trim()) {
@@ -4902,7 +4951,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian10.Plugin {
   }
   async highlightSelection(view, selectionSnapshot) {
     var _a;
-    const sel = window.getSelection();
+    const sel = this.selectionFor(view);
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) {
       new import_obsidian10.Notice("No text selected.");
@@ -4953,7 +5002,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian10.Plugin {
   async savePdfHighlight(view, selectionSnapshot, mode, payload) {
     var _a, _b, _c, _d, _e;
     if (!view.file) return;
-    let snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || ((_a = window.getSelection()) == null ? void 0 : _a.toString()) || "";
+    let snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || ((_a = this.selectionFor(view)) == null ? void 0 : _a.toString()) || "";
     if (!snippet.trim()) {
       new import_obsidian10.Notice("No text selected.");
       return;
@@ -4996,7 +5045,7 @@ ${appendString}`;
         await this.app.vault.create(companionFile, fileContent);
       }
       new import_obsidian10.Notice("Saved to " + pdfName + " - Highlights");
-      (_d = window.getSelection()) == null ? void 0 : _d.removeAllRanges();
+      (_d = this.selectionFor(view)) == null ? void 0 : _d.removeAllRanges();
       if (this.settings.enableHaptics && import_obsidian10.Platform.isMobile) {
         (_e = navigator.vibrate) == null ? void 0 : _e.call(navigator, 10);
       }
@@ -5100,7 +5149,7 @@ ${appendString}`;
       }
       await this.applyMarkdownModification(targetFile, "", newResult.start, newResult.end, "tag", tag);
       this.restoreScroll(view, scrollPos);
-      (_a = window.getSelection()) == null ? void 0 : _a.removeAllRanges();
+      (_a = this.selectionFor(view)) == null ? void 0 : _a.removeAllRanges();
     }).open();
   }
   addRecentTag(tag) {
@@ -5153,7 +5202,7 @@ ${appendString}`;
       const currentRaw = await this.app.vault.read(targetFile);
       await this.applyAnnotation(targetFile, currentRaw, newResult.start, newResult.end, comment);
       this.restoreScroll(view, scrollPos);
-      (_a = window.getSelection()) == null ? void 0 : _a.removeAllRanges();
+      (_a = this.selectionFor(view)) == null ? void 0 : _a.removeAllRanges();
       new import_obsidian10.Notice("Annotation added!");
     }).open();
   }
@@ -5181,7 +5230,7 @@ ${appendString}`;
     await this.recordUndoResult(file, newContent);
   }
   async removeHighlightSelection(view, selectionSnapshot) {
-    const sel = window.getSelection();
+    const sel = this.selectionFor(view);
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) {
       new import_obsidian10.Notice("Select highlighted text to remove.");
@@ -5326,7 +5375,7 @@ ${appendString}`;
   }
   async copyAsQuote(view, selectionSnapshot) {
     var _a;
-    const sel = window.getSelection();
+    const sel = this.selectionFor(view);
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) {
       new import_obsidian10.Notice("No text selected.");
@@ -5343,7 +5392,7 @@ ${appendString}`;
     sel == null ? void 0 : sel.removeAllRanges();
   }
   async applyColorHighlight(view, color, autoTag = "", selectionSnapshot) {
-    const sel = window.getSelection();
+    const sel = this.selectionFor(view);
     const request = this.buildSelectionRequest(view, selectionSnapshot);
     if (!request) return;
     const scrollPos = getScroll(view);
@@ -5726,7 +5775,8 @@ ${prefix}`);
       const tagStr = fullTag ? `${fullTag} ` : "";
       let wrappedContent = actualContent;
       if (mode === "highlight" || mode === "tag" || mode === "color") {
-        wrappedContent = wrapHighlight(actualContent, color);
+        const { leading, core, trailing } = extractInlineBoundaries(actualContent);
+        wrappedContent = `${leading}${wrapHighlight(core, color)}${trailing}`;
       } else if (mode === "bold") {
         wrappedContent = `**${actualContent}**`;
       } else if (mode === "italic") {

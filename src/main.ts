@@ -43,6 +43,7 @@ import {
 } from "./utils/colors";
 import { getSelectedOccurrence, type SelectionHint } from "./utils/blockOccurrence";
 import { kindForTag, type BlockKind } from "./utils/sourceBlocks";
+import { extractInlineBoundaries } from "./utils/inlineBoundaries";
 import { BulkRecolorModal } from "./modals/BulkRecolorModal";
 
 export interface SemanticColor {
@@ -523,6 +524,16 @@ export default class ReadingHighlighterPlugin extends Plugin {
         return view && view.getMode() === "preview" ? view : null;
     }
 
+    /**
+     * The selection of the window holding `view`. A note moved to a popout
+     * window has its own selection, which `window.getSelection()` — the main
+     * window's — never sees.
+     */
+    selectionFor(view: View | null | undefined): Selection | null {
+        const win = view?.containerEl?.ownerDocument?.defaultView ?? window;
+        return win.getSelection();
+    }
+
     getSelectionContext(selectionSnapshot: SelectionSnapshot | null) {
         const view = this.getActiveReadingView();
         const range = this.getSelectionRange(selectionSnapshot);
@@ -531,7 +542,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const blocks = this.getAllowedBlocksInRange(range, view.contentEl);
         const fallbackBlock = this.getClosestAllowedBlock(range.commonAncestorContainer, view.contentEl);
         const contextElement = blocks[0] || fallbackBlock || null;
-        const rawSnippet = selectionSnapshot?.text || window.getSelection()?.toString() || "";
+        const rawSnippet = selectionSnapshot?.text || this.selectionFor(view)?.toString() || "";
 
         let snippet = rawSnippet;
         if (this.settings.enableSmartParagraphSelection && blocks.length === 1) {
@@ -553,7 +564,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         if (selectionSnapshot?.range) {
             return selectionSnapshot.range.cloneRange();
         }
-        const selection = window.getSelection();
+        const selection = this.selectionFor(this.getActiveReadingView());
         if (!selection || selection.rangeCount === 0) {
             return null;
         }
@@ -593,7 +604,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     buildSelectionRequest(view: MarkdownView, selectionSnapshot: SelectionSnapshot | null) {
-        const sel = window.getSelection();
+        const sel = this.selectionFor(view);
         const selectionContext = this.getSelectionContext(selectionSnapshot);
         const snippet = selectionContext?.snippet || selectionSnapshot?.text || sel?.toString() || "";
         if (!snippet.trim()) {
@@ -768,7 +779,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     async highlightSelection(view: MarkdownView, selectionSnapshot?: SelectionSnapshot | null) {
-        const sel = window.getSelection();
+        const sel = this.selectionFor(view);
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) {
             new Notice("No text selected.");
@@ -838,7 +849,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         payload: string | number
     ) {
         if (!view.file) return;
-        let snippet = selectionSnapshot?.text || window.getSelection()?.toString() || "";
+        let snippet = selectionSnapshot?.text || this.selectionFor(view)?.toString() || "";
         if (!snippet.trim()) {
             new Notice("No text selected.");
             return;
@@ -888,7 +899,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 await this.app.vault.create(companionFile, fileContent);
             }
             new Notice("Saved to " + pdfName + " - Highlights");
-            window.getSelection()?.removeAllRanges();
+            this.selectionFor(view)?.removeAllRanges();
             if (this.settings.enableHaptics && Platform.isMobile) {
                 navigator.vibrate?.(10);
             }
@@ -1007,7 +1018,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
             await this.applyMarkdownModification(targetFile, "", newResult.start, newResult.end, "tag", tag);
             this.restoreScroll(view, scrollPos);
-            window.getSelection()?.removeAllRanges();
+            this.selectionFor(view)?.removeAllRanges();
         }).open();
     }
 
@@ -1066,7 +1077,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const currentRaw = await this.app.vault.read(targetFile);
             await this.applyAnnotation(targetFile, currentRaw, newResult.start, newResult.end, comment);
             this.restoreScroll(view, scrollPos);
-            window.getSelection()?.removeAllRanges();
+            this.selectionFor(view)?.removeAllRanges();
             new Notice("Annotation added!");
         }).open();
     }
@@ -1094,7 +1105,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     async removeHighlightSelection(view: MarkdownView, selectionSnapshot?: SelectionSnapshot | null) {
-        const sel = window.getSelection();
+        const sel = this.selectionFor(view);
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) {
             new Notice("Select highlighted text to remove.");
@@ -1258,7 +1269,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     async copyAsQuote(view: MarkdownView, selectionSnapshot?: SelectionSnapshot | null) {
-        const sel = window.getSelection();
+        const sel = this.selectionFor(view);
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) {
             new Notice("No text selected.");
@@ -1282,7 +1293,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         autoTag = "",
         selectionSnapshot?: SelectionSnapshot | null
     ) {
-        const sel = window.getSelection();
+        const sel = this.selectionFor(view);
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) return;
         const scrollPos = getScroll(view);
@@ -1763,7 +1774,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
             let wrappedContent = actualContent;
 
             if (mode === "highlight" || mode === "tag" || mode === "color") {
-                wrappedContent = wrapHighlight(actualContent, color);
+                // A bold, italic or code delimiter taken in from just one side
+                // of the selection stays outside the highlight, with its partner.
+                const { leading, core, trailing } = extractInlineBoundaries(actualContent);
+                wrappedContent = `${leading}${wrapHighlight(core, color)}${trailing}`;
             } else if (mode === "bold") {
                 wrappedContent = `**${actualContent}**`;
             } else if (mode === "italic") {

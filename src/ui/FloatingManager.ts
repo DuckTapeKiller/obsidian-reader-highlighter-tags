@@ -400,7 +400,9 @@ export class FloatingManager {
 
         this.containerEl?.toggleClass("is-pdf-view", isPdf);
 
-        const sel = window.getSelection();
+        // The selection of the window the note is in: a popout window has a
+        // selection of its own, and `window` is always the main one.
+        const sel = this.targetDocument().defaultView?.getSelection() ?? window.getSelection();
         const snippet = sel?.toString() ?? "";
 
         // Only a selection inside the note itself. Text selected in a hover

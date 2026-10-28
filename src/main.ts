@@ -30,9 +30,11 @@ import {
     removeAllHighlightsFromRaw,
     removeFootnoteFromRaw,
     removeAllFootnotesFromRaw,
+    parseFootnotes,
     type RecolorSource,
 } from "./utils/highlights";
 import {
+    COLOR_EMOJI,
     COLOR_LABELS,
     HIGHLIGHT_COLORS,
     isHighlightColor,
@@ -42,9 +44,20 @@ import {
     type HighlightColor,
 } from "./utils/colors";
 import { getSelectedOccurrence, type SelectionHint } from "./utils/blockOccurrence";
-import { kindForTag, type BlockKind } from "./utils/sourceBlocks";
-import { extractInlineBoundaries } from "./utils/inlineBoundaries";
+import { kindForTag, splitSourceBlocks, type BlockKind } from "./utils/sourceBlocks";
+import { emphasisPairs, highlightInLine } from "./utils/inlineMarkdown";
 import { BulkRecolorModal } from "./modals/BulkRecolorModal";
+import { confirmAction } from "./modals/ConfirmModal";
+
+/** A change the plugin made, kept so it can be undone. */
+export interface UndoEntry {
+    file: TFile;
+    original: string;
+    after?: string;
+}
+
+/** How many changes back undo can go. */
+const MAX_UNDO_STEPS = 20;
 
 export interface SemanticColor {
     color: HighlightColor;
@@ -192,11 +205,11 @@ export default class ReadingHighlighterPlugin extends Plugin {
     floatingManager: FloatingManager;
     logic: SelectionLogic;
     /**
-     * What "Undo last highlight" restores. `after` is the note as the plugin
-     * left it; undo refuses once the note no longer reads that way, since
-     * restoring `original` would throw away whatever was written since.
+     * Changes the plugin can undo, oldest first. `after` is the note as the
+     * change left it; undo refuses once the note no longer reads that way,
+     * since restoring `original` would throw away whatever was written since.
      */
-    lastModification: { file: TFile; original: string; after?: string } | null = null;
+    undoHistory: UndoEntry[] = [];
     lastScrollPosition: ScrollPosition | null = null;
     /** A reading position waiting to be saved once scrolling settles. */
     pendingProgress: { view: MarkdownView; file: TFile } | null = null;
@@ -236,7 +249,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         if (Platform.isMobile) {
             const btn = this.addRibbonIcon("highlighter", "Highlight selection", () => {
                 const view = this.getActiveReadingView();
-                if (view) void this.highlightSelection(view);
+                if (view) this.runAction(this.highlightSelection(view));
                 else new Notice("Open a note in reading view first.");
             });
             this.register(() => btn.remove());
@@ -257,7 +270,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                void this.highlightSelection(view);
+                this.runAction(this.highlightSelection(view));
                 return true;
             },
         });
@@ -269,7 +282,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                void this.tagSelection(view);
+                this.runAction(this.tagSelection(view));
                 return true;
             },
         });
@@ -296,7 +309,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                void this.annotateSelection(view);
+                this.runAction(this.annotateSelection(view));
                 return true;
             },
         });
@@ -308,7 +321,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                void this.copyAsQuote(view);
+                this.runAction(this.copyAsQuote(view));
                 return true;
             },
         });
@@ -320,7 +333,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const view = this.getActiveReadingView();
                 if (!view) return false;
                 if (checking) return true;
-                void this.removeHighlightSelection(view);
+                this.runAction(this.removeHighlightSelection(view));
                 return true;
             },
         });
@@ -467,7 +480,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                     const view = this.getActiveReadingView();
                     if (!view) return false;
                     if (checking) return true;
-                    void this.applyColorByIndex(view, i);
+                    this.runAction(this.applyColorByIndex(view, i));
                     return true;
                 },
             });
@@ -541,12 +554,18 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         const blocks = this.getAllowedBlocksInRange(range, view.contentEl);
         const fallbackBlock = this.getClosestAllowedBlock(range.commonAncestorContainer, view.contentEl);
-        const contextElement = blocks[0] || fallbackBlock || null;
+        // A selection inside one list item nested in another belongs to that
+        // item. `blocks` holds the outermost block it touches, whose text
+        // takes in the whole nested list: the selected word's occurrence
+        // would be counted across every nested item.
+        const innermost =
+            blocks.length === 1 && fallbackBlock && blocks[0].contains(fallbackBlock) ? fallbackBlock : null;
+        const contextElement = innermost || blocks[0] || fallbackBlock || null;
         const rawSnippet = selectionSnapshot?.text || this.selectionFor(view)?.toString() || "";
 
         let snippet = rawSnippet;
-        if (this.settings.enableSmartParagraphSelection && blocks.length === 1) {
-            const blockText = this.getElementText(blocks[0]);
+        if (this.settings.enableSmartParagraphSelection && blocks.length === 1 && contextElement) {
+            const blockText = this.getElementText(contextElement);
             if (blockText) {
                 snippet = blockText;
             }
@@ -599,8 +618,34 @@ export default class ReadingHighlighterPlugin extends Plugin {
         return current && SMART_SELECTION_TAGS.has(current.tagName) ? current : null;
     }
 
+    /**
+     * The kind of source block a rendered block comes from. Reading view
+     * renders a footnote as a list item at the end of the note, but in the
+     * source it is a footnote definition, not a list item: without telling them
+     * apart, a footnote reading like an entry of the note's bibliography was
+     * found in the bibliography.
+     */
+    blockKindOf(element: HTMLElement | null | undefined): BlockKind | null {
+        if (element?.tagName === "LI" && element.closest("section.footnotes, .footnotes")) return "footnote";
+        return kindForTag(element?.tagName);
+    }
+
+    /**
+     * A block's rendered text. A list item's own text leaves out the lists
+     * nested in it: in the source, each of their items is a block of its own.
+     * A footnote's back arrow is not text of the note either.
+     */
     getElementText(element: HTMLElement) {
-        return (element?.innerText || element?.textContent || "").replace(/\s+/g, " ").trim();
+        let source = element;
+        if (
+            element?.querySelector?.(".footnote-backref") ||
+            (element?.tagName === "LI" && element.querySelector("ul, ol"))
+        ) {
+            source = element.cloneNode(true) as HTMLElement;
+            if (element.tagName === "LI") source.querySelectorAll("ul, ol").forEach((list) => list.remove());
+            source.querySelectorAll(".footnote-backref").forEach((arrow) => arrow.remove());
+        }
+        return (source?.innerText || source?.textContent || "").replace(/\s+/g, " ").trim();
     }
 
     buildSelectionRequest(view: MarkdownView, selectionSnapshot: SelectionSnapshot | null) {
@@ -619,7 +664,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             contextText: contextElement ? this.getElementText(contextElement) : null,
             occurrenceIndex: this.getSelectionOccurrence(view, contextElement),
             withinBlock: this.getWithinBlockHint(contextElement, selectionSnapshot, snippet),
-            contextKind: kindForTag(contextElement?.tagName),
+            contextKind: this.blockKindOf(contextElement),
         };
     }
 
@@ -645,14 +690,17 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     getSelectionOccurrence(view: MarkdownView, contextElement: HTMLElement | null) {
         if (!contextElement) return 0;
-        const contextText = contextElement.innerText.trim();
+        const contextText = this.getElementText(contextElement);
         const tagName = contextElement.tagName.toLowerCase();
+        // Only blocks of the same kind: a footnote and a bibliography entry
+        // reading alike are both list items, but not the same sequence.
+        const kind = this.blockKindOf(contextElement);
         const allElements = view.contentEl.querySelectorAll(tagName);
         let count = 0;
         let foundIndex = 0;
         for (let i = 0; i < allElements.length; i++) {
             const el = allElements[i] as HTMLElement;
-            if (el.innerText.trim() === contextText) {
+            if (this.blockKindOf(el) === kind && this.getElementText(el) === contextText) {
                 if (el === contextElement) {
                     foundIndex = count;
                     break;
@@ -664,40 +712,87 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     async saveUndoState(file: TFile) {
-        this.lastModification = {
-            file: file,
-            original: await this.app.vault.read(file),
-        };
+        // An entry without a result was never written (a tag or annotation
+        // dialog that was cancelled), so there is nothing in it to undo.
+        this.undoHistory = this.undoHistory.filter((entry) => entry.after !== undefined);
+        this.undoHistory.push({ file, original: await this.app.vault.read(file) });
+        if (this.undoHistory.length > MAX_UNDO_STEPS) this.undoHistory.shift();
     }
 
     /** Record the note as a change left it, so undo can tell if it was edited since. */
     async recordUndoResult(file: TFile, content?: string) {
-        const last = this.lastModification;
+        const last = this.undoHistory[this.undoHistory.length - 1];
         if (!last || last.file !== file) return;
         last.after = content ?? (await this.app.vault.read(file));
     }
 
+    /**
+     * Undo the latest change to the open note, or the latest change anywhere
+     * when the open note has none. Run again to go further back.
+     */
     async undoLastHighlight() {
-        const last = this.lastModification;
-        // Without a recorded result the change was never written (a tag or
-        // annotation dialog that was cancelled), so there is nothing to undo.
-        if (!last || last.after === undefined) {
+        const done = this.undoHistory.filter((entry) => entry.after !== undefined);
+        const active = this.app.workspace.getActiveFile();
+        const entry = [...done].reverse().find((e) => e.file === active) ?? done[done.length - 1];
+        if (!entry) {
             new Notice("Nothing to undo.");
             return;
         }
+        await this.undoChange(entry);
+    }
+
+    /** Undo one recorded change, if the note still reads as it left it. */
+    async undoChange(entry: UndoEntry) {
+        if (!this.undoHistory.includes(entry)) {
+            new Notice("Already undone.");
+            return;
+        }
         try {
-            const current = await this.app.vault.read(last.file);
-            if (current !== last.after) {
+            const current = await this.app.vault.read(entry.file);
+            if (current !== entry.after) {
+                // Nothing written since can be kept by restoring, so this
+                // change can no longer be undone.
+                this.undoHistory = this.undoHistory.filter((e) => e !== entry);
                 new Notice("The note has changed since, so undoing would lose those changes.");
                 return;
             }
-            await this.app.vault.modify(last.file, last.original);
-            new Notice("Undone last highlight.");
-            this.lastModification = null;
+            await this.app.vault.modify(entry.file, entry.original);
+            this.undoHistory = this.undoHistory.filter((e) => e !== entry);
+            new Notice("Undone.");
         } catch (err) {
             new Notice("Failed to undo.");
             console.error(err);
         }
+    }
+
+    /**
+     * Run an action started from the toolbar or a command. It is not awaited
+     * by its caller, so a failure would otherwise vanish: the selection stays,
+     * the toolbar goes, and nothing says why.
+     */
+    runAction(action: Promise<unknown>) {
+        action.catch((err: unknown) => {
+            console.error("Reader Highlighter Tags: action failed.", err);
+            new Notice(`That did not work: ${err instanceof Error ? err.message : "unknown error"}`);
+        });
+    }
+
+    /** A notice for a change just made, with a button that undoes it. */
+    noticeWithUndo(message: string) {
+        const entry = this.undoHistory[this.undoHistory.length - 1];
+        if (!entry || entry.after === undefined) {
+            new Notice(message);
+            return;
+        }
+        const fragment = createFragment((f) => {
+            f.createSpan({ text: message });
+            const button = f.createEl("button", { text: "Undo", cls: "reading-highlighter-undo-btn" });
+            button.addEventListener("click", (evt) => {
+                evt.stopPropagation();
+                void this.undoChange(entry);
+            });
+        });
+        new Notice(fragment, 10000);
     }
 
     /**
@@ -736,7 +831,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             this.getElementText(block),
             this.getSelectionOccurrence(view, block),
             getSelectedOccurrence(block, blockRange, snippet),
-            kindForTag(block.tagName)
+            this.blockKindOf(block)
         );
     }
 
@@ -804,7 +899,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             }
             this.restoreScroll(view, scrollPos);
             sel?.removeAllRanges();
-            new Notice("Highlighted!");
+            this.noticeWithUndo("Highlighted.");
             return;
         }
 
@@ -833,7 +928,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         if (this.settings.enableHaptics && Platform.isMobile) {
             navigator.vibrate?.(10);
         }
-        new Notice("Highlighted!");
+        this.noticeWithUndo("Highlighted.");
     }
 
     async applyColorByIndex(view: MarkdownView, index: number, selectionSnapshot?: SelectionSnapshot | null) {
@@ -1019,6 +1114,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             await this.applyMarkdownModification(targetFile, "", newResult.start, newResult.end, "tag", tag);
             this.restoreScroll(view, scrollPos);
             this.selectionFor(view)?.removeAllRanges();
+            this.noticeWithUndo("Tagged.");
         }).open();
     }
 
@@ -1078,7 +1174,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             await this.applyAnnotation(targetFile, currentRaw, newResult.start, newResult.end, comment);
             this.restoreScroll(view, scrollPos);
             this.selectionFor(view)?.removeAllRanges();
-            new Notice("Annotation added!");
+            this.noticeWithUndo("Annotation added.");
         }).open();
     }
 
@@ -1131,7 +1227,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const targetFile = result.file;
         await this.saveUndoState(targetFile);
         await this.applyMarkdownModification(targetFile, "", result.start, result.end, "remove");
-        new Notice("Highlighting removed.");
+        this.noticeWithUndo("Highlighting removed.");
         this.restoreScroll(view, scrollPos);
         sel?.removeAllRanges();
     }
@@ -1141,16 +1237,26 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     async removeAllHighlightsInFile(file: TFile) {
-        await this.saveUndoState(file);
         const raw = await this.app.vault.read(file);
         const result = removeAllHighlightsFromRaw(raw);
         if (!result.removedCount) {
             new Notice("No highlights to remove.");
             return;
         }
-        await this.app.vault.modify(file, result.raw);
-        await this.recordUndoResult(file, result.raw);
-        new Notice("All highlights removed.");
+        const count = result.removedCount;
+        const confirmed = await confirmAction(this.app, {
+            title: "Remove all highlights?",
+            message: `This removes ${count} highlight${count === 1 ? "" : "s"} from "${file.basename}". The text stays.`,
+            confirmText: "Remove highlights",
+        });
+        if (!confirmed) return;
+        // Read again: the note may have changed while the dialog was open.
+        await this.saveUndoState(file);
+        const current = await this.app.vault.read(file);
+        const final = removeAllHighlightsFromRaw(current);
+        await this.app.vault.modify(file, final.raw);
+        await this.recordUndoResult(file, final.raw);
+        this.noticeWithUndo("All highlights removed.");
     }
 
     async removeAnnotationById(file: TFile, footnoteId: string) {
@@ -1163,20 +1269,38 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
         await this.app.vault.modify(file, result.raw);
         await this.recordUndoResult(file, result.raw);
-        new Notice("Annotation removed.");
+        this.noticeWithUndo("Annotation removed.");
     }
 
+    /**
+     * Remove every annotation of the note — every footnote, as the navigator
+     * lists them — after showing how many and which. Citations are footnotes
+     * too, and there is no telling them apart, so the dialog says so.
+     */
     async removeAllAnnotations(file: TFile) {
-        await this.saveUndoState(file);
         const raw = await this.app.vault.read(file);
-        const result = removeAllFootnotesFromRaw(raw);
-        if (!result.removedCount) {
+        const footnotes = [...parseFootnotes(raw).values()];
+        const count = footnotes.length;
+        if (!count) {
             new Notice("No annotations to remove.");
             return;
         }
+        const shown = footnotes.slice(0, 8).map((f) => `[^${f.id}] ${f.text}`.slice(0, 120));
+        if (count > shown.length) shown.push(`…and ${count - shown.length} more`);
+        const confirmed = await confirmAction(this.app, {
+            title: "Remove all annotations?",
+            message: `This removes all ${count} footnote${count === 1 ? "" : "s"} in "${file.basename}", with their references. Citations are footnotes too and are removed with them.`,
+            details: shown,
+            confirmText: "Remove annotations",
+        });
+        if (!confirmed) return;
+        // Read again: the note may have changed while the dialog was open.
+        await this.saveUndoState(file);
+        const current = await this.app.vault.read(file);
+        const result = removeAllFootnotesFromRaw(current);
         await this.app.vault.modify(file, result.raw);
         await this.recordUndoResult(file, result.raw);
-        new Notice(`Removed ${result.removedCount} annotation${result.removedCount === 1 ? "" : "s"}.`);
+        this.noticeWithUndo(`Removed ${result.removedCount} annotation${result.removedCount === 1 ? "" : "s"}.`);
     }
 
     async mergeAdjacentHighlightsInFile(file: TFile) {
@@ -1191,7 +1315,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         await this.app.vault.modify(file, result.raw);
         await this.recordUndoResult(file, result.raw);
-        new Notice(`Merged ${result.mergedCount} highlight${result.mergedCount === 1 ? "" : "s"}.`);
+        this.noticeWithUndo(`Merged ${result.mergedCount} highlight${result.mergedCount === 1 ? "" : "s"}.`);
     }
 
     async recolorHighlightsInFile(file: TFile, from: RecolorSource, to: HighlightColor | null) {
@@ -1206,7 +1330,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         await this.app.vault.modify(file, result.raw);
         await this.recordUndoResult(file, result.raw);
-        new Notice(`Recoloured ${result.changedCount} highlight${result.changedCount === 1 ? "" : "s"}.`);
+        this.noticeWithUndo(`Recoloured ${result.changedCount} highlight${result.changedCount === 1 ? "" : "s"}.`);
     }
 
     async convertHtmlHighlightsInFile(file: TFile) {
@@ -1221,7 +1345,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         await this.app.vault.modify(file, result.raw);
         await this.recordUndoResult(file, result.raw);
-        new Notice(
+        this.noticeWithUndo(
             `Converted ${result.changedCount} HTML highlight${result.changedCount === 1 ? "" : "s"} to native highlights.`
         );
     }
@@ -1317,7 +1441,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         await this.applyMarkdownModification(targetFile, result.raw, result.start, result.end, "color", color, autoTag);
         this.restoreScroll(view, scrollPos);
         sel?.removeAllRanges();
-        new Notice("Highlighted!");
+        this.noticeWithUndo("Highlighted.");
     }
 
     /**
@@ -1471,12 +1595,16 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const indent = indentMatch ? indentMatch[0] : "";
         let remainder = line.substring(indent.length);
         let prefix = "";
+        // Markdown takes only a space or a tab after a marker: "1.\u00a0Usos",
+        // with a no-break space, is a paragraph, not a list item.
+        const heading = /^#{1,6}[ \t]+/;
         const prefixPatterns = [
             /^>\s*/,
-            /^#{1,6}\s+/,
-            /^-\s\[[ xX]\]\s+/,
-            /^[-*+]\s+/,
-            /^\d{1,3}[.)]\s+/,
+            heading,
+            /^-[ \t]\[[ xX]\][ \t]+/,
+            // A marker alone on its line is an empty list item.
+            /^[-*+](?:[ \t]+|$)/,
+            /^\d{1,3}[.)](?:[ \t]+|$)/,
             /^\[\^[^\]]+\]:\s*/,
             /^\[![^\]]+\]\s*/,
         ];
@@ -1488,7 +1616,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 if (match) {
                     prefix += match[0];
                     remainder = remainder.substring(match[0].length);
-                    matched = true;
+                    // A heading's text is not a list: "### 2. Functions"
+                    // keeps its "2.".
+                    matched = pattern !== heading;
                     break;
                 }
             }
@@ -1631,6 +1761,11 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
         let expandedStart = start;
         let expandedEnd = end;
+        // The highlights Obsidian renders. A `==` that is not one of their
+        // markers — a comparison, code — is text and is never taken in or
+        // removed.
+        const existingHighlights = parseHighlights(raw).highlights;
+        const markerStarts = new Set(existingHighlights.flatMap((h) => [h.openTagStart, h.closeTagStart]));
         let bodyStart = 0;
         if (raw.startsWith("---")) {
             const secondDash = raw.indexOf("---", 3);
@@ -1643,7 +1778,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             expanded = false;
             const preceding = raw.substring(0, expandedStart);
             const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[\^[^\]]+\]:?\s?|[([{"'«“‘‹])$/);
-            if (matchBack && expandedStart > bodyStart) {
+            const backIsText = matchBack?.[0] === "==" && !markerStarts.has(expandedStart - 2);
+            if (matchBack && !backIsText && expandedStart > bodyStart) {
                 const newStart = expandedStart - matchBack[0].length;
                 if (newStart >= bodyStart) {
                     expandedStart = newStart;
@@ -1653,12 +1789,23 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const following = raw.substring(expandedEnd);
             // Expanded to include balanced punctuation, quotes (including « »), and footnotes
             const matchForward = following.match(
-                /^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:]["']?|[)\]}"'»”’›.?!,;:](\s|$)?)/
+                /^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\]|[.?!,;:]["']?|[)\]}"'»”’›.?!,;:][ \t]?)/
             );
-            if (matchForward) {
+            if (matchForward && !(matchForward[0] === "==" && !markerStarts.has(expandedEnd))) {
                 expandedEnd += matchForward[0].length;
                 expanded = true;
             }
+        }
+        // Obsidian shows a wikilink's text exactly as written, so a marker
+        // inside `[[…]]` either shows as text or, in the link's target, breaks
+        // the link. A selection reaching into one takes the whole link.
+        const linkScanStart = this.getLineStart(raw, expandedStart);
+        const linkScan = raw.substring(linkScanStart, this.getLineEnd(raw, expandedEnd));
+        for (const link of linkScan.matchAll(/!?\[\[(?:[^\]\n]|\](?!\]))*\]\]/g)) {
+            const linkStart = linkScanStart + link.index;
+            const linkEnd = linkStart + link[0].length;
+            if (linkStart < expandedStart && expandedStart < linkEnd) expandedStart = linkStart;
+            if (linkStart < expandedEnd && expandedEnd < linkEnd) expandedEnd = linkEnd;
         }
         // Merge with any highlight the selection overlaps.
         //
@@ -1674,7 +1821,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         let mergedColor: HighlightColor | null = null;
         let mergedAny = false;
         if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
-            for (const existing of parseHighlights(raw).highlights) {
+            for (const existing of existingHighlights) {
                 const overlaps = existing.openTagStart < expandedEnd && existing.closeTagEnd > expandedStart;
                 if (!overlaps) continue;
                 if (!mergedAny) mergedColor = existing.color;
@@ -1746,21 +1893,84 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const cleanAutoTag = sanitizeTag(autoTag);
             fullTag = fullTag ? `${fullTag} #${cleanAutoTag}` : `#${cleanAutoTag}`;
         }
-        const processedLines = lines.map((line, lineIndex) => {
+        // The markers of the highlights now inside the range: the ones to
+        // remove before writing it back.
+        const markerRanges = existingHighlights
+            .filter((h) => h.openTagStart >= expandedStart && h.closeTagEnd <= expandedEnd)
+            .flatMap((h): [number, number][] => [
+                [h.openTagStart, h.openTagEnd],
+                [h.closeTagStart, h.closeTagEnd],
+            ]);
+        const withoutMarkers = (line: string, lineStart: number) => {
+            let out = "";
+            for (let k = 0; k < line.length; k++) {
+                const at = lineStart + k;
+                if (!markerRanges.some(([a, b]) => at >= a && at < b)) out += line[k];
+            }
+            return out;
+        };
+        // Where each kept character of a line came from in `raw`.
+        const keptOffsets = (line: string, lineStart: number) => {
+            const offsets: number[] = [];
+            for (let k = 0; k < line.length; k++) {
+                const at = lineStart + k;
+                if (!markerRanges.some(([a, b]) => at >= a && at < b)) offsets.push(at);
+            }
+            return offsets;
+        };
+        // Delimiters that pair with a partner on another line of their
+        // paragraph — an italic poem, a bold passage across soft line breaks.
+        // Highlighted line by line, each line alone would look unpaired.
+        const crossLineDelimiters = new Set<number>();
+        if (mode === "highlight" || mode === "tag" || mode === "color") {
+            for (const block of splitSourceBlocks(raw)) {
+                if (block.end <= expandedStart || block.start >= expandedEnd) continue;
+                const text = raw.substring(block.start, block.end);
+                if (!text.includes("\n")) continue;
+                // Quote markers are not part of the paragraph's text; blank them
+                // so offsets stay put.
+                const paragraph = text.replace(/^[ \t]*(?:>[ \t]?)+/gm, (m) => " ".repeat(m.length));
+                for (const pair of emphasisPairs(paragraph)) {
+                    if (!paragraph.slice(pair.open[1], pair.close[0]).includes("\n")) continue;
+                    for (const [a, b] of [pair.open, pair.close]) {
+                        for (let k = a; k < b; k++) crossLineDelimiters.add(block.start + k);
+                    }
+                }
+            }
+        }
+        // The text of the first and last lines outside the range. Lines are
+        // written back whole: a highlight can need a stray `==` before or
+        // after it escaped, so that the stray cannot pair with it.
+        const lineHead = raw.substring(this.getLineStart(raw, expandedStart), expandedStart);
+        const lineTail = raw.substring(expandedEnd, this.getLineEnd(raw, expandedEnd));
+        const processLine = (line: string, lineIndex: number): string | { whole: string } => {
             let cleanLine = line.replace(/<mark[^>]*>/g, "").replace(/<\/mark>/g, "");
             if (this.isTableAlignmentRow(line)) return line;
             if (this.isTableDataRow(line)) {
                 return this.applyToTableRow(line, lineOffsets[lineIndex], selectionStart, selectionEnd, mode, color);
             }
             if (mode === "highlight" || mode === "color" || mode === "tag" || mode === "remove") {
-                cleanLine = stripHighlightMarkers(cleanLine);
+                cleanLine = withoutMarkers(line, lineOffsets[lineIndex]);
             } else if (mode === "bold") {
                 cleanLine = cleanLine.split("**").join("");
             } else if (mode === "italic") {
                 cleanLine = cleanLine.split("*").join("");
             }
             if (mode === "remove") return cleanLine;
-            const { indent, prefix, content } = this.splitMarkdownLine(cleanLine);
+            // List markers, quote markers and heading hashes are only syntax at
+            // the start of a line. Selected text that merely begins with "3. "
+            // keeps it.
+            const atLineStart = lineIndex > 0 || !lineHead.trim();
+            // Read the markers off the whole line, not off the selected part of
+            // it: "3." selected out of "3.12. Sustantivos" is no list item.
+            const rest = lineIndex === lines.length - 1 ? lineTail : "";
+            const markers = atLineStart ? this.splitMarkdownLine(cleanLine + rest) : null;
+            const markerLength = markers
+                ? Math.min(markers.indent.length + markers.prefix.length, cleanLine.length)
+                : 0;
+            const indent = cleanLine.slice(0, markerLength);
+            const prefix = "";
+            const content = cleanLine.slice(markerLength);
             if (!content.trim()) return line;
 
             // Extract leading and trailing whitespace to preserve it outside the highlight
@@ -1774,10 +1984,38 @@ export default class ReadingHighlighterPlugin extends Plugin {
             let wrappedContent = actualContent;
 
             if (mode === "highlight" || mode === "tag" || mode === "color") {
-                // A bold, italic or code delimiter taken in from just one side
-                // of the selection stays outside the highlight, with its partner.
-                const { leading, core, trailing } = extractInlineBoundaries(actualContent);
-                wrappedContent = `${leading}${wrapHighlight(core, color)}${trailing}`;
+                // Read with the rest of its line, so a bold, italic or
+                // struck-through delimiter can be matched with a partner
+                // outside the selection and kept with it.
+                const before = lineIndex === 0 ? lineHead : "";
+                const after = lineIndex === lines.length - 1 ? lineTail : "";
+                const head = `${before}${indent}${prefix}${leadWS}`;
+                // An existing highlight's marker removed at an edge must be
+                // written back there.
+                const lineStart = lineOffsets[lineIndex];
+                const firstChar = lineStart + (line.length - line.trimStart().length);
+                const afterLastChar = lineStart + line.trimEnd().length;
+                const markerAtEdge =
+                    (lineIndex === 0 && markerRanges.some(([a]) => a === firstChar)) ||
+                    (lineIndex === lines.length - 1 && markerRanges.some(([, b]) => b === afterLastChar));
+                // The context is `before`, the line without its removed markers,
+                // and `after`: map each character back to `raw`.
+                const contextOffsets = [
+                    ...Array.from({ length: before.length }, (_, k) => expandedStart - before.length + k),
+                    ...keptOffsets(line, lineOffsets[lineIndex]),
+                    ...Array.from({ length: after.length }, (_, k) => expandedEnd + k),
+                ];
+                const crossLine = contextOffsets.flatMap((at, k) => (crossLineDelimiters.has(at) ? [k] : []));
+                const written = highlightInLine(
+                    `${head}${actualContent}${trailWS}${after}`,
+                    head.length,
+                    head.length + actualContent.length,
+                    `==${color ? COLOR_EMOJI[color] : ""}`,
+                    tagStr,
+                    markerAtEdge,
+                    crossLine
+                );
+                return { whole: written };
             } else if (mode === "bold") {
                 wrappedContent = `**${actualContent}**`;
             } else if (mode === "italic") {
@@ -1785,9 +2023,18 @@ export default class ReadingHighlighterPlugin extends Plugin {
             }
 
             return `${indent}${prefix}${leadWS}${tagStr}${wrappedContent}${trailWS}`;
+        };
+        const processedLines = lines.map((line, lineIndex) => {
+            const result = processLine(line, lineIndex);
+            if (typeof result !== "string") return result.whole;
+            const before = lineIndex === 0 ? lineHead : "";
+            const after = lineIndex === lines.length - 1 ? lineTail : "";
+            return `${before}${result}${after}`;
         });
         const replaceBlock = processedLines.join(newline);
-        const newContent = raw.substring(0, expandedStart) + replaceBlock + raw.substring(expandedEnd);
+        const replaceStart = expandedStart - lineHead.length;
+        const replaceEnd = expandedEnd + lineTail.length;
+        const newContent = raw.substring(0, replaceStart) + replaceBlock + raw.substring(replaceEnd);
         await this.app.vault.modify(file, newContent);
         if (mode !== "remove" && this.settings.enableFrontmatterTag && this.settings.frontmatterTag) {
             const targetTag = this.formatFrontmatterTag(this.settings.frontmatterTag);

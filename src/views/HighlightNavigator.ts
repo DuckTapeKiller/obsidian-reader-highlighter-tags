@@ -263,7 +263,7 @@ export class HighlightNavigatorView extends ItemView {
     stripMarkdown(text: string): string {
         if (!text) return "";
         return text
-            .replace(/\[\[(?:[^\]|]+\|)?([^\]]+)\]\]/g, "$1") // [[Link]] or [[Link|Alias]] -> Link/Alias
+            .replace(/\[\[(?:(?:[^\]|]|\](?!\]))+\|)?((?:[^\]]|\](?!\]))+)\]\]/g, "$1") // [[Link]] or [[Link|Alias]] -> Link/Alias
             .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [Link](URL) -> Link
             .replace(/[*_~`]+/g, ""); // Bold, Italics, Strikethrough, Code
     }
@@ -461,8 +461,10 @@ export class HighlightNavigatorView extends ItemView {
                 found = true;
                 return removeHighlightFromRaw(data, highlight);
             });
-            if (found) await this.plugin.recordUndoResult(currentFile, result);
-            if (!found) {
+            if (found) {
+                await this.plugin.recordUndoResult(currentFile, result);
+                this.plugin.noticeWithUndo("Highlight removed.");
+            } else {
                 new Notice("Highlight not found (it may have moved).");
             }
             await this.refresh(true);

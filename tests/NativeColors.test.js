@@ -147,7 +147,10 @@ describe("the matcher's view of the source", () => {
     });
 
     it("pairs markers line by line", () => {
-        expect(filtered("==a\n==🟢b==")).toBe("a\nb");
+        // The unclosed `==a` is text. (Obsidian itself would pair the first
+        // marker with the last across the soft line break; highlights are read
+        // one line at a time here, as they always have been.)
+        expect(filtered("==a\n==🟢b==")).toBe("==a\nb");
     });
 
     it("maps offsets back past the emoji", async () => {

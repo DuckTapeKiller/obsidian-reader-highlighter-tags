@@ -85,6 +85,8 @@ export function readBlockTextAndCaret(block: NodeLike | null, range: RangeLike |
 
     let raw = "";
     let rawCaret = -1;
+    // A list item's own text: the lists nested in it are items of their own.
+    const ownTextOnly = block.tagName?.toUpperCase() === "LI";
 
     const visit = (node: NodeLike): void => {
         if (node.nodeType === TEXT_NODE) {
@@ -118,6 +120,7 @@ export function readBlockTextAndCaret(block: NodeLike | null, range: RangeLike |
             raw += "\n";
             return;
         }
+        if (ownTextOnly && node !== block && /^(UL|OL)$/i.test(node.tagName ?? "")) return;
         if (!children) return;
         for (let i = 0; i < children.length; i++) {
             visit(children[i]);

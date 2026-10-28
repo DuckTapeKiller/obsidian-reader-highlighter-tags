@@ -76,7 +76,7 @@ The plugin takes care of the details that usually go wrong:
 - **The right occurrence.** When the same words appear more than once, the plugin highlights the one you selected.
 - **Embedded notes.** Text shown from an embedded note (`![[Note]]`) is highlighted in the note it comes from.
 - **Erase.** The trash button removes any highlight your selection touches, across paragraphs too.
-- **Undo.** _Undo last highlight_ restores the note as it was before the plugin's last change. If you have edited the note since, it refuses rather than discard your edits.
+- **Undo.** Highlighting, colouring, tagging, annotating, removing, merging, recolouring and converting each show a notice with an **Undo** button. _Undo last highlight_ goes back one change at a time, up to 20, starting with the open note. If you have edited the note since a change, undo refuses rather than discard your edits.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/DuckTapeKiller/obsidian-reader-highlighter-tags/main/docs/images/table.webp" alt="A table of building costs in which one row has been highlighted green, cell by cell, and another cell purple." width="420">
@@ -228,25 +228,25 @@ Every action is a command, so you can give it a hotkey in **Settings → Hotkeys
 
 ![The command palette listing the plugin's commands.](https://raw.githubusercontent.com/DuckTapeKiller/obsidian-reader-highlighter-tags/main/docs/images/commands.webp)
 
-| Command                                                       | What it does                                                   |
-| ------------------------------------------------------------- | -------------------------------------------------------------- |
-| Highlight selection                                           | Highlights the selection, in the default colour if you set one |
-| Apply red / orange / yellow / green / blue / purple highlight | Highlights the selection in that colour                        |
-| Tag selection                                                 | Highlights the selection and tags it                           |
-| Add annotation to selection                                   | Adds a footnote comment after the selection                    |
-| Copy selection as quote                                       | Copies the selection using your quote template                 |
-| Remove highlight from selection                               | Removes every highlight the selection touches                  |
-| Undo last highlight                                           | Restores the note as it was before the plugin's last change    |
-| Remove all highlights from note                               | Removes every highlight in the note, keeping the text          |
-| Remove all annotations from note                              | Removes every footnote annotation in the note                  |
-| Merge adjacent highlights in note                             | Joins neighbouring highlights of the same colour               |
-| Recolour highlights in note                                   | Changes every highlight of one colour to another               |
-| Convert HTML highlights to native highlights in note          | Turns old `<mark>` and `<span>` highlights into native ones    |
-| Export highlights to new note / to JSON / to CSV              | Exports the note's highlights                                  |
-| Open highlight navigator                                      | Opens the navigator in the sidebar                             |
-| Open global research view                                     | Opens the research view                                        |
-| Extract all text from current PDF                             | Copies a PDF's text into its companion note                    |
-| Resume reading                                                | Jumps to where you stopped reading                             |
+| Command                                                       | What it does                                                               |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Highlight selection                                           | Highlights the selection, in the default colour if you set one             |
+| Apply red / orange / yellow / green / blue / purple highlight | Highlights the selection in that colour                                    |
+| Tag selection                                                 | Highlights the selection and tags it                                       |
+| Add annotation to selection                                   | Adds a footnote comment after the selection                                |
+| Copy selection as quote                                       | Copies the selection using your quote template                             |
+| Remove highlight from selection                               | Removes every highlight the selection touches                              |
+| Undo last highlight                                           | Undoes the plugin's last change; run again to go further back              |
+| Remove all highlights from note                               | Removes every highlight in the note, keeping the text, after asking        |
+| Remove all annotations from note                              | Removes every footnote in the note, citations included, after listing them |
+| Merge adjacent highlights in note                             | Joins neighbouring highlights of the same colour                           |
+| Recolour highlights in note                                   | Changes every highlight of one colour to another                           |
+| Convert HTML highlights to native highlights in note          | Turns old `<mark>` and `<span>` highlights into native ones                |
+| Export highlights to new note / to JSON / to CSV              | Exports the note's highlights                                              |
+| Open highlight navigator                                      | Opens the navigator in the sidebar                                         |
+| Open global research view                                     | Opens the research view                                                    |
+| Extract all text from current PDF                             | Copies a PDF's text into its companion note                                |
+| Resume reading                                                | Jumps to where you stopped reading                                         |
 
 ## Settings
 

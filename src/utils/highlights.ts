@@ -1,4 +1,10 @@
-import { colorAt, nearestHighlightColor, stripHighlightMarkers, wrapHighlight, type HighlightColor } from "./colors";
+import {
+    highlightMarkerPairs,
+    nearestHighlightColor,
+    stripHighlightMarkers,
+    wrapHighlight,
+    type HighlightColor,
+} from "./colors";
 
 export type HighlightType = "markdown" | "html";
 export type FootnotePlacement = "after" | "inside";
@@ -182,25 +188,24 @@ export function parseHighlights(raw: string): ParsedHighlights {
             continue;
         }
 
-        const markdownPattern = /==(.*?)==/g;
         const htmlPattern = /<mark\b[^>]*>(.*?)<\/mark>/gi;
 
-        let match: RegExpExecArray | null;
-        while ((match = markdownPattern.exec(line)) !== null) {
-            const start = lineOffset + match.index;
-            const end = start + match[0].length;
+        // Only what Obsidian renders as a highlight: not the `==` of a
+        // comparison, nor any inside a code span.
+        for (const pair of highlightMarkerPairs(line)) {
+            const start = lineOffset + pair.open;
+            const end = lineOffset + pair.close + 2;
             // A colour emoji straight after the opening marker belongs to the
             // marker: Obsidian reads it as the colour and never shows it.
-            const colour = colorAt(match[1] ?? "");
-            const innerText = (match[1] ?? "").slice(colour.length);
-            const innerStart = start + 2 + colour.length;
+            const innerText = line.slice(pair.openEnd, pair.close);
+            const innerStart = lineOffset + pair.openEnd;
             const innerEnd = end - 2;
 
-            const { tagsText, tagsStart, tagsEnd } = extractLeadingTagsRange(line, lineOffset, match.index);
+            const { tagsText, tagsStart, tagsEnd } = extractLeadingTagsRange(line, lineOffset, pair.open);
             const footnote = detectFootnoteForHighlight({
                 line,
                 lineOffset,
-                wrapperEndInLine: match.index + match[0].length,
+                wrapperEndInLine: pair.close + 2,
                 innerText,
                 innerStart,
             });
@@ -210,7 +215,7 @@ export function parseHighlights(raw: string): ParsedHighlights {
                 text: innerText.trim(),
                 line: lineIdx,
                 type: "markdown",
-                color: colour.color,
+                color: pair.color,
                 start,
                 end,
                 innerStart,
@@ -230,6 +235,7 @@ export function parseHighlights(raw: string): ParsedHighlights {
             });
         }
 
+        let match: RegExpExecArray | null;
         while ((match = htmlPattern.exec(line)) !== null) {
             const start = lineOffset + match.index;
             const end = start + match[0].length;

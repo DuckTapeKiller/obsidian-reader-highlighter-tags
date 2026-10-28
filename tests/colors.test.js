@@ -45,9 +45,23 @@ describe("wrapHighlight", () => {
 });
 
 describe("stripHighlightMarkers", () => {
-    it("is split-and-join for text without colours", () => {
-        for (const text of ["==a== b ==c==", "a===b", "====", "x == y", "==sin cierre", ""]) {
-            expect(stripHighlightMarkers(text)).toBe(text.split("==").join(""));
+    it("removes the markers of highlights", () => {
+        expect(stripHighlightMarkers("==a== b ==c==")).toBe("a b c");
+        expect(stripHighlightMarkers("a==b==c")).toBe("abc");
+        expect(stripHighlightMarkers("")).toBe("");
+    });
+
+    it("keeps `==` that Obsidian does not read as a highlight", () => {
+        // Comparisons, code, unpaired and empty markers are text.
+        for (const text of [
+            "x == y",
+            "if x == 1 or y == 2",
+            "`a == b` and `c == d`",
+            "==sin cierre",
+            "====",
+            "a == b== c",
+        ]) {
+            expect(stripHighlightMarkers(text)).toBe(text);
         }
     });
 

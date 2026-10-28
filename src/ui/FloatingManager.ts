@@ -246,9 +246,11 @@ export class FloatingManager {
                 }
 
                 if (isPdf) {
-                    void this.plugin.savePdfHighlight(view, this._selectionSnapshot, "action", actionName);
+                    this.plugin.runAction(
+                        this.plugin.savePdfHighlight(view, this._selectionSnapshot, "action", actionName)
+                    );
                 } else {
-                    void this.plugin[actionName](view as MarkdownView, this._selectionSnapshot);
+                    this.plugin.runAction(this.plugin[actionName](view as MarkdownView, this._selectionSnapshot));
                 }
 
                 this.hide();
@@ -271,7 +273,7 @@ export class FloatingManager {
                 preventFocus(evt);
                 const view = this.app.workspace.getActiveViewOfType(View);
                 if (view && view.getViewType() === "pdf") {
-                    void this.plugin.extractAllPdfText(view);
+                    this.plugin.runAction(this.plugin.extractAllPdfText(view));
                 }
                 this.hide();
             };
@@ -300,9 +302,11 @@ export class FloatingManager {
                 }
 
                 if (isPdf) {
-                    void this.plugin.savePdfHighlight(view, this._selectionSnapshot, "color", index);
+                    this.plugin.runAction(this.plugin.savePdfHighlight(view, this._selectionSnapshot, "color", index));
                 } else {
-                    void this.plugin.applyColorByIndex(view as MarkdownView, index, this._selectionSnapshot);
+                    this.plugin.runAction(
+                        this.plugin.applyColorByIndex(view as MarkdownView, index, this._selectionSnapshot)
+                    );
                 }
 
                 this.hide();
@@ -372,7 +376,11 @@ export class FloatingManager {
      */
     handleSelection() {
         if (Platform.isAndroidApp) {
-            // Debounce: wait for selection to stabilise
+            // Debounce: wait for selection to stabilise. While it is still
+            // moving the toolbar stays out of the way: shown mid-drag, it sat
+            // under the finger, and dragging a selection handle onto it
+            // stretched the selection to the end of the note.
+            this.hide();
             if (this._selectionDebounceTimer) {
                 window.clearTimeout(this._selectionDebounceTimer);
             }

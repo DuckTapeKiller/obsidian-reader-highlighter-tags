@@ -75,29 +75,104 @@ export function wrapHighlight(content: string, color: HighlightColor | null | un
     return `${lead}==${color ? COLOR_EMOJI[color] : ""}${inner}==${trail}`;
 }
 
+export interface HighlightMarkers {
+    /** Start of the opening `==`. */
+    open: number;
+    /** End of the opening marker, past its colour emoji if it has one. */
+    openEnd: number;
+    /** Start of the closing `==`. */
+    close: number;
+    color: HighlightColor | null;
+}
+
 /**
- * Remove every `==` marker from `text`, and the colour emoji of each opening
- * one.
- *
- * Markers pair left to right, as `parseHighlights` reads them, so an emoji
- * straight after a *closing* marker is left alone: that one is visible text.
- * For text without colour emoji this is exactly `text.split("==").join("")`.
+ * Characters of `text` that cannot be a highlight marker: those of code spans,
+ * of backslash escapes, and inside wikilinks, whose text Obsidian shows as it
+ * is.
+ */
+function codeAndEscapes(text: string): boolean[] {
+    const masked = new Array<boolean>(text.length).fill(false);
+    for (const m of text.matchAll(/!?\[\[(?:[^\]\n]|\](?!\]))*\]\]/g)) {
+        for (let k = m.index; k < m.index + m[0].length; k++) masked[k] = true;
+    }
+    let i = 0;
+    while (i < text.length) {
+        if (text[i] === "\\" && i + 1 < text.length && /[!-/:-@[-`{-~]/.test(text[i + 1])) {
+            masked[i] = masked[i + 1] = true;
+            i += 2;
+            continue;
+        }
+        if (text[i] === "`") {
+            let runEnd = i;
+            while (runEnd < text.length && text[runEnd] === "`") runEnd++;
+            const fence = text.slice(i, runEnd);
+            let close = text.indexOf(fence, runEnd);
+            // A closing run must be exactly as long as the opening one.
+            while (close !== -1 && text[close + fence.length] === "`") {
+                let next = close;
+                while (text[next] === "`") next++;
+                close = text.indexOf(fence, next);
+            }
+            const end = close === -1 ? runEnd : close + fence.length;
+            for (let k = i; k < end; k++) masked[k] = true;
+            i = end;
+            continue;
+        }
+        i++;
+    }
+    return masked;
+}
+
+/**
+ * The highlights in one line of `text`, read as Obsidian reads them: an
+ * opening `==` must be followed by a character that is not whitespace, a
+ * closing `==` must follow one, and `==` inside a code span or escaped is
+ * plain text. So `if x == 1 or y == 2` and `` `a == b` `` hold no highlight,
+ * while `a==b==c` does. Markers pair left to right, each opener with the
+ * first closer after it.
+ */
+export function highlightMarkerPairs(text: string): HighlightMarkers[] {
+    const masked = codeAndEscapes(text);
+    const isMarker = (k: number) => text[k] === "=" && text[k + 1] === "=" && !masked[k] && !masked[k + 1];
+    const pairs: HighlightMarkers[] = [];
+    let i = 0;
+    while (i < text.length - 1) {
+        if (!isMarker(i) || i + 2 >= text.length || /\s/.test(text[i + 2])) {
+            i++;
+            continue;
+        }
+        let close = -1;
+        for (let j = i + 3; j < text.length - 1; j++) {
+            if (text[j] === "\n") break;
+            if (isMarker(j) && !/\s/.test(text[j - 1])) {
+                close = j;
+                break;
+            }
+        }
+        if (close === -1) {
+            i++;
+            continue;
+        }
+        const colour = colorAt(text, i + 2);
+        pairs.push({ open: i, openEnd: i + 2 + colour.length, close, color: colour.color });
+        i = close + 2;
+    }
+    return pairs;
+}
+
+/**
+ * Remove the highlight markers from `text`, with the colour emoji of each
+ * opening one. Only markers Obsidian reads as a highlight go: the `==` of a
+ * comparison or of code stays.
  */
 export function stripHighlightMarkers(text: string): string {
     let out = "";
-    let open = false;
-    let i = 0;
-    while (i < text.length) {
-        if (text.startsWith("==", i)) {
-            i += 2;
-            if (!open) i += colorAt(text, i).length;
-            open = !open;
-            continue;
-        }
-        out += text[i];
-        i++;
+    let cursor = 0;
+    for (const pair of highlightMarkerPairs(text)) {
+        out += text.slice(cursor, pair.open) + text.slice(pair.openEnd, pair.close);
+        cursor = pair.close + 2;
     }
-    return out;
+    return out + text.slice(cursor);
 }
 
 const CSS_COLOR_NAMES: Record<string, HighlightColor> = {

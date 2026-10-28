@@ -11,6 +11,11 @@
    takes the same look from the menu variables. Only layout lives here, at
    (0,1,1) so it holds against `.menu` and `.clickable-icon` (0,1,0). */
 body .reading-highlighter-float-container {
+    /* Never part of a text selection. It sits at the end of the page, so a
+       selection handle dragged onto it would otherwise stretch the selection
+       over everything after the note's text. */
+    user-select: none;
+    -webkit-user-select: none;
     --rht-button-size: 30px;
     --rht-swatch-size: var(--icon-s, 16px);
     --icon-size: var(--icon-m, 18px);
@@ -574,7 +579,11 @@ body .highlight-navigator-container .highlight-navigator-item .highlight-item-me
     font-size: 18px;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    transition:
+        opacity 0.12s ease,
+        background-color 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
 }
 
 body .highlight-navigator-container .highlight-navigator-item:hover .highlight-item-menu {
@@ -975,11 +984,11 @@ body.is-mobile .research-view-container {
     .research-view-header {
         padding: 12px;
     }
-    
+
     .research-view-color-filters {
         gap: 4px;
     }
-    
+
     .research-color-chip {
         padding: 4px 8px;
         font-size: 0.75em;
@@ -1181,24 +1190,24 @@ body.is-mobile .research-view-container {
 }
 
 /* --- Failure Recovery Modal --- */
-.recovery-desc { 
-    margin-bottom: 20px; 
-    color: var(--text-muted); 
+.recovery-desc {
+    margin-bottom: 20px;
+    color: var(--text-muted);
     font-size: 0.95em;
 }
 
-.recovery-info-box { 
-    background: var(--background-secondary); 
-    padding: 12px; 
-    border-radius: var(--radius-m); 
-    margin-bottom: 20px; 
-    border: 1px solid var(--background-modifier-border); 
+.recovery-info-box {
+    background: var(--background-secondary);
+    padding: 12px;
+    border-radius: var(--radius-m);
+    margin-bottom: 20px;
+    border: 1px solid var(--background-modifier-border);
 }
 
-.recovery-snippet-preview { 
-    font-family: var(--font-monospace); 
-    font-size: 0.85em; 
-    margin-top: 8px; 
+.recovery-snippet-preview {
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    margin-top: 8px;
     color: var(--text-accent);
     padding: 6px;
     background: var(--background-primary);
@@ -1206,20 +1215,20 @@ body.is-mobile .research-view-container {
     word-break: break-all;
 }
 
-.recovery-rule-preview { 
-    margin-top: 15px; 
+.recovery-rule-preview {
+    margin-top: 15px;
     padding: 10px;
     border-radius: var(--radius-s);
-    font-weight: 500; 
+    font-weight: 500;
     min-height: 24px;
     background: var(--background-secondary-alt);
     font-size: 0.9em;
 }
 
-.recovery-instruction { 
-    margin-top: 20px; 
-    margin-bottom: 8px; 
-    font-weight: bold; 
+.recovery-instruction {
+    margin-top: 20px;
+    margin-bottom: 8px;
+    font-weight: bold;
     color: var(--text-normal);
 }
 

@@ -31,7 +31,9 @@ export function kindForTag(tag: string | null | undefined): BlockKind | null {
 
 const HEADING_RE = /^\s{0,3}#{1,6}\s/;
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d{1,9}[.)])\s/;
-const FOOTNOTE_DEF_RE = /^\s{0,3}\[\^[^\]]+\]:/;
+// A footnote definition. The matcher strips numeric labels from the text it
+// searches, so `[^30]: Text` reaches it as `: Text`: that is a definition too.
+const FOOTNOTE_DEF_RE = /^\s{0,3}(?:\[\^[^\]]+\]:|:\s)/;
 const TABLE_ROW_RE = /^\s*\|/;
 const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
 const THEMATIC_BREAK_RE = /^\s{0,3}(?:\*\s*\*\s*\*|-\s*-\s*-|_\s*_\s*_)[\s*\-_]*$/;
@@ -67,7 +69,9 @@ function tableCellRanges(line: string, lineStart: number): SourceBlock[] {
 const TABLE_DELIMITER_RE = /^\s*\|?(\s*:?-+:?\s*\|)+\s*:?-*:?\s*\|?\s*$/;
 
 /** The kind a line starts, or null when it continues the current block. */
-function ownBlockKind(line: string): BlockKind | null {
+function ownBlockKind(quoted: string): BlockKind | null {
+    // Inside a quote, a list item or heading starts after the `>` markers.
+    const line = quoted.replace(/^\s*(?:>\s?)+/, "");
     if (HEADING_RE.test(line)) return "heading";
     if (LIST_ITEM_RE.test(line)) return "list";
     if (FOOTNOTE_DEF_RE.test(line)) return "footnote";
@@ -121,8 +125,9 @@ export function splitSourceBlocks(text: string, offset = 0): SourceBlock[] {
             blockStart = lineStart;
             blockEnd = contentEnd;
             blockKind = "code";
-        } else if (!line.trim()) {
-            // Blank line: hard block boundary.
+        } else if (!line.trim() || /^\s*(?:>\s*)+$/.test(line)) {
+            // Blank line: hard block boundary. So is a quote line with nothing
+            // after its `>`: it separates two paragraphs of the quote.
             flush();
         } else if (TABLE_ROW_RE.test(line)) {
             // Reading view renders every table cell as its own <td>/<th>, and
@@ -141,6 +146,10 @@ export function splitSourceBlocks(text: string, offset = 0): SourceBlock[] {
             blockStart = lineStart;
             blockEnd = contentEnd;
             blockKind = ownBlockKind(line) ?? "paragraph";
+            // A heading or a rule is one line. The line after it starts a new
+            // block even with no blank line between, so a paragraph straight
+            // under a heading is not read as part of the heading.
+            if (blockKind === "heading" || THEMATIC_BREAK_RE.test(line)) flush();
         } else if (blockStart === -1) {
             blockStart = lineStart;
             blockEnd = contentEnd;

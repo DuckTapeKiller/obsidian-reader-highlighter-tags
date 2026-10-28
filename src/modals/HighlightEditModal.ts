@@ -189,7 +189,7 @@ export class HighlightEditModal extends Modal {
             await this.plugin.recordUndoResult(this.file, finalRaw);
             this.onApplied(finalRaw);
             this.close();
-            new Notice(remove ? "Highlight removed." : "Highlight updated.");
+            this.plugin.noticeWithUndo(remove ? "Highlight removed." : "Highlight updated.");
         } catch (err) {
             console.error(err);
             new Notice(err instanceof Error ? err.message : "Failed to update highlight.");

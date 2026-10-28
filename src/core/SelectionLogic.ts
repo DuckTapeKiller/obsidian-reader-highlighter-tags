@@ -1,7 +1,7 @@
 import { App, TFile, MarkdownView } from "obsidian";
 import { BlockKind, SourceBlock, splitSourceBlocks, findBlockAt } from "../utils/sourceBlocks";
 import type { SelectionHint } from "../utils/blockOccurrence";
-import { colorAt } from "../utils/colors";
+import { highlightMarkerPairs } from "../utils/colors";
 
 interface LearnedRule {
     stripPattern?: string;
@@ -131,6 +131,9 @@ const INLINE_DECORATION_RE =
 // Highlight markup the structural filter removes. Shared, so the filter can
 // recognise it and treat colour emoji specially.
 const HIGHLIGHT_MARKUP_RE = /==|<mark[^>]*>|<\/mark>/g;
+// The target of a wikilink that has an alias, with its `[[` and `|`: Reading
+// view shows only the alias. Embeds (`![[image.png|200]]`) are left alone.
+const WIKILINK_TARGET_RE = /\[\[(?:[^\]|\n]|\](?!\]))*\|(?=(?:[^\]\n]|\](?!\]))*\]\])/g;
 
 export class SelectionLogic {
     app: App;
@@ -279,7 +282,9 @@ export class SelectionLogic {
             // failure, so it can add matches but never change an existing one.
             // Written with a capture group rather than a lookbehind: lookbehind
             // is unsupported on iOS before 16.4, and Obsidian runs there.
-            const withoutMarkers = snippet.replace(/([\p{L}\p{N}.,;:!?"'”’)\]])\d{1,3}(?=$|[\s\p{P}])/gu, "$1");
+            // A marker follows a letter or punctuation, never a digit: the digits
+            // of `1655` or `Q280489` are part of the number, not a marker.
+            const withoutMarkers = snippet.replace(/([\p{L}.,;:!?"'”’)\]])\d{1,3}(?=$|[\s\p{P}])/gu, "$1");
             if (withoutMarkers !== snippet && withoutMarkers.trim()) {
                 const retries: ((text: string, snip: string) => Candidate[])[] = [
                     (text, snip) => this.findHybridCandidates(text, snip, 0),
@@ -399,7 +404,12 @@ export class SelectionLogic {
             const linkPath = pipeIdx === -1 ? linkPathWithAlias : linkPathWithAlias.slice(0, pipeIdx);
 
             const targetFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, file.path);
-            if (targetFile) {
+            if (targetFile && targetFile.extension !== "md") {
+                // An image, PDF, audio or video embed shows no text in Reading
+                // view, and reading it as text would pull its bytes into the
+                // search — on mobile, reading a photo that way can fail
+                // outright and stop every action in the note. It adds nothing.
+            } else if (targetFile) {
                 const subContext = { ...opContext, visited: new Set(opContext.visited) };
                 const subVirtual = await this.resolveVirtualContent(targetFile, depth + 1, subContext, embedFragment);
                 const embedStart = virtualText.length;
@@ -558,6 +568,8 @@ export class SelectionLogic {
             />\s*\[![^\]]+\]/g,
             // Block IDs: ^abc123 (hidden in reading view)
             /[ \t]\^[a-zA-Z0-9-]+(?=\s|$)/g,
+            // Wikilink targets hidden behind an alias
+            WIKILINK_TARGET_RE,
             // Plugin-injected highlighting
             HIGHLIGHT_MARKUP_RE,
             // Table alignment rows
@@ -595,23 +607,27 @@ export class SelectionLogic {
             const matches: { start: number; end: number; length: number }[] = [];
 
             if (regex === HIGHLIGHT_MARKUP_RE) {
-                // An opening `==` may carry a colour emoji (`==🟡text==`) that
-                // Reading view never shows, so it goes with the marker. Markers
-                // pair left to right within a line, as Obsidian reads them; an
-                // emoji after a closing marker is visible text and stays.
-                let open = false;
-                let previousEnd = 0;
-                while ((match = regex.exec(currentText)) !== null) {
-                    let length = match[0].length;
-                    if (match[0] === "==") {
-                        const newlineBetween = currentText.indexOf("\n", previousEnd);
-                        if (newlineBetween !== -1 && newlineBetween < match.index) open = false;
-                        if (!open) length += colorAt(currentText, match.index + 2).length;
-                        open = !open;
+                // Only the markers of highlights Obsidian renders: a `==` in a
+                // comparison or in code is visible text. An opening marker
+                // takes its colour emoji (`==🟡text==`), which is never shown.
+                let lineStart = 0;
+                for (const line of currentText.split("\n")) {
+                    for (const pair of highlightMarkerPairs(line)) {
+                        const open = lineStart + pair.open;
+                        const close = lineStart + pair.close;
+                        matches.push({ start: open, end: lineStart + pair.openEnd, length: pair.openEnd - pair.open });
+                        matches.push({ start: close, end: close + 2, length: 2 });
                     }
-                    previousEnd = match.index + length;
-                    regex.lastIndex = previousEnd;
-                    matches.push({ start: match.index, end: previousEnd, length });
+                    lineStart += line.length + 1;
+                }
+                for (const tag of currentText.matchAll(/<mark[^>]*>|<\/mark>/g)) {
+                    matches.push({ start: tag.index, end: tag.index + tag[0].length, length: tag[0].length });
+                }
+                matches.sort((a, b) => a.start - b.start);
+            } else if (regex === WIKILINK_TARGET_RE) {
+                while ((match = regex.exec(currentText)) !== null) {
+                    if (currentText[match.index - 1] === "!") continue;
+                    matches.push({ start: match.index, end: match.index + match[0].length, length: match[0].length });
                 }
             } else if (regex.source === "\\[\\^[^\\]]+\\]") {
                 // Special handling for footnotes
@@ -715,9 +731,10 @@ export class SelectionLogic {
         return (
             line
                 .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-                .replace(/!\[\[[^\]]+\]\]/g, "")
-                .replace(/\[\[[^\]|]*\|([^\]]+)\]\]/g, "$1")
-                .replace(/\[\[([^\]]+)\]\]/g, "$1")
+                // A wikilink runs to the first `]]`; a single `]` is part of it.
+                .replace(/!\[\[(?:[^\]]|\](?!\]))+\]\]/g, "")
+                .replace(/\[\[(?:[^\]|]|\](?!\]))*\|((?:[^\]]|\](?!\]))+)\]\]/g, "$1")
+                .replace(/\[\[((?:[^\]]|\](?!\]))+)\]\]/g, "$1")
                 .replace(/\[\^[^\]]+\]/g, "")
                 .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
                 // `applyStructuralFilter` has already removed the `](url)` half of
@@ -735,8 +752,11 @@ export class SelectionLogic {
      * block text the caller captured from Reading view.
      */
     blockCompareText(raw: string, block: SourceBlock): string {
-        return raw
-            .substring(block.start, block.end)
+        let text = raw.substring(block.start, block.end);
+        // A footnote definition reaches the matcher as `: Text` once its
+        // numeric label is stripped; Reading view shows only the text.
+        if (block.kind === "footnote") text = text.replace(/^\s*(?:\[\^[^\]]+\]:|:)\s*/, "");
+        return text
             .split(/\r?\n/)
             .map((line) => this.normalizeLineForCompare(this.stripLinkSyntax(line)))
             .filter((line) => line.length > 0)
@@ -1168,12 +1188,12 @@ export class SelectionLogic {
         const tokenRegex = new RegExp(
             [
                 /(`{3}[^\n]*\n[\s\S]*?`{3})/.source,
-                /(!\[\[(?:[^\]]+)\]\])/.source,
+                /(!\[\[(?:[^\]]|\](?!\]))+\]\])/.source,
                 /(!\[(?:[^\]]*)\]\[(?:[^\]]*)\])/.source,
                 /(!\[(?:[^\]]*)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
                 /(\[(?!\^)(?:[^\]]+)\]\[(?:[^\]]*)\])/.source,
                 /(\[(?!\^)(?:[^\]]+)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
-                /(\[\[(?:[^\]]+)\]\])/.source,
+                /(\[\[(?:[^\]]|\](?!\]))+\]\])/.source,
                 /(\[\^[^\]]+\]:?[ \t]?)/.source,
                 /(\$\$[^$]+\$\$)/.source,
                 /(\$(?:[^$\s]|[^$\s][^$]*[^$\s])\$)/.source,

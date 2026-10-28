@@ -73,11 +73,19 @@ export class TFile {
     }
 }
 export class Notice {
-    constructor(message) {
-        Notice.messages.push(String(message));
+    constructor(message, duration) {
+        Notice.messages.push(typeof message === "string" ? message : message.textContent);
+        this.message = message;
+        this.duration = duration;
+        this.hidden = false;
+        Notice.instances.push(this);
+    }
+    hide() {
+        this.hidden = true;
     }
 }
 Notice.messages = [];
+Notice.instances = [];
 
 export const Platform = { isMobile: false, isPhone: false, isDesktop: true, isIosApp: false };
 export function normalizePath(path) {

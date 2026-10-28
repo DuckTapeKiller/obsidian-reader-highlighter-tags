@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView, Notice, WorkspaceLeaf, TFile } from "obsidian";
+import { ItemView, MarkdownView, WorkspaceLeaf, TFile } from "obsidian";
 import type ReadingHighlighterPlugin from "../main";
 import { VaultScanner, type ScanResult } from "../core/VaultScanner";
 import { exportHighlightsToCanvas } from "../utils/canvas";
@@ -411,12 +411,12 @@ export class ResearchView extends ItemView {
         }
 
         if (allHighlights.length === 0) {
-            new Notice("No highlights to export to canvas.");
+            this.plugin.notify("No highlights to export to canvas.");
             return;
         }
 
         try {
-            new Notice("Generating canvas...");
+            this.plugin.notify("Generating canvas...");
             const exportPath = await exportHighlightsToCanvas(this.app, allHighlights);
             const file = this.app.vault.getAbstractFileByPath(exportPath);
             if (file instanceof TFile) {

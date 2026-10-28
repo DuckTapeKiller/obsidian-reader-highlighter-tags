@@ -1319,3 +1319,48 @@ body .reading-highlighter-float-container.is-pdf-view button.markdown-only-btn {
     height: 18px;
     margin-right: var(--size-4-2);
 }
+
+/* The plugin's notices: one slim line in the theme's notice colours. Only
+   their size changes; background, border and radius stay the theme's. */
+.notice:has(.reading-highlighter-notice) {
+    padding: var(--size-4-2) var(--size-4-3);
+    font-size: var(--font-ui-small);
+    line-height: var(--line-height-tight);
+}
+
+.reading-highlighter-notice {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-3);
+}
+
+/* Undo is a text action set off by a hairline, the size of the message, not a
+   raised button taller than the notice's text. It reaches the notice's top and
+   bottom edges, so a tap anywhere beside the hairline undoes rather than
+   dismissing the notice. */
+.reading-highlighter-notice .reading-highlighter-undo-btn {
+    align-self: stretch;
+    height: auto;
+    margin-block: calc(-1 * var(--size-4-2));
+    padding: var(--size-4-2) 0 var(--size-4-2) var(--size-4-3);
+    border: none;
+    border-left: var(--border-width) solid var(--background-modifier-border);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    font: inherit;
+    font-weight: var(--font-semibold);
+    color: var(--text-accent);
+    cursor: var(--cursor);
+}
+
+.reading-highlighter-notice .reading-highlighter-undo-btn:hover {
+    background: none;
+    color: var(--text-accent-hover);
+}
+
+/* On a phone, as wide as its text rather than a bar across the screen. */
+.is-phone .notice:has(.reading-highlighter-notice) {
+    align-self: center;
+    width: auto;
+}

@@ -1,4 +1,4 @@
-import { Modal, Setting, Notice, TFile } from "obsidian";
+import { Modal, Setting, TFile } from "obsidian";
 import type ReadingHighlighterPlugin from "../main";
 import { TagSuggestModal } from "./TagSuggestModal";
 import {
@@ -192,7 +192,7 @@ export class HighlightEditModal extends Modal {
             this.plugin.noticeWithUndo(remove ? "Highlight removed." : "Highlight updated.");
         } catch (err) {
             console.error(err);
-            new Notice(err instanceof Error ? err.message : "Failed to update highlight.");
+            this.plugin.notify(err instanceof Error ? err.message : "Failed to update highlight.");
         }
     }
 

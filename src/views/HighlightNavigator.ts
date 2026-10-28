@@ -1,14 +1,4 @@
-import {
-    ItemView,
-    MarkdownView,
-    Menu,
-    MenuItem,
-    Notice,
-    Platform,
-    WorkspaceLeaf,
-    TFile,
-    TAbstractFile,
-} from "obsidian";
+import { ItemView, MarkdownView, Menu, MenuItem, Platform, WorkspaceLeaf, TFile, TAbstractFile } from "obsidian";
 import type ReadingHighlighterPlugin from "../main";
 import { getHighlightsFromContent } from "../utils/export";
 import type { Highlight } from "../utils/highlights";
@@ -395,11 +385,11 @@ export class HighlightNavigatorView extends ItemView {
     async copyItemText(item: NavItem) {
         const text = (item?.text ?? "").trim();
         if (!text) {
-            new Notice("Nothing to copy.");
+            this.plugin.notify("Nothing to copy.");
             return;
         }
         const ok = await this.plugin.writeClipboardText(text);
-        new Notice(ok ? "Copied to clipboard." : "Failed to copy.");
+        this.plugin.notify(ok ? "Copied to clipboard." : "Failed to copy.");
     }
 
     openHighlightActionsMenu(item: Highlight, event: MouseEvent) {
@@ -465,12 +455,12 @@ export class HighlightNavigatorView extends ItemView {
                 await this.plugin.recordUndoResult(currentFile, result);
                 this.plugin.noticeWithUndo("Highlight removed.");
             } else {
-                new Notice("Highlight not found (it may have moved).");
+                this.plugin.notify("Highlight not found (it may have moved).");
             }
             await this.refresh(true);
         } catch (err) {
             console.error("Reader Highlighter Tags: failed to remove highlight.", err);
-            new Notice("Failed to remove highlight.");
+            this.plugin.notify("Failed to remove highlight.");
         }
     }
 
@@ -714,11 +704,11 @@ export class HighlightNavigatorView extends ItemView {
             }));
 
             if (highlights.length === 0) {
-                new Notice("No highlights to export.");
+                this.plugin.notify("No highlights to export.");
                 return;
             }
 
-            new Notice("Generating canvas...");
+            this.plugin.notify("Generating canvas...");
             const exportPath = await exportHighlightsToCanvas(this.app, highlights);
 
             const file = this.app.vault.getAbstractFileByPath(exportPath);

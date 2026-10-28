@@ -59,6 +59,9 @@ export interface UndoEntry {
 /** How many changes back undo can go. */
 const MAX_UNDO_STEPS = 20;
 
+/** How long a notice offering Undo stays, in milliseconds. */
+const UNDO_NOTICE_MS = 3000;
+
 export interface SemanticColor {
     color: HighlightColor;
     meaning: string;
@@ -250,6 +253,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
      * since restoring `original` would throw away whatever was written since.
      */
     undoHistory: UndoEntry[] = [];
+    /** The plugin's notice on screen, if any: there is only ever one. */
+    currentNotice: Notice | null = null;
     lastScrollPosition: ScrollPosition | null = null;
     /** A reading position waiting to be saved once scrolling settles. */
     pendingProgress: { view: MarkdownView; file: TFile } | null = null;
@@ -290,7 +295,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const btn = this.addRibbonIcon("highlighter", "Highlight selection", () => {
                 const view = this.getActiveReadingView();
                 if (view) this.runAction(this.highlightSelection(view));
-                else new Notice("Open a note in reading view first.");
+                else this.notify("Open a note in reading view first.");
             });
             this.register(() => btn.remove());
         }
@@ -781,7 +786,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const active = this.app.workspace.getActiveFile();
         const entry = [...done].reverse().find((e) => e.file === active) ?? done[done.length - 1];
         if (!entry) {
-            new Notice("Nothing to undo.");
+            this.notify("Nothing to undo.");
             return;
         }
         await this.undoChange(entry);
@@ -790,7 +795,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     /** Undo one recorded change, if the note still reads as it left it. */
     async undoChange(entry: UndoEntry) {
         if (!this.undoHistory.includes(entry)) {
-            new Notice("Already undone.");
+            this.notify("Already undone.");
             return;
         }
         try {
@@ -799,14 +804,14 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 // Nothing written since can be kept by restoring, so this
                 // change can no longer be undone.
                 this.undoHistory = this.undoHistory.filter((e) => e !== entry);
-                new Notice("The note has changed since, so undoing would lose those changes.");
+                this.notify("The note has changed since, so undoing would lose those changes.");
                 return;
             }
             await this.app.vault.modify(entry.file, entry.original);
             this.undoHistory = this.undoHistory.filter((e) => e !== entry);
-            new Notice("Undone.");
+            this.notify("Undone.");
         } catch (err) {
-            new Notice("Failed to undo.");
+            this.notify("Failed to undo.");
             console.error(err);
         }
     }
@@ -819,26 +824,48 @@ export default class ReadingHighlighterPlugin extends Plugin {
     runAction(action: Promise<unknown>) {
         action.catch((err: unknown) => {
             console.error("Reader Highlighter Tags: action failed.", err);
-            new Notice(`That did not work: ${err instanceof Error ? err.message : "unknown error"}`);
+            this.notify(`That did not work: ${err instanceof Error ? err.message : "unknown error"}`);
         });
+    }
+
+    /**
+     * Show a notice in place of the plugin's previous one. Notices stacked up
+     * one per action, and an Undo left on screen after a newer change or after
+     * its own change was undone could no longer do anything.
+     */
+    notify(message: string | DocumentFragment, duration?: number): Notice {
+        this.currentNotice?.hide();
+        // Wrapped so styles.css can draw the plugin's notices as one slim line
+        // without touching anyone else's.
+        const content =
+            typeof message === "string"
+                ? createFragment((f) => f.createSpan({ cls: "reading-highlighter-notice", text: message }))
+                : message;
+        this.currentNotice = new Notice(content, duration);
+        return this.currentNotice;
     }
 
     /** A notice for a change just made, with a button that undoes it. */
     noticeWithUndo(message: string) {
         const entry = this.undoHistory[this.undoHistory.length - 1];
         if (!entry || entry.after === undefined) {
-            new Notice(message);
+            this.notify(message);
             return;
         }
         const fragment = createFragment((f) => {
-            f.createSpan({ text: message });
-            const button = f.createEl("button", { text: "Undo", cls: "reading-highlighter-undo-btn" });
-            button.addEventListener("click", (evt) => {
-                evt.stopPropagation();
-                void this.undoChange(entry);
-            });
+            const row = f.createSpan({ cls: "reading-highlighter-notice" });
+            row.createSpan({ text: message });
+            row.createEl("button", { text: "Undo", cls: "reading-highlighter-undo-btn" });
         });
-        new Notice(fragment, 10000);
+        const button = fragment.querySelector(".reading-highlighter-undo-btn");
+        this.notify(fragment, UNDO_NOTICE_MS);
+        button?.addEventListener("click", (evt) => {
+            evt.stopPropagation();
+            // Undoing replaces this notice with its outcome. Left open, it
+            // stayed on a phone: after a tap the finger counts as hovering
+            // over it, and Obsidian never hides a hovered notice.
+            void this.undoChange(entry);
+        });
     }
 
     /**
@@ -935,7 +962,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const sel = this.selectionFor(view);
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) {
-            new Notice("No text selected.");
+            this.notify("No text selected.");
             return;
         }
         const scrollPos = getScroll(view);
@@ -1004,7 +1031,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         if (!view.file) return;
         let snippet = selectionSnapshot?.text || this.selectionFor(view)?.toString() || "";
         if (!snippet.trim()) {
-            new Notice("No text selected.");
+            this.notify("No text selected.");
             return;
         }
         snippet = this.sanitizePdfText(snippet);
@@ -1051,14 +1078,14 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 const fileContent = `# Highlights from [[${view.file.path}|${pdfName}]]\n\n${appendString}`;
                 await this.app.vault.create(companionFile, fileContent);
             }
-            new Notice("Saved to " + pdfName + " - Highlights");
+            this.notify("Saved to " + pdfName + " - Highlights");
             this.selectionFor(view)?.removeAllRanges();
             if (this.settings.enableHaptics && Platform.isMobile) {
                 navigator.vibrate?.(10);
             }
         } catch (e) {
             console.error("Failed to save PDF highlight", e);
-            new Notice("Failed to save PDF highlight");
+            this.notify("Failed to save PDF highlight");
         }
     }
 
@@ -1082,11 +1109,11 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
     async extractAllPdfText(view: View & { file?: TFile }) {
         if (!view || view.getViewType() !== "pdf" || !view.file) {
-            new Notice("Please open a PDF file first.");
+            this.notify("Please open a PDF file first.");
             return;
         }
 
-        const notice = new Notice("Extracting all PDF text...", 0);
+        const notice = this.notify("Extracting all PDF text...", 0);
 
         try {
             const pdfjs = (await loadPdfJs()) as PdfJs;
@@ -1116,18 +1143,18 @@ export default class ReadingHighlighterPlugin extends Plugin {
             const dummySnapshot = { text: fullText };
             await this.savePdfHighlight(view, dummySnapshot, "action", "highlightSelection");
             notice.hide();
-            new Notice(`Successfully extracted ${pdf.numPages} pages.`);
+            this.notify(`Successfully extracted ${pdf.numPages} pages.`);
         } catch (e) {
             console.error("Full PDF extraction failed", e);
             notice.hide();
-            new Notice("Failed to extract PDF text.");
+            this.notify("Failed to extract PDF text.");
         }
     }
 
     async tagSelection(view: MarkdownView, selectionSnapshot?: SelectionSnapshot | null) {
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) {
-            new Notice("No text selected.");
+            this.notify("No text selected.");
             return;
         }
         const scrollPos = getScroll(view);
@@ -1161,7 +1188,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 request.contextKind
             );
             if (!newResult) {
-                new Notice("Selection lost - file may have changed.");
+                this.notify("Selection lost - file may have changed.");
                 return;
             }
 
@@ -1190,7 +1217,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     async annotateSelection(view: MarkdownView, selectionSnapshot?: SelectionSnapshot | null) {
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) {
-            new Notice("No text selected.");
+            this.notify("No text selected.");
             return;
         }
         const scrollPos = getScroll(view);
@@ -1224,7 +1251,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 request.contextKind
             );
             if (!newResult) {
-                new Notice("Selection lost - file may have changed.");
+                this.notify("Selection lost - file may have changed.");
                 return;
             }
 
@@ -1262,7 +1289,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const sel = this.selectionFor(view);
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) {
-            new Notice("Select highlighted text to remove.");
+            this.notify("Select highlighted text to remove.");
             return;
         }
         const scrollPos = getScroll(view);
@@ -1298,7 +1325,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const raw = await this.app.vault.read(file);
         const result = removeAllHighlightsFromRaw(raw);
         if (!result.removedCount) {
-            new Notice("No highlights to remove.");
+            this.notify("No highlights to remove.");
             return;
         }
         const count = result.removedCount;
@@ -1322,7 +1349,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const raw = await this.app.vault.read(file);
         const result = removeFootnoteFromRaw(raw, footnoteId);
         if (!result.changed) {
-            new Notice("Annotation not found.");
+            this.notify("Annotation not found.");
             return;
         }
         await this.app.vault.modify(file, result.raw);
@@ -1340,7 +1367,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const footnotes = [...parseFootnotes(raw).values()];
         const count = footnotes.length;
         if (!count) {
-            new Notice("No annotations to remove.");
+            this.notify("No annotations to remove.");
             return;
         }
         const shown = footnotes.slice(0, 8).map((f) => `[^${f.id}] ${f.text}`.slice(0, 120));
@@ -1367,7 +1394,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const result = mergeAdjacentHighlightsInRaw(raw);
 
         if (!result.mergedCount) {
-            new Notice("No adjacent highlights to merge.");
+            this.notify("No adjacent highlights to merge.");
             return;
         }
 
@@ -1382,7 +1409,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const result = recolorHighlightsInRaw(raw, { from, to });
 
         if (!result.changedCount) {
-            new Notice("No matching highlights to recolour.");
+            this.notify("No matching highlights to recolour.");
             return;
         }
 
@@ -1397,7 +1424,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const result = convertHtmlHighlightsInRaw(raw);
 
         if (!result.changedCount) {
-            new Notice("No HTML highlights in this note.");
+            this.notify("No HTML highlights in this note.");
             return;
         }
 
@@ -1411,13 +1438,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
     async exportHighlights(view: MarkdownView) {
         try {
             const exportPath = await exportHighlightsToMD(this.app, view.file);
-            new Notice(`Highlights exported to ${exportPath}`);
+            this.notify(`Highlights exported to ${exportPath}`);
             const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
             if (exportFile instanceof TFile) {
                 await this.app.workspace.getLeaf().openFile(exportFile);
             }
         } catch (err) {
-            new Notice("Failed to export highlights.");
+            this.notify("Failed to export highlights.");
             console.error(err);
         }
     }
@@ -1425,13 +1452,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
     async exportHighlightsJSON(view: MarkdownView) {
         try {
             const exportPath = await exportHighlightsToJSON(this.app, view.file);
-            new Notice(`Highlights exported to ${exportPath}`);
+            this.notify(`Highlights exported to ${exportPath}`);
             const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
             if (exportFile instanceof TFile) {
                 await this.app.workspace.getLeaf().openFile(exportFile);
             }
         } catch (err) {
-            new Notice("Failed to export highlights to JSON.");
+            this.notify("Failed to export highlights to JSON.");
             console.error(err);
         }
     }
@@ -1439,13 +1466,13 @@ export default class ReadingHighlighterPlugin extends Plugin {
     async exportHighlightsCSV(view: MarkdownView) {
         try {
             const exportPath = await exportHighlightsToCSV(this.app, view.file);
-            new Notice(`Highlights exported to ${exportPath}`);
+            this.notify(`Highlights exported to ${exportPath}`);
             const exportFile = this.app.vault.getAbstractFileByPath(exportPath);
             if (exportFile instanceof TFile) {
                 await this.app.workspace.getLeaf().openFile(exportFile);
             }
         } catch (err) {
-            new Notice("Failed to export highlights to CSV.");
+            this.notify("Failed to export highlights to CSV.");
             console.error(err);
         }
     }
@@ -1454,7 +1481,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const sel = this.selectionFor(view);
         const request = this.buildSelectionRequest(view, selectionSnapshot);
         if (!request) {
-            new Notice("No text selected.");
+            this.notify("No text selected.");
             return;
         }
         const frontmatter =
@@ -1462,10 +1489,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const quote = this.expandQuoteTemplate(view.file, request.snippet, frontmatter);
         const copied = await this.writeClipboardText(quote);
         if (!copied) {
-            new Notice("Failed to copy quote.");
+            this.notify("Failed to copy quote.");
             return;
         }
-        new Notice("Copied as quote!");
+        this.notify("Copied as quote!");
         sel?.removeAllRanges();
     }
 
@@ -1544,9 +1571,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
         const pos = this.settings.readingPositions[view.file.path];
         if (pos) {
             applyScroll(view, { x: 0, y: pos });
-            new Notice("Resumed reading position.");
+            this.notify("Resumed reading position.");
         } else {
-            new Notice("No saved position for this file.");
+            this.notify("No saved position for this file.");
         }
     }
 
@@ -2147,7 +2174,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
     ) {
         const report = this.logic.lastFailureReport;
         if (!report) {
-            new Notice("Selection failed, but no diagnostic report was generated.");
+            this.notify("Selection failed, but no diagnostic report was generated.");
             return;
         }
         new FailureRecoveryModal(this.app, report, async (correctedText: string, learnedRule: DerivedRule | null) => {
@@ -2158,7 +2185,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 if (!existing) {
                     this.settings.learnedNormRules.push({ stripPattern: learnedRule.stripPattern });
                     await this.saveSettings();
-                    new Notice("Normalization rule learned for future selections!");
+                    this.notify("Normalization rule learned for future selections!");
                 }
             }
             const mockSnapshot = { text: correctedText, range: null };
@@ -2328,7 +2355,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                                 button.setButtonText("Clear all").onClick(async () => {
                                     this.plugin.settings.readingPositions = {};
                                     await this.plugin.saveSettings();
-                                    new Notice("Reading positions cleared.");
+                                    this.plugin.notify("Reading positions cleared.");
                                     this.refreshDefinitions();
                                 })
                             );
@@ -2391,7 +2418,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                                       btn.setButtonText("Delete").onClick(async () => {
                                           this.plugin.settings.learnedNormRules.splice(index, 1);
                                           await this.plugin.saveSettings();
-                                          new Notice("Rule deleted.");
+                                          this.plugin.notify("Rule deleted.");
                                           this.refreshDefinitions();
                                       });
                                       btn.buttonEl.addClass("mod-warning");
@@ -2405,7 +2432,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                                       btn.setButtonText("Clear all rules").onClick(async () => {
                                           this.plugin.settings.learnedNormRules = [];
                                           await this.plugin.saveSettings();
-                                          new Notice("All rules cleared.");
+                                          this.plugin.notify("All rules cleared.");
                                           this.refreshDefinitions();
                                       });
                                       btn.buttonEl.addClass("mod-warning");
@@ -2613,7 +2640,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 button.setButtonText("Clear all").onClick(async () => {
                     this.plugin.settings.readingPositions = {};
                     await this.plugin.saveSettings();
-                    new Notice("Reading positions cleared.");
+                    this.plugin.notify("Reading positions cleared.");
                     this.render();
                 })
             );
@@ -2695,7 +2722,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                             this.plugin.settings.learnedNormRules.splice(index, 1);
                             await this.plugin.saveSettings();
                             this.render();
-                            new Notice("Rule deleted.");
+                            this.plugin.notify("Rule deleted.");
                         });
                         btn.buttonEl.addClass("mod-warning");
                     });
@@ -2705,7 +2732,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                     this.plugin.settings.learnedNormRules = [];
                     await this.plugin.saveSettings();
                     this.render();
-                    new Notice("All rules cleared.");
+                    this.plugin.notify("All rules cleared.");
                 });
                 btn.buttonEl.addClass("mod-warning");
             });

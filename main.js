@@ -1033,16 +1033,16 @@ var FloatingManager = class {
     this.colorButtons = [];
     this.paletteContainer = null;
     this._handlers = [];
-    this.longPressTimer = null;
     this._selectionDebounceTimer = null;
     this._selectionSnapshot = null;
   }
+  // Nothing is highlighted until a toolbar button or a command is used. The
+  // iOS long press that highlighted a selection on its own is gone: a finger
+  // held still while selecting a paragraph, or on a selection handle, set it
+  // off.
   load() {
     this.createElements();
     this.registerEvents();
-    if (import_obsidian.Platform.isMobile) {
-      this.setupMobileGestures();
-    }
   }
   unload() {
     var _a;
@@ -1240,46 +1240,6 @@ var FloatingManager = class {
       btn.addEventListener("mousedown", handler);
       btn.addEventListener("touchstart", handler, { passive: false });
     });
-  }
-  setupMobileGestures() {
-    if (!import_obsidian.Platform.isIosApp) return;
-    this.plugin.registerDomEvent(
-      activeDocument,
-      "touchstart",
-      () => {
-        this.longPressTimer = window.setTimeout(() => {
-          const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-          const sel = window.getSelection();
-          if (view && view.getMode() === "preview" && (sel == null ? void 0 : sel.toString().trim())) {
-            void this.plugin.highlightSelection(view);
-            this.hide();
-          }
-        }, 600);
-      },
-      { passive: true }
-    );
-    this.plugin.registerDomEvent(
-      activeDocument,
-      "touchmove",
-      () => {
-        if (this.longPressTimer) {
-          window.clearTimeout(this.longPressTimer);
-          this.longPressTimer = null;
-        }
-      },
-      { passive: true }
-    );
-    this.plugin.registerDomEvent(
-      activeDocument,
-      "touchend",
-      () => {
-        if (this.longPressTimer) {
-          window.clearTimeout(this.longPressTimer);
-          this.longPressTimer = null;
-        }
-      },
-      { passive: true }
-    );
   }
   /**
    * Called on every `selectionchange` event.
@@ -1571,7 +1531,7 @@ var SelectionLogic = class {
     }
     return results;
   }
-  async locateSelection(processedFile, view, selectionSnippet, context = null, occurrenceIndex = 0, withinBlock = null, contextKind = null) {
+  async locateSelection(processedFile, view, selectionSnippet, context = null, occurrenceIndex = 0, withinBlock = null, contextKind = null, after = null) {
     this.lastFailureReport = null;
     let snippet = this.stripBrowserJunk(selectionSnippet);
     if (!snippet) {
@@ -1659,6 +1619,13 @@ var SelectionLogic = class {
     }
     candidates = this.offsetCandidates(candidates, firstSegmentBodyStart);
     candidates = candidates.map((cand) => this.snapToStructuralBoundaries(fullRaw, cand));
+    if (after) {
+      const following = candidates.filter((cand) => {
+        const at = this.mapVirtualToPhysical(cand.start, cand.end, virtual.segments);
+        return (at == null ? void 0 : at.file.path) === after.file.path && at.start >= after.offset;
+      });
+      if (following.length > 0) candidates = following;
+    }
     const result = this.resolveCandidates(
       candidates,
       fullRaw,
@@ -2503,14 +2470,55 @@ var SelectionLogic = class {
         break;
       }
       if (selectionIndex === selectionBlocks.length) {
-        candidates.push({
-          start: firstLine.start,
-          end: documentLines[lastMatch].end,
-          text: text.substring(firstLine.start, documentLines[lastMatch].end)
-        });
+        const start = this.blockSequenceStart(text, firstLine, selectionBlocks[0]);
+        const end = this.blockSequenceEnd(
+          text,
+          documentLines[lastMatch],
+          selectionBlocks[selectionBlocks.length - 1]
+        );
+        candidates.push({ start, end, text: text.substring(start, end) });
       }
     }
     return this.dedupeCandidates(candidates);
+  }
+  /**
+   * Where a selection's first line starts in the document line it matched.
+   * The selection runs on to the next line, so its first line is the end of
+   * that line: the last place its text occurs there.
+   */
+  blockSequenceStart(text, line, block) {
+    var _a, _b;
+    const { normalized, map } = this.buildFuzzyMap(line.raw);
+    const needle = this.normalizeForFuzzySearch(block);
+    const at = needle ? normalized.lastIndexOf(needle) : -1;
+    if (at < 0 || map[at] === void 0) return line.start;
+    let start = line.start + map[at];
+    const lead = [...((_b = (_a = block.match(/^[^\p{L}\p{N}]*/u)) == null ? void 0 : _a[0]) != null ? _b : "").replace(/\s/g, "")];
+    while (lead.length && start > line.start && text[start - 1] === lead[lead.length - 1]) {
+      lead.pop();
+      start--;
+    }
+    return start;
+  }
+  /**
+   * Where a selection's last line ends in the document line it matched: the
+   * selection came from the line before, so its last line is the start of
+   * that line, the first place its text occurs there.
+   */
+  blockSequenceEnd(text, line, block) {
+    var _a, _b, _c;
+    const { normalized, map } = this.buildFuzzyMap(line.raw);
+    const needle = this.normalizeForFuzzySearch(block);
+    const at = needle ? normalized.indexOf(needle) : -1;
+    const last = at < 0 ? void 0 : map[at + needle.length - 1];
+    if (last === void 0) return line.end;
+    let end = line.start + last + String.fromCodePoint((_a = line.raw.codePointAt(last)) != null ? _a : 0).length;
+    const trail = [...((_c = (_b = block.match(/[^\p{L}\p{N}]*$/u)) == null ? void 0 : _b[0]) != null ? _c : "").replace(/\s/g, "")];
+    while (trail.length && end < line.end && text[end] === trail[0]) {
+      trail.shift();
+      end++;
+    }
+    return end;
   }
   createDocumentLineRecords(text) {
     const lines = [];
@@ -4813,6 +4821,7 @@ var DEFAULT_SETTINGS = {
   enableColorPalette: false,
   showOnlyAssignedColors: true,
   semanticColors: HIGHLIGHT_COLORS.map((color) => ({ color, meaning: "" })),
+  builtInMeaningsCleared: false,
   quoteTemplate: "> {{text}}\n>\n> \u2014 [[{{file}}]]",
   enableAnnotations: true,
   showAnnotationButton: true,
@@ -4840,6 +4849,27 @@ function migratePalette(saved) {
     if (!existing.includes(meaning)) target.meaning = [...existing, meaning].join(" / ");
   }
   return palette;
+}
+var BUILT_IN_MEANINGS = {
+  red: "Important",
+  blue: "Vocabulary",
+  green: "Key Concept",
+  yellow: "General"
+};
+var MEANING_PLACEHOLDERS = {
+  red: "Meaning (e.g. Important)",
+  orange: "Meaning (e.g. Question)",
+  yellow: "Meaning (e.g. General)",
+  green: "Meaning (e.g. Key concept)",
+  blue: "Meaning (e.g. Vocabulary)",
+  purple: "Meaning (e.g. Disagree)"
+};
+function clearBuiltInMeanings(palette) {
+  for (const entry of palette) {
+    const builtIn = BUILT_IN_MEANINGS[entry.color];
+    if (!builtIn) continue;
+    entry.meaning = entry.meaning.split(" / ").filter((part) => part.trim() !== builtIn).join(" / ");
+  }
 }
 function toDisplayString(value) {
   if (typeof value === "string") return value;
@@ -5126,6 +5156,10 @@ var ReadingHighlighterPlugin = class extends import_obsidian11.Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, current, {
       semanticColors: migratePalette(loaded.semanticColors)
     });
+    if (!this.settings.builtInMeaningsCleared) {
+      clearBuiltInMeanings(this.settings.semanticColors);
+      this.settings.builtInMeaningsCleared = true;
+    }
     if (!isHighlightColor(this.settings.defaultHighlightColor)) {
       this.settings.defaultHighlightColor = enableColorHighlighting && nearestHighlightColor(highlightColor) || "";
     }
@@ -5384,7 +5418,7 @@ var ReadingHighlighterPlugin = class extends import_obsidian11.Plugin {
   /**
    * Locate the portion of the selection that lies in `block`.
    */
-  async locateBlockPortion(view, range, block) {
+  async locateBlockPortion(view, range, block, after = null) {
     const blockRange = this.intersectRangeWithBlock(range, block);
     if (!blockRange) return null;
     const snippet = blockRange.toString();
@@ -5396,7 +5430,8 @@ var ReadingHighlighterPlugin = class extends import_obsidian11.Plugin {
       this.getElementText(block),
       this.getSelectionOccurrence(view, block),
       getSelectedOccurrence(block, blockRange, snippet),
-      this.blockKindOf(block)
+      this.blockKindOf(block),
+      after
     );
   }
   /**
@@ -5421,12 +5456,16 @@ var ReadingHighlighterPlugin = class extends import_obsidian11.Plugin {
     for (let i = 0; i < blocks.length && !head; i++) {
       head = await this.locateBlockPortion(view, request.range, blocks[i]);
     }
+    if (!head) return false;
     let tail = null;
     for (let i = blocks.length - 1; i >= 0 && !tail; i--) {
-      tail = await this.locateBlockPortion(view, request.range, blocks[i]);
+      tail = await this.locateBlockPortion(view, request.range, blocks[i], {
+        file: head.file,
+        offset: head.start
+      });
     }
-    if (!head || !tail || head.file.path !== tail.file.path) return false;
-    const start = Math.min(head.start, tail.start);
+    if (!tail || head.file.path !== tail.file.path || tail.start < head.start) return false;
+    const start = head.start;
     const end = Math.max(head.end, tail.end);
     if (end <= start) return false;
     await this.saveUndoState(head.file);
@@ -6235,11 +6274,6 @@ ${prefix}`);
       }
     }
     const color = mode === "color" && isHighlightColor(payload) ? payload : mergedAny ? mergedColor : this.settings.defaultHighlightColor || null;
-    const initiallySelectedText = raw.substring(expandedStart, expandedEnd);
-    if (/\r?\n/.test(initiallySelectedText)) {
-      expandedStart = this.getLineStart(raw, expandedStart);
-      expandedEnd = this.getLineEnd(raw, expandedEnd);
-    }
     const selectionStart = expandedStart;
     const selectionEnd = expandedEnd;
     if (this.isTableDataRow(this.lineContaining(raw, expandedStart)) || this.isTableDataRow(this.lineContaining(raw, expandedEnd))) {
@@ -6483,7 +6517,11 @@ var ReadingHighlighterSettingTab = class extends import_obsidian11.PluginSetting
     const colourMeanings = s.semanticColors.map((item, index) => ({
       name: COLOR_LABELS[item.color],
       aliases: item.meaning ? [item.meaning] : [],
-      control: { type: "text", key: `semanticColors.${index}.meaning`, placeholder: "Meaning (e.g. Disagree)" }
+      control: {
+        type: "text",
+        key: `semanticColors.${index}.meaning`,
+        placeholder: MEANING_PLACEHOLDERS[item.color]
+      }
     }));
     const colourOptions = { "": "Theme default" };
     for (const color of HIGHLIGHT_COLORS) colourOptions[color] = COLOR_LABELS[color];
@@ -6762,7 +6800,7 @@ var ReadingHighlighterSettingTab = class extends import_obsidian11.PluginSetting
           attr: { "data-highlight": item.color }
         });
         setting.addText(
-          (text) => text.setPlaceholder("Meaning (e.g. Disagree)").setValue(item.meaning).onChange(async (value) => {
+          (text) => text.setPlaceholder(MEANING_PLACEHOLDERS[item.color]).setValue(item.meaning).onChange(async (value) => {
             this.plugin.settings.semanticColors[index].meaning = value;
             await this.plugin.saveSettings();
           })

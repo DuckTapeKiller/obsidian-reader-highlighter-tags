@@ -129,48 +129,47 @@ describe("an action that fails (issue 13)", () => {
     });
 });
 
+async function toolbar() {
+    const window = createObsidianWindow();
+    const doc = window.document;
+    const content = doc.getElementById("content");
+    renderHtml(content, "<p>Some text to select in reading view, and more after it.</p>");
+    const view = {
+        file: { path: "n.md" },
+        contentEl: content,
+        containerEl: content,
+        getMode: () => "preview",
+        getViewType: () => "markdown",
+    };
+    const app = {
+        vault: { read: async () => "", modify: async () => {}, getAbstractFileByPath: () => null },
+        metadataCache: { getFileCache: () => ({ embeds: [] }) },
+        workspace: { getActiveViewOfType: () => view, on: () => {}, off: () => {} },
+    };
+    const plugin = new ReadingHighlighterPlugin(app, { id: "t", version: "0" });
+    await plugin.loadSettings();
+    plugin.floatingManager = new FloatingManager(plugin);
+    plugin.registerDomEvent(doc, "selectionchange", () => plugin.floatingManager.handleSelection());
+    plugin.floatingManager.load();
+    const node = content.querySelector("p").firstChild;
+    const select = (end) => {
+        const range = doc.createRange();
+        range.setStart(node, 0);
+        range.setEnd(node, end);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        doc.dispatchEvent(new window.Event("selectionchange"));
+    };
+    const visible = () => plugin.floatingManager.containerEl?.style.display === "flex";
+    return { select, visible, plugin, doc, window };
+}
+
 describe("the toolbar on Android (issue 5)", () => {
     afterEach(() => {
         Platform.isAndroidApp = false;
         vi.useRealTimers();
     });
-
-    async function toolbar() {
-        const window = createObsidianWindow();
-        const doc = window.document;
-        const content = doc.getElementById("content");
-        renderHtml(content, "<p>Some text to select in reading view, and more after it.</p>");
-        const view = {
-            file: { path: "n.md" },
-            contentEl: content,
-            containerEl: content,
-            getMode: () => "preview",
-            getViewType: () => "markdown",
-        };
-        const app = {
-            vault: { read: async () => "", modify: async () => {}, getAbstractFileByPath: () => null },
-            metadataCache: { getFileCache: () => ({ embeds: [] }) },
-            workspace: { getActiveViewOfType: () => view, on: () => {}, off: () => {} },
-        };
-        const plugin = new ReadingHighlighterPlugin(app, { id: "t", version: "0" });
-        await plugin.loadSettings();
-        plugin.floatingManager = new FloatingManager(plugin);
-        plugin.registerDomEvent(doc, "selectionchange", () => plugin.floatingManager.handleSelection());
-        plugin.floatingManager.load();
-        const node = content.querySelector("p").firstChild;
-        const select = (end) => {
-            const range = doc.createRange();
-            range.setStart(node, 0);
-            range.setEnd(node, end);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-            doc.dispatchEvent(new window.Event("selectionchange"));
-        };
-        const visible = () => plugin.floatingManager.containerEl?.style.display === "flex";
-        return { select, visible };
-    }
-
     it("stays hidden while the selection is still moving, and shows once it settles", async () => {
         Platform.isAndroidApp = true;
         vi.useFakeTimers();
@@ -193,5 +192,27 @@ describe("the toolbar on Android (issue 5)", () => {
         const t = await toolbar();
         t.select(4);
         expect(t.visible()).toBe(true);
+    });
+});
+
+describe("nothing is highlighted without a button or a command", () => {
+    afterEach(() => {
+        Platform.isMobile = false;
+        Platform.isIosApp = false;
+        vi.useRealTimers();
+    });
+
+    it("on iOS, a finger held still on a selection does not highlight it", async () => {
+        Platform.isMobile = true;
+        Platform.isIosApp = true;
+        vi.useFakeTimers();
+        const t = await toolbar();
+        const highlight = vi.spyOn(t.plugin, "highlightSelection").mockResolvedValue(undefined);
+        t.select(14);
+        // A long press while selecting a paragraph, or on a selection handle.
+        t.doc.dispatchEvent(new t.window.Event("touchstart"));
+        vi.advanceTimersByTime(2000);
+        t.doc.dispatchEvent(new t.window.Event("touchend"));
+        expect(highlight).not.toHaveBeenCalled();
     });
 });

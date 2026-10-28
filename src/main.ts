@@ -87,6 +87,8 @@ interface ReadingHighlighterSettings {
     enableColorPalette: boolean;
     showOnlyAssignedColors: boolean;
     semanticColors: SemanticColor[];
+    /** The meanings versions up to 1.0.8 filled in themselves have been cleared. */
+    builtInMeaningsCleared: boolean;
     quoteTemplate: string;
     enableAnnotations: boolean;
     showAnnotationButton: boolean;
@@ -119,6 +121,7 @@ const DEFAULT_SETTINGS: ReadingHighlighterSettings = {
     enableColorPalette: false,
     showOnlyAssignedColors: true,
     semanticColors: HIGHLIGHT_COLORS.map((color) => ({ color, meaning: "" })),
+    builtInMeaningsCleared: false,
     quoteTemplate: "> {{text}}\n>\n> — [[{{file}}]]",
     enableAnnotations: true,
     showAnnotationButton: true,
@@ -153,6 +156,43 @@ function migratePalette(saved: LegacyColorSettings["semanticColors"]): SemanticC
         if (!existing.includes(meaning)) target.meaning = [...existing, meaning].join(" / ");
     }
     return palette;
+}
+
+/**
+ * Meanings versions up to 1.0.8 filled in themselves. They were saved with the
+ * settings and carried over to the native colours, so they looked like the
+ * reader's own. A meaning is the reader's to give.
+ */
+const BUILT_IN_MEANINGS: Partial<Record<HighlightColor, string>> = {
+    red: "Important",
+    blue: "Vocabulary",
+    green: "Key Concept",
+    yellow: "General",
+};
+
+/** Examples shown in an empty meaning field; never saved. */
+const MEANING_PLACEHOLDERS: Record<HighlightColor, string> = {
+    red: "Meaning (e.g. Important)",
+    orange: "Meaning (e.g. Question)",
+    yellow: "Meaning (e.g. General)",
+    green: "Meaning (e.g. Key concept)",
+    blue: "Meaning (e.g. Vocabulary)",
+    purple: "Meaning (e.g. Disagree)",
+};
+
+/**
+ * Remove the built-in meanings from the palette, keeping any meaning the
+ * reader gave that was joined to one.
+ */
+function clearBuiltInMeanings(palette: SemanticColor[]) {
+    for (const entry of palette) {
+        const builtIn = BUILT_IN_MEANINGS[entry.color];
+        if (!builtIn) continue;
+        entry.meaning = entry.meaning
+            .split(" / ")
+            .filter((part) => part.trim() !== builtIn)
+            .join(" / ");
+    }
 }
 
 // Stringify an unknown frontmatter value the same way `String(value || "")`
@@ -519,6 +559,12 @@ export default class ReadingHighlighterPlugin extends Plugin {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, current, {
             semanticColors: migratePalette(loaded.semanticColors),
         });
+        // Once only: a meaning typed after this is kept, even if it reads like
+        // one of the old built-in ones. The flag is saved with the next change.
+        if (!this.settings.builtInMeaningsCleared) {
+            clearBuiltInMeanings(this.settings.semanticColors);
+            this.settings.builtInMeaningsCleared = true;
+        }
         if (!isHighlightColor(this.settings.defaultHighlightColor)) {
             // A default colour chosen when highlights were HTML becomes the
             // nearest native one.
@@ -819,7 +865,12 @@ export default class ReadingHighlighterPlugin extends Plugin {
     /**
      * Locate the portion of the selection that lies in `block`.
      */
-    async locateBlockPortion(view: MarkdownView, range: Range, block: HTMLElement): Promise<LocatedRange | null> {
+    async locateBlockPortion(
+        view: MarkdownView,
+        range: Range,
+        block: HTMLElement,
+        after: { file: TFile; offset: number } | null = null
+    ): Promise<LocatedRange | null> {
         const blockRange = this.intersectRangeWithBlock(range, block);
         if (!blockRange) return null;
         const snippet = blockRange.toString();
@@ -831,7 +882,8 @@ export default class ReadingHighlighterPlugin extends Plugin {
             this.getElementText(block),
             this.getSelectionOccurrence(view, block),
             getSelectedOccurrence(block, blockRange, snippet),
-            this.blockKindOf(block)
+            this.blockKindOf(block),
+            after
         );
     }
 
@@ -858,13 +910,19 @@ export default class ReadingHighlighterPlugin extends Plugin {
         for (let i = 0; i < blocks.length && !head; i++) {
             head = await this.locateBlockPortion(view, request.range, blocks[i]);
         }
+        if (!head) return false;
         let tail: LocatedRange | null = null;
         for (let i = blocks.length - 1; i >= 0 && !tail; i--) {
-            tail = await this.locateBlockPortion(view, request.range, blocks[i]);
+            tail = await this.locateBlockPortion(view, request.range, blocks[i], {
+                file: head.file,
+                offset: head.start,
+            });
         }
-        if (!head || !tail || head.file.path !== tail.file.path) return false;
+        // The end found before the start means one of them is in the wrong
+        // place: everything between would be highlighted. Ask instead.
+        if (!tail || head.file.path !== tail.file.path || tail.start < head.start) return false;
 
-        const start = Math.min(head.start, tail.start);
+        const start = head.start;
         const end = Math.max(head.end, tail.end);
         if (end <= start) return false;
 
@@ -1839,11 +1897,10 @@ export default class ReadingHighlighterPlugin extends Plugin {
                   ? mergedColor
                   : this.settings.defaultHighlightColor || null;
 
-        const initiallySelectedText = raw.substring(expandedStart, expandedEnd);
-        if (/\r?\n/.test(initiallySelectedText)) {
-            expandedStart = this.getLineStart(raw, expandedStart);
-            expandedEnd = this.getLineEnd(raw, expandedEnd);
-        }
+        // A selection across lines is not widened to whole lines: from the
+        // middle of one paragraph to the middle of the next, only the selected
+        // part of each is highlighted. The first and last lines keep the text
+        // outside the selection as `lineHead` and `lineTail` below.
         // A table row must be rewritten as whole cells, so the range is widened
         // to full lines — but the caller's own range is kept, because only the
         // cells it actually covers should be highlighted.
@@ -2153,7 +2210,11 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
         const colourMeanings: SettingDefinitionItem[] = s.semanticColors.map((item, index) => ({
             name: COLOR_LABELS[item.color],
             aliases: item.meaning ? [item.meaning] : [],
-            control: { type: "text", key: `semanticColors.${index}.meaning`, placeholder: "Meaning (e.g. Disagree)" },
+            control: {
+                type: "text",
+                key: `semanticColors.${index}.meaning`,
+                placeholder: MEANING_PLACEHOLDERS[item.color],
+            },
         }));
         const colourOptions: Record<string, string> = { "": "Theme default" };
         for (const color of HIGHLIGHT_COLORS) colourOptions[color] = COLOR_LABELS[color];
@@ -2464,7 +2525,7 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 });
                 setting.addText((text) =>
                     text
-                        .setPlaceholder("Meaning (e.g. Disagree)")
+                        .setPlaceholder(MEANING_PLACEHOLDERS[item.color])
                         .setValue(item.meaning)
                         .onChange(async (value) => {
                             this.plugin.settings.semanticColors[index].meaning = value;

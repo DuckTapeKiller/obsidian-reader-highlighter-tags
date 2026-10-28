@@ -71,7 +71,7 @@ Our life is frittered away by detail. ==🟢Simplicity, simplicity, simplicity!=
 The plugin takes care of the details that usually go wrong:
 
 - **Extending and merging.** Select from inside a highlight out past its end and the two become one highlight. A selection that touches several highlights joins them all.
-- **Structure stays intact.** List bullets, task boxes, heading marks, quote and callout markers stay outside the highlight. A selection across several paragraphs highlights each paragraph separately.
+- **Structure stays intact.** List bullets, task boxes, heading marks, quote and callout markers stay outside the highlight. A selection across several paragraphs highlights each paragraph separately, and only what you selected: from the middle of one paragraph to the middle of the next, the start of the first and the end of the last stay unhighlighted.
 - **Tables, cell by cell.** Each selected cell gets its own highlight, so the table keeps rendering as a table.
 - **The right occurrence.** When the same words appear more than once, the plugin highlights the one you selected.
 - **Embedded notes.** Text shown from an embedded note (`![[Note]]`) is highlighted in the note it comes from.
@@ -216,7 +216,7 @@ The plugin remembers how far you have read in each note, saving your place whene
 
 ## On mobile
 
-Everything works on phones and tablets. The buttons grow to touch size, and on a phone the colours wrap onto a second row when the bar would be wider than the screen. On iOS, a long press on a selection highlights it straight away. On Android the toolbar sits below the selection, clear of the system's copy menu. Successful actions give a light vibration, which you can turn off. A ribbon button highlights the current selection.
+Everything works on phones and tablets. The buttons grow to touch size, and on a phone the colours wrap onto a second row when the bar would be wider than the screen. On Android the toolbar sits below the selection, clear of the system's copy menu. Successful actions give a light vibration, which you can turn off. A ribbon button highlights the current selection.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/DuckTapeKiller/obsidian-reader-highlighter-tags/main/docs/images/mobile.webp" alt="Two phone screens. Left, the toolbar above a selection in two rows, actions above and colours below. Right, the toolbar fixed to the right edge." width="560">
@@ -252,24 +252,24 @@ Every action is a command, so you can give it a hotkey in **Settings → Hotkeys
 
 ![The plugin's settings: toolbar position, highlight colour, colour palette and colour meanings.](https://raw.githubusercontent.com/DuckTapeKiller/obsidian-reader-highlighter-tags/main/docs/images/settings.webp)
 
-| Setting                                    | Default          | What it does                                                           |
-| ------------------------------------------ | ---------------- | ---------------------------------------------------------------------- |
-| Toolbar position                           | Fixed right side | Next to the text, or fixed at the top, bottom, left or right           |
-| Highlight colour                           | Theme default    | The colour the highlighter writes                                      |
-| Show colour palette                        | Off              | Shows the six colours in the toolbar                                   |
-| Only show colours with a meaning           | On               | Hides colours you haven't named; shows all six until you name one      |
-| Colour meanings                            | None             | A name for each colour, shown on hover and used as research filters    |
-| Default tag prefix                         | None             | A tag added in front of every highlight                                |
-| Smart tag suggestions                      | On               | Suggests recent tags and tags from the note's folder and frontmatter   |
-| Smart paragraph selection                  | Off              | Widens a selection to its whole paragraph, list item, heading or quote |
-| Quote format                               | `> {{text}}` …   | The template used by _Copy as quote_                                   |
-| Enable annotations, Show annotation button | On               | Annotations and their toolbar button                                   |
-| Track reading progress                     | On               | Remembers your place in each note                                      |
-| Show tag, quote and remove buttons         | On               | Which buttons the toolbar shows                                        |
-| Haptic feedback                            | On               | A light vibration on success, on mobile                                |
-| Show button tooltips                       | Off              | Tooltips on the toolbar's action buttons                               |
-| Auto-tag highlight in frontmatter          | Off              | Adds a tag to the note's `tags` property when you highlight            |
-| Learned normalization rules                | None             | Rules saved by _Apply & learn_, each one removable                     |
+| Setting                                    | Default          | What it does                                                                                        |
+| ------------------------------------------ | ---------------- | --------------------------------------------------------------------------------------------------- |
+| Toolbar position                           | Fixed right side | Next to the text, or fixed at the top, bottom, left or right                                        |
+| Highlight colour                           | Theme default    | The colour the highlighter writes                                                                   |
+| Show colour palette                        | Off              | Shows the six colours in the toolbar                                                                |
+| Only show colours with a meaning           | On               | Hides colours you haven't named; shows all six until you name one                                   |
+| Colour meanings                            | None             | A name for each colour, shown on hover and used as research filters; the empty fields show examples |
+| Default tag prefix                         | None             | A tag added in front of every highlight                                                             |
+| Smart tag suggestions                      | On               | Suggests recent tags and tags from the note's folder and frontmatter                                |
+| Smart paragraph selection                  | Off              | Widens a selection to its whole paragraph, list item, heading or quote                              |
+| Quote format                               | `> {{text}}` …   | The template used by _Copy as quote_                                                                |
+| Enable annotations, Show annotation button | On               | Annotations and their toolbar button                                                                |
+| Track reading progress                     | On               | Remembers your place in each note                                                                   |
+| Show tag, quote and remove buttons         | On               | Which buttons the toolbar shows                                                                     |
+| Haptic feedback                            | On               | A light vibration on success, on mobile                                                             |
+| Show button tooltips                       | Off              | Tooltips on the toolbar's action buttons                                                            |
+| Auto-tag highlight in frontmatter          | Off              | Adds a tag to the note's `tags` property when you highlight                                         |
+| Learned normalization rules                | None             | Rules saved by _Apply & learn_, each one removable                                                  |
 
 ## Compatibility and privacy
 

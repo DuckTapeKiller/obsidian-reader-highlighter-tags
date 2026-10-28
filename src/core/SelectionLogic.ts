@@ -180,7 +180,8 @@ export class SelectionLogic {
         context: string | null = null,
         occurrenceIndex = 0,
         withinBlock: SelectionHint | null = null,
-        contextKind: BlockKind | null = null
+        contextKind: BlockKind | null = null,
+        after: { file: TFile; offset: number } | null = null
     ): Promise<PhysicalResult | null> {
         this.lastFailureReport = null; // Note 2: Reset at top of call
 
@@ -309,6 +310,17 @@ export class SelectionLogic {
 
         // Apply Structural Snapping to all final candidates to protect footnotes/prefixes
         candidates = candidates.map((cand) => this.snapToStructuralBoundaries(fullRaw, cand));
+
+        // The end of a selection across blocks comes after its start. A note
+        // holding the same passage twice otherwise sends the end to the other
+        // copy, and everything between them is highlighted.
+        if (after) {
+            const following = candidates.filter((cand) => {
+                const at = this.mapVirtualToPhysical(cand.start, cand.end, virtual.segments);
+                return at?.file.path === after.file.path && at.start >= after.offset;
+            });
+            if (following.length > 0) candidates = following;
+        }
 
         const result = this.resolveCandidates(
             candidates,
@@ -1381,15 +1393,60 @@ export class SelectionLogic {
             }
 
             if (selectionIndex === selectionBlocks.length) {
-                candidates.push({
-                    start: firstLine.start,
-                    end: documentLines[lastMatch].end,
-                    text: text.substring(firstLine.start, documentLines[lastMatch].end),
-                });
+                // Lines match whole, but the selection can start partway into
+                // the first and end partway into the last.
+                const start = this.blockSequenceStart(text, firstLine, selectionBlocks[0]);
+                const end = this.blockSequenceEnd(
+                    text,
+                    documentLines[lastMatch],
+                    selectionBlocks[selectionBlocks.length - 1]
+                );
+                candidates.push({ start, end, text: text.substring(start, end) });
             }
         }
 
         return this.dedupeCandidates(candidates);
+    }
+
+    /**
+     * Where a selection's first line starts in the document line it matched.
+     * The selection runs on to the next line, so its first line is the end of
+     * that line: the last place its text occurs there.
+     */
+    blockSequenceStart(text: string, line: LineRecord, block: string): number {
+        const { normalized, map } = this.buildFuzzyMap(line.raw);
+        const needle = this.normalizeForFuzzySearch(block);
+        const at = needle ? normalized.lastIndexOf(needle) : -1;
+        if (at < 0 || map[at] === undefined) return line.start;
+        let start = line.start + map[at];
+        // Punctuation the selection opens with, such as « or ¿.
+        const lead = [...(block.match(/^[^\p{L}\p{N}]*/u)?.[0] ?? "").replace(/\s/g, "")];
+        while (lead.length && start > line.start && text[start - 1] === lead[lead.length - 1]) {
+            lead.pop();
+            start--;
+        }
+        return start;
+    }
+
+    /**
+     * Where a selection's last line ends in the document line it matched: the
+     * selection came from the line before, so its last line is the start of
+     * that line, the first place its text occurs there.
+     */
+    blockSequenceEnd(text: string, line: LineRecord, block: string): number {
+        const { normalized, map } = this.buildFuzzyMap(line.raw);
+        const needle = this.normalizeForFuzzySearch(block);
+        const at = needle ? normalized.indexOf(needle) : -1;
+        const last = at < 0 ? undefined : map[at + needle.length - 1];
+        if (last === undefined) return line.end;
+        let end = line.start + last + String.fromCodePoint(line.raw.codePointAt(last) ?? 0).length;
+        // Punctuation the selection closes with, such as a full stop or ».
+        const trail = [...(block.match(/[^\p{L}\p{N}]*$/u)?.[0] ?? "").replace(/\s/g, "")];
+        while (trail.length && end < line.end && text[end] === trail[0]) {
+            trail.shift();
+            end++;
+        }
+        return end;
     }
 
     createDocumentLineRecords(text: string): LineRecord[] {

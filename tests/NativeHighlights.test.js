@@ -141,20 +141,20 @@ describe("settings from versions that coloured with HTML", () => {
     it("moves each meaning to the nearest native colour", async () => {
         const settings = await load({
             semanticColors: [
-                { color: "#FFCDD2", meaning: "Important" },
+                { color: "#FFCDD2", meaning: "Urgent" },
                 { color: "#F8BBD0", meaning: "" },
-                { color: "#BBDEFB", meaning: "Vocabulary" },
-                { color: "#C8E6C9", meaning: "Key Concept" },
-                { color: "#FFF9C4", meaning: "General" },
+                { color: "#BBDEFB", meaning: "Words" },
+                { color: "#C8E6C9", meaning: "Ideas" },
+                { color: "#FFF9C4", meaning: "Background" },
                 { color: "#F0F4C0", meaning: "Aside" },
             ],
         });
         expect(settings.semanticColors).toEqual([
-            { color: "red", meaning: "Important" },
+            { color: "red", meaning: "Urgent" },
             { color: "orange", meaning: "" },
-            { color: "yellow", meaning: "General / Aside" },
-            { color: "green", meaning: "Key Concept" },
-            { color: "blue", meaning: "Vocabulary" },
+            { color: "yellow", meaning: "Background / Aside" },
+            { color: "green", meaning: "Ideas" },
+            { color: "blue", meaning: "Words" },
             { color: "purple", meaning: "" },
         ]);
     });
@@ -251,5 +251,66 @@ describe("exports", () => {
             ["uno", "yellow"],
             ["dos", null],
         ]);
+    });
+});
+
+describe("the meanings older versions filled in themselves", () => {
+    async function load(saved) {
+        const plugin = new ReadingHighlighterPlugin({}, { id: "t", version: "0" });
+        plugin.loadData = async () => saved;
+        await plugin.loadSettings();
+        return plugin.settings;
+    }
+    const meanings = (settings) => settings.semanticColors.map((c) => c.meaning);
+
+    it("are cleared from settings saved by 1.0.8 or earlier", async () => {
+        const settings = await load({
+            semanticColors: [
+                { color: "#FFCDD2", meaning: "Important" },
+                { color: "#BBDEFB", meaning: "Vocabulary" },
+                { color: "#C8E6C9", meaning: "Key Concept" },
+                { color: "#FFF9C4", meaning: "General" },
+                { color: "#E1BEE7", meaning: "Mine" },
+            ],
+        });
+        expect(meanings(settings)).toEqual(["", "", "", "", "", "Mine"]);
+        expect(settings.builtInMeaningsCleared).toBe(true);
+    });
+
+    it("are cleared from settings already moved to the native colours", async () => {
+        const settings = await load({
+            semanticColors: [
+                { color: "red", meaning: "Important" },
+                { color: "orange", meaning: "" },
+                { color: "yellow", meaning: "General" },
+                { color: "green", meaning: "Key Concept" },
+                { color: "blue", meaning: "Vocabulary" },
+                { color: "purple", meaning: "" },
+            ],
+        });
+        expect(meanings(settings)).toEqual(["", "", "", "", "", ""]);
+    });
+
+    it("leave a meaning the reader joined to one of them", async () => {
+        const settings = await load({ semanticColors: [{ color: "red", meaning: "Important / Urgent" }] });
+        expect(meanings(settings)[0]).toBe("Urgent");
+    });
+
+    it("are cleared only on their own colour", async () => {
+        const settings = await load({ semanticColors: [{ color: "orange", meaning: "Important" }] });
+        expect(meanings(settings)[1]).toBe("Important");
+    });
+
+    it("are cleared once: the same words typed afterwards are kept", async () => {
+        const settings = await load({
+            builtInMeaningsCleared: true,
+            semanticColors: [{ color: "red", meaning: "Important" }],
+        });
+        expect(meanings(settings)[0]).toBe("Important");
+    });
+
+    it("are never filled in on a new install", async () => {
+        const settings = await load(null);
+        expect(meanings(settings)).toEqual(["", "", "", "", "", ""]);
     });
 });

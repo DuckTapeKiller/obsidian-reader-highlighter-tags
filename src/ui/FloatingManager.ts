@@ -28,7 +28,6 @@ export class FloatingManager {
     colorButtons: HTMLButtonElement[];
     paletteContainer: HTMLDivElement | null;
     _handlers: (() => void)[];
-    longPressTimer: number | null;
     _selectionDebounceTimer: number | null;
     _selectionSnapshot: SelectionSnapshot | null;
 
@@ -46,9 +45,6 @@ export class FloatingManager {
         this.paletteContainer = null;
         this._handlers = [];
 
-        // Mobile gesture state
-        this.longPressTimer = null;
-
         // Android selection debounce
         this._selectionDebounceTimer = null;
 
@@ -57,12 +53,13 @@ export class FloatingManager {
         this._selectionSnapshot = null;
     }
 
+    // Nothing is highlighted until a toolbar button or a command is used. The
+    // iOS long press that highlighted a selection on its own is gone: a finger
+    // held still while selecting a paragraph, or on a selection handle, set it
+    // off.
     load() {
         this.createElements();
         this.registerEvents();
-        if (Platform.isMobile) {
-            this.setupMobileGestures();
-        }
     }
 
     unload() {
@@ -315,57 +312,6 @@ export class FloatingManager {
             btn.addEventListener("mousedown", handler);
             btn.addEventListener("touchstart", handler, { passive: false });
         });
-    }
-
-    setupMobileGestures() {
-        // Long press to highlight without showing toolbar
-        // Only enable on iOS — on Android this races with the native selection
-        // behaviour and causes partial (single-word) highlights.
-        if (!Platform.isIosApp) return;
-
-        // Registered through the plugin so they go when it unloads. Added
-        // directly, they outlived a disable and re-enable, and every touch
-        // then fired the long-press highlight once per copy.
-        this.plugin.registerDomEvent(
-            activeDocument,
-            "touchstart",
-            () => {
-                this.longPressTimer = window.setTimeout(() => {
-                    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                    const sel = window.getSelection();
-
-                    if (view && view.getMode() === "preview" && sel?.toString().trim()) {
-                        void this.plugin.highlightSelection(view);
-                        this.hide();
-                    }
-                }, 600);
-            },
-            { passive: true }
-        );
-
-        this.plugin.registerDomEvent(
-            activeDocument,
-            "touchmove",
-            () => {
-                if (this.longPressTimer) {
-                    window.clearTimeout(this.longPressTimer);
-                    this.longPressTimer = null;
-                }
-            },
-            { passive: true }
-        );
-
-        this.plugin.registerDomEvent(
-            activeDocument,
-            "touchend",
-            () => {
-                if (this.longPressTimer) {
-                    window.clearTimeout(this.longPressTimer);
-                    this.longPressTimer = null;
-                }
-            },
-            { passive: true }
-        );
     }
 
     /**

@@ -1337,28 +1337,33 @@ body .reading-highlighter-float-container.is-pdf-view button.markdown-only-btn {
 }
 
 /* Undo is a text action set off by a hairline, the size of the message, not a
-   raised button taller than the notice's text. It reaches the notice's top and
-   bottom edges, so a tap anywhere beside the hairline undoes rather than
-   dismissing the notice. */
+   raised button taller than the notice's text. It is written in the notice's
+   own text colour, which every theme sets for the notice's background: the
+   accent colour is chosen for the page, and in some themes matched the
+   notice's background (black on black in Brutalist light). It reaches the
+   notice's top and bottom edges, so a tap anywhere beside the hairline undoes
+   rather than dismissing the notice. */
 .reading-highlighter-notice .reading-highlighter-undo-btn {
     align-self: stretch;
     height: auto;
     margin-block: calc(-1 * var(--size-4-2));
     padding: var(--size-4-2) 0 var(--size-4-2) var(--size-4-3);
     border: none;
-    border-left: var(--border-width) solid var(--background-modifier-border);
+    /* The notice's text colour, faint: visible on any notice background. */
+    border-left: var(--border-width) solid color-mix(in srgb, currentColor 35%, transparent);
     border-radius: 0;
     background: none;
     box-shadow: none;
     font: inherit;
     font-weight: var(--font-semibold);
-    color: var(--text-accent);
+    color: inherit;
     cursor: var(--cursor);
 }
 
 .reading-highlighter-notice .reading-highlighter-undo-btn:hover {
     background: none;
-    color: var(--text-accent-hover);
+    color: inherit;
+    text-decoration: underline;
 }
 
 /* On a phone, as wide as its text rather than a bar across the screen. */

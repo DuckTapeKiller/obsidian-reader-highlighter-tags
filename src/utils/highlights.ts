@@ -80,6 +80,19 @@ function escapeRegex(text: string): string {
     return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Escapes HTML-significant characters so highlight text extracted from the
+ * note cannot be interpreted as markup when later rendered in the UI.
+ */
+function escapeHtml(text: string): string {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function detectNewline(raw: string): string {
     return raw.includes("\r\n") ? "\r\n" : "\n";
 }
@@ -212,7 +225,7 @@ export function parseHighlights(raw: string): ParsedHighlights {
 
             highlights.push({
                 id: "",
-                text: innerText.trim(),
+                text: escapeHtml(innerText.trim()),
                 line: lineIdx,
                 type: "markdown",
                 color: pair.color,

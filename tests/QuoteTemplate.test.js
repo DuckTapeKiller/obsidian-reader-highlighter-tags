@@ -31,6 +31,11 @@ describe("quote template", () => {
         expect(p.expandQuoteTemplate(file, "One.\nTwo.")).toBe("> One.\n> Two.\n— Meditations");
     });
 
+    it("puts the text in as it is when the template quotes it inline", async () => {
+        const p = await plugin("«{{text}}» ({{file}})");
+        expect(p.expandQuoteTemplate(file, "Life is opinion.")).toBe("«Life is opinion.» (Meditations)");
+    });
+
     it("leaves variables inside the selected text alone", async () => {
         const p = await plugin("> {{text}}");
         expect(p.expandQuoteTemplate(file, "Write {{file}} here.")).toBe("> Write {{file}} here.");

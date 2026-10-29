@@ -315,7 +315,12 @@ export class HighlightNavigatorView extends ItemView {
                         attr: { "data-highlight": highlight.color },
                     });
                 } else {
-                    el.createSpan({ cls: "highlight-color-dot highlight-default" });
+                    // In the theme's default colour, drawn as the research view
+                    // draws it.
+                    el.createSpan({
+                        cls: "highlight-color-dot highlight-swatch reading-highlighter-swatch",
+                        attr: { "data-highlight": "plain" },
+                    });
                 }
             } else {
                 const footnote = item as NavFootnote;
@@ -374,7 +379,7 @@ export class HighlightNavigatorView extends ItemView {
                 if (type === "footnotes") {
                     void this.jumpToFootnote(item as NavFootnote);
                 } else {
-                    void this.jumpToLine((item as Highlight).line);
+                    void this.jumpToHighlight(item as Highlight);
                 }
             };
         });
@@ -538,6 +543,58 @@ export class HighlightNavigatorView extends ItemView {
         });
 
         menu.showAtMouseEvent(event);
+    }
+
+    /**
+     * Go to a highlight. In Reading view only the highlight is shown: the note
+     * scrolls to it and it alone is outlined for a moment. Jumping to its line
+     * made Obsidian flash the whole block holding it — a long paragraph, or the
+     * whole note when the note is one block.
+     */
+    async jumpToHighlight(highlight: Highlight) {
+        const leaf = this.app.workspace.getMostRecentLeaf();
+        const view = leaf && leaf.view instanceof MarkdownView ? leaf.view : null;
+        if (!leaf || !view || view.getMode() !== "preview") {
+            await this.jumpToLine(highlight.line);
+            return;
+        }
+        this.app.workspace.setActiveLeaf(leaf, { focus: true });
+        // Brings the highlight's section into view, so Reading view draws it.
+        view.previewMode.applyScroll(highlight.line);
+        this.collapseSidebarOnMobile();
+        const mark = await this.findRenderedHighlight(view, highlight);
+        if (!mark) return;
+        mark.scrollIntoView({ block: "center" });
+        mark.removeClass("reading-highlighter-flash");
+        // Read the layout so the outline starts again when clicked twice.
+        void mark.offsetWidth;
+        mark.addClass("reading-highlighter-flash");
+        window.setTimeout(() => mark.removeClass("reading-highlighter-flash"), 1600);
+    }
+
+    /**
+     * The rendered `<mark>` of a highlight, once Reading view has drawn it. The
+     * same words can be highlighted twice, so of the matching marks the one
+     * nearest where the note scrolled to is taken.
+     */
+    async findRenderedHighlight(view: MarkdownView, highlight: Highlight): Promise<HTMLElement | null> {
+        const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+        const wanted = normalize(this.stripMarkdown(highlight.text));
+        if (!wanted) return null;
+        for (let attempt = 0; attempt < 10; attempt++) {
+            const root = view.previewMode.containerEl;
+            const top = root.getBoundingClientRect().top;
+            const candidates = Array.from(root.querySelectorAll<HTMLElement>("mark")).filter((mark) => {
+                const text = normalize(mark.textContent ?? "");
+                return text === wanted || (text.length > 0 && (text.includes(wanted) || wanted.includes(text)));
+            });
+            if (candidates.length) {
+                const distance = (mark: HTMLElement) => Math.abs(mark.getBoundingClientRect().top - top);
+                return candidates.reduce((best, mark) => (distance(mark) < distance(best) ? mark : best));
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 60));
+        }
+        return null;
     }
 
     async jumpToLine(line: number) {

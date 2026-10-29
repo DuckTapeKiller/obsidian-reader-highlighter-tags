@@ -39,6 +39,23 @@ export class Plugin extends Component {
     async saveData() {}
 }
 export class View extends Component {}
+export class AbstractInputSuggest {
+    constructor(app, inputEl) {
+        this.app = app;
+        this.inputEl = inputEl;
+    }
+    setValue(value) {
+        this.inputEl.value = value;
+    }
+    getValue() {
+        return this.inputEl.value;
+    }
+    open() {}
+    close() {}
+    onSelect() {
+        return this;
+    }
+}
 export class ItemView extends View {}
 export class MarkdownView extends View {}
 export class Modal extends Component {}

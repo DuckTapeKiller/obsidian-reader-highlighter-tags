@@ -1088,15 +1088,14 @@ var FloatingManager = class {
    * filtered.
    *
    * With "only show colours with a meaning" on, colours left unnamed are
-   * hidden — a reader using a seven-colour taxonomy should not have to pick
-   * past eight unused swatches. If nothing has been named yet, every colour is
-   * shown rather than an empty palette that looks broken.
+   * hidden, so a reader sees only the colours they use. With none named, no
+   * colour is shown: the setting says so, and showing all six instead put
+   * colours on the toolbar that the reader had asked to hide.
    */
   visiblePaletteColors() {
     const all = this.plugin.settings.semanticColors.map((item, index) => ({ item, index }));
     if (!this.plugin.settings.showOnlyAssignedColors) return all;
-    const named = all.filter(({ item }) => (item.meaning || "").trim().length > 0);
-    return named.length > 0 ? named : all;
+    return all.filter(({ item }) => (item.meaning || "").trim().length > 0);
   }
   /**
    * Build the toolbar as one of Obsidian's own menus.
@@ -1112,14 +1111,23 @@ var FloatingManager = class {
   createElements() {
     var _a;
     if (this.containerEl) return;
+    this.highlightBtn = null;
+    this.tagBtn = null;
+    this.removeBtn = null;
+    this.quoteBtn = null;
+    this.annotateBtn = null;
+    this.extractAllBtn = null;
+    this.paletteContainer = null;
+    this.colorButtons = [];
     const doc = this.targetDocument();
     this.containerEl = doc.body.createDiv({ cls: "reading-highlighter-float-container" });
     if (!import_obsidian.Platform.isPhone) this.containerEl.addClass("menu");
     this.hide();
     this.highlightBtn = this.createButton("highlighter", "Highlight selection");
-    if (this.plugin.settings.enableColorPalette) {
+    const paletteColors = this.plugin.settings.enableColorPalette ? this.visiblePaletteColors() : [];
+    if (paletteColors.length > 0) {
       this.paletteContainer = this.containerEl.createDiv({ cls: "reading-highlighter-palette" });
-      for (const { item, index } of this.visiblePaletteColors()) {
+      for (const { item, index } of paletteColors) {
         const colorBtn = this.paletteContainer.createEl("button", {
           cls: "clickable-icon reading-highlighter-btn reading-highlighter-color-btn"
         });
@@ -3504,7 +3512,10 @@ var HighlightNavigatorView = class extends import_obsidian7.ItemView {
             attr: { "data-highlight": highlight.color }
           });
         } else {
-          el.createSpan({ cls: "highlight-color-dot highlight-default" });
+          el.createSpan({
+            cls: "highlight-color-dot highlight-swatch reading-highlighter-swatch",
+            attr: { "data-highlight": "plain" }
+          });
         }
       } else {
         const footnote = item;
@@ -3545,7 +3556,7 @@ var HighlightNavigatorView = class extends import_obsidian7.ItemView {
         if (type === "footnotes") {
           void this.jumpToFootnote(item);
         } else {
-          void this.jumpToLine(item.line);
+          void this.jumpToHighlight(item);
         }
       };
     });
@@ -3664,6 +3675,55 @@ var HighlightNavigatorView = class extends import_obsidian7.ItemView {
       });
     });
     menu.showAtMouseEvent(event);
+  }
+  /**
+   * Go to a highlight. In Reading view only the highlight is shown: the note
+   * scrolls to it and it alone is outlined for a moment. Jumping to its line
+   * made Obsidian flash the whole block holding it — a long paragraph, or the
+   * whole note when the note is one block.
+   */
+  async jumpToHighlight(highlight) {
+    const leaf = this.app.workspace.getMostRecentLeaf();
+    const view = leaf && leaf.view instanceof import_obsidian7.MarkdownView ? leaf.view : null;
+    if (!leaf || !view || view.getMode() !== "preview") {
+      await this.jumpToLine(highlight.line);
+      return;
+    }
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    view.previewMode.applyScroll(highlight.line);
+    this.collapseSidebarOnMobile();
+    const mark = await this.findRenderedHighlight(view, highlight);
+    if (!mark) return;
+    mark.scrollIntoView({ block: "center" });
+    mark.removeClass("reading-highlighter-flash");
+    void mark.offsetWidth;
+    mark.addClass("reading-highlighter-flash");
+    window.setTimeout(() => mark.removeClass("reading-highlighter-flash"), 1600);
+  }
+  /**
+   * The rendered `<mark>` of a highlight, once Reading view has drawn it. The
+   * same words can be highlighted twice, so of the matching marks the one
+   * nearest where the note scrolled to is taken.
+   */
+  async findRenderedHighlight(view, highlight) {
+    const normalize = (text) => text.replace(/\s+/g, " ").trim();
+    const wanted = normalize(this.stripMarkdown(highlight.text));
+    if (!wanted) return null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const root = view.previewMode.containerEl;
+      const top = root.getBoundingClientRect().top;
+      const candidates = Array.from(root.querySelectorAll("mark")).filter((mark) => {
+        var _a;
+        const text = normalize((_a = mark.textContent) != null ? _a : "");
+        return text === wanted || text.length > 0 && (text.includes(wanted) || wanted.includes(text));
+      });
+      if (candidates.length) {
+        const distance = (mark) => Math.abs(mark.getBoundingClientRect().top - top);
+        return candidates.reduce((best, mark) => distance(mark) < distance(best) ? mark : best);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 60));
+    }
+    return null;
   }
   async jumpToLine(line) {
     const leaf = this.app.workspace.getMostRecentLeaf();
@@ -3876,7 +3936,35 @@ var VaultScanner = class {
 
 // src/views/ResearchView.ts
 init_canvas();
+init_colors();
 var RESEARCH_VIEW = "reader-research-view";
+var UNTAGGED = "untagged";
+function highlightTags(h) {
+  return String(h.tagsText || "").split(/\s+/).filter((token) => token.startsWith("#") && token.length > 1).map((token) => token.toLowerCase());
+}
+function tagMatches(tag, filter) {
+  return tag === filter || tag.startsWith(`${filter}/`);
+}
+var TagFilterSuggest = class extends import_obsidian8.AbstractInputSuggest {
+  constructor(app, inputEl, view) {
+    super(app, inputEl);
+    this.view = view;
+  }
+  getSuggestions(query) {
+    const q = query.trim().toLowerCase().replace(/^#/, "");
+    return this.view.tagOptions().filter((option) => !this.view.activeTags.has(option.key)).filter((option) => !q || option.label.toLowerCase().replace(/^#/, "").includes(q));
+  }
+  renderSuggestion(option, el) {
+    el.addClass("research-tag-suggestion");
+    el.createSpan({ text: option.label });
+    el.createSpan({ cls: "research-tag-count", text: String(option.count) });
+  }
+  selectSuggestion(option) {
+    this.setValue("");
+    this.close();
+    this.view.addTagFilter(option.key);
+  }
+};
 function asText3(value) {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
@@ -3887,6 +3975,9 @@ function asText3(value) {
 var ResearchView = class extends import_obsidian8.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
+    this.activeTags = /* @__PURE__ */ new Set();
+    this.tagChipsEl = null;
+    this.colorFilterEl = null;
     this.plugin = plugin;
     this.scanner = new VaultScanner(plugin.app);
     this.scanResults = [];
@@ -3948,27 +4039,15 @@ var ResearchView = class extends import_obsidian8.ItemView {
       this.filterValue = e.target.value.toLowerCase();
       this.renderContent();
     };
-    if (this.plugin.settings.enableColorPalette) {
-      const filterContainer = header.createDiv({ cls: "research-view-color-filters" });
-      this.plugin.settings.semanticColors.forEach((colorItem) => {
-        if (!colorItem.meaning) return;
-        const chip = filterContainer.createEl("button", {
-          cls: "research-color-chip"
-        });
-        this.colorDot(chip, colorItem.color);
-        chip.createSpan({ text: colorItem.meaning });
-        chip.onclick = () => {
-          if (this.activeColors.has(colorItem.color)) {
-            this.activeColors.delete(colorItem.color);
-            chip.removeClass("is-active");
-          } else {
-            this.activeColors.add(colorItem.color);
-            chip.addClass("is-active");
-          }
-          this.renderContent();
-        };
-      });
-    }
+    this.colorFilterEl = header.createDiv({ cls: "research-view-color-filters" });
+    const tagRow = header.createDiv({ cls: "research-view-tag-filter" });
+    const tagInput = tagRow.createEl("input", {
+      type: "text",
+      placeholder: "Filter by tag...",
+      cls: "research-tag-input"
+    });
+    new TagFilterSuggest(this.app, tagInput, this);
+    this.tagChipsEl = tagRow.createDiv({ cls: "research-tag-chips" });
     this.progressContainer = header.createDiv({
       cls: "research-progress-container",
       attr: { style: "display: none;" }
@@ -4013,8 +4092,131 @@ var ResearchView = class extends import_obsidian8.ItemView {
     } finally {
       this.isScanning = false;
       this.progressContainer.setCssStyles({ display: "none" });
+      this.renderColorFilters();
+      this.renderTagFilter();
       this.renderContent();
     }
+  }
+  /**
+   * Every tag found on a highlight, with its parents, so that `#frases` can
+   * be chosen when only `#frases/poesía` is written; and highlights without
+   * tags. Most used first.
+   */
+  tagOptions() {
+    var _a;
+    const highlights = this.collectHighlights();
+    const counts = /* @__PURE__ */ new Map();
+    let untagged = 0;
+    for (const h of highlights) {
+      const original = String(h.tagsText || "").split(/\s+/).filter((token) => token.startsWith("#") && token.length > 1);
+      if (!original.length) untagged++;
+      const keys = /* @__PURE__ */ new Map();
+      for (const tag of original) {
+        const parts = tag.split("/");
+        for (let i = 1; i <= parts.length; i++) {
+          const label = parts.slice(0, i).join("/");
+          keys.set(label.toLowerCase(), label);
+        }
+      }
+      for (const [key, label] of keys) {
+        const entry = (_a = counts.get(key)) != null ? _a : { label, count: 0 };
+        entry.count++;
+        counts.set(key, entry);
+      }
+    }
+    const options = [...counts].map(([key, { label, count }]) => ({ key, label, count }));
+    options.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    if (untagged) options.push({ key: UNTAGGED, label: "Untagged", count: untagged });
+    return options;
+  }
+  addTagFilter(key) {
+    this.activeTags.add(key);
+    this.renderTagFilter();
+    this.renderContent();
+  }
+  /** The chips for the tags chosen; a chip removes its tag when clicked. */
+  renderTagFilter() {
+    var _a, _b, _c, _d;
+    const el = this.tagChipsEl;
+    if (!el) return;
+    el.empty();
+    const options = new Map(this.tagOptions().map((option) => [option.key, option]));
+    for (const key of [...this.activeTags]) if (!options.has(key)) this.activeTags.delete(key);
+    for (const key of this.activeTags) {
+      const chip = el.createEl("button", { cls: "research-tag-chip is-active" });
+      chip.createSpan({ text: (_b = (_a = options.get(key)) == null ? void 0 : _a.label) != null ? _b : key });
+      chip.createSpan({ cls: "research-tag-chip-remove", text: "\xD7" });
+      chip.setAttribute("aria-label", `Remove ${(_d = (_c = options.get(key)) == null ? void 0 : _c.label) != null ? _d : key}`);
+      chip.onclick = () => {
+        this.activeTags.delete(key);
+        this.renderTagFilter();
+        this.renderContent();
+      };
+    }
+  }
+  /**
+   * Whether a highlight passes the tag filter: none chosen passes all;
+   * otherwise any chosen tag, or one nested under it, or Untagged for a
+   * highlight with none.
+   */
+  matchesTagFilter(h) {
+    if (this.activeTags.size === 0) return true;
+    const tags = highlightTags(h);
+    if (!tags.length) return this.activeTags.has(UNTAGGED);
+    return tags.some(
+      (tag) => [...this.activeTags].some((filter) => filter !== UNTAGGED && tagMatches(tag, filter))
+    );
+  }
+  /** Search matches the highlighted text and the highlight's tags. */
+  matchesSearch(h) {
+    if (!this.searchQuery) return true;
+    return h.text.toLowerCase().includes(this.searchQuery) || highlightTags(h).some((tag) => tag.includes(this.searchQuery));
+  }
+  /** The highlights every filter lets through: properties, search, colour and tag. */
+  filteredHighlights() {
+    return this.applyPropertyFilter(this.collectHighlights()).filter(
+      (h) => this.matchesSearch(h) && this.matchesColorFilter(h) && this.matchesTagFilter(h)
+    );
+  }
+  /**
+   * One chip per colour the scan found, labelled with its meaning when it has
+   * one, and one for highlights in the theme's default colour. Built from the
+   * highlights, not the settings: a colour without a meaning, or with the
+   * toolbar's palette switched off, is still something to filter by.
+   */
+  renderColorFilters() {
+    const el = this.colorFilterEl;
+    if (!el) return;
+    el.empty();
+    const found = new Set(this.collectHighlights().map((h) => {
+      var _a;
+      return (_a = h.color) != null ? _a : "plain";
+    }));
+    for (const key of [...this.activeColors]) if (!found.has(key)) this.activeColors.delete(key);
+    for (const key of [...HIGHLIGHT_COLORS, "plain"]) {
+      if (!found.has(key)) continue;
+      const chip = el.createEl("button", { cls: "research-color-chip" });
+      chip.toggleClass("is-active", this.activeColors.has(key));
+      this.colorDot(chip, key);
+      chip.createSpan({ text: this.colorFilterLabel(key) });
+      chip.onclick = () => {
+        if (this.activeColors.has(key)) this.activeColors.delete(key);
+        else this.activeColors.add(key);
+        chip.toggleClass("is-active", this.activeColors.has(key));
+        this.renderContent();
+      };
+    }
+  }
+  colorFilterLabel(key) {
+    var _a, _b;
+    if (key === "plain") return "Theme default";
+    const meaning = (_b = (_a = this.plugin.settings.semanticColors.find((c) => c.color === key)) == null ? void 0 : _a.meaning) == null ? void 0 : _b.trim();
+    return meaning || COLOR_LABELS[key];
+  }
+  /** Whether a highlight passes the colour filter; none chosen passes all. */
+  matchesColorFilter(h) {
+    var _a;
+    return this.activeColors.size === 0 || this.activeColors.has((_a = h.color) != null ? _a : "plain");
   }
   updatePropertySelector() {
     if (!this.propertySelect) return;
@@ -4072,15 +4274,8 @@ var ResearchView = class extends import_obsidian8.ItemView {
       });
       return;
     }
-    let allHighlights = this.collectHighlights();
-    const totalHighlights = allHighlights.length;
-    allHighlights = this.applyPropertyFilter(allHighlights);
-    if (this.searchQuery) {
-      allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
-    }
-    if (this.activeColors.size > 0) {
-      allHighlights = allHighlights.filter((h) => h.color !== null && this.activeColors.has(h.color));
-    }
+    const totalHighlights = this.collectHighlights().length;
+    const allHighlights = this.filteredHighlights();
     const statsRow = this.contentEl.createDiv({ cls: "research-stats" });
     if (this.searchQuery) {
       const fileMap = /* @__PURE__ */ new Map();
@@ -4152,14 +4347,7 @@ var ResearchView = class extends import_obsidian8.ItemView {
   }
   async exportToCanvas() {
     if (this.isScanning) return;
-    let allHighlights = this.collectHighlights();
-    allHighlights = this.applyPropertyFilter(allHighlights);
-    if (this.searchQuery) {
-      allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
-    }
-    if (this.activeColors.size > 0) {
-      allHighlights = allHighlights.filter((h) => h.color !== null && this.activeColors.has(h.color));
-    }
+    const allHighlights = this.filteredHighlights();
     if (allHighlights.length === 0) {
       this.plugin.notify("No highlights to export to canvas.");
       return;
@@ -4831,7 +5019,6 @@ var DEFAULT_SETTINGS = {
   enableSmartTagSuggestions: true,
   recentTags: [],
   maxRecentTags: 10,
-  showNavigatorButton: true,
   showTooltips: false,
   enableFrontmatterTag: false,
   frontmatterTag: "resaltados",
@@ -6048,7 +6235,9 @@ ${appendString}`;
    * every line of the selection, so a quote of several lines stays one
    * blockquote. The selection used to arrive already quoted, which with the
    * default template nested its first line one level deeper (`> > `). A
-   * template with no `>` before `{{text}}` still gets each line quoted.
+   * template with `{{text}}` alone at the start of a line still gets each line
+   * quoted; one quoting it inline, such as `«{{text}}»`, gets the text as it
+   * is, without a `>` inside its quotation marks.
    */
   expandQuoteTemplate(file, text, frontmatter = {}) {
     const sourceUrl = toDisplayString(frontmatter.url || frontmatter.source || frontmatter.link).replace(
@@ -6070,6 +6259,7 @@ ${appendString}`;
     return this.settings.quoteTemplate.replace(/{{(file|path|date|time|domain|author)}}/g, (_match, key) => variables[key] || "").replace(/^(.*?){{text}}/gm, (_match, prefix) => {
       if (/>\s*$/.test(prefix)) return prefix + lines.join(`
 ${prefix}`);
+      if (prefix.trim()) return prefix + lines.join("\n");
       return prefix + lines.map((line) => `> ${line}`).join("\n");
     });
   }

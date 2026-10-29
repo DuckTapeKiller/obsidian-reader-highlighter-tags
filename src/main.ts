@@ -100,7 +100,6 @@ interface ReadingHighlighterSettings {
     enableSmartTagSuggestions: boolean;
     recentTags: string[];
     maxRecentTags: number;
-    showNavigatorButton: boolean;
     showTooltips: boolean;
     enableFrontmatterTag: boolean;
     frontmatterTag: string;
@@ -133,7 +132,6 @@ const DEFAULT_SETTINGS: ReadingHighlighterSettings = {
     enableSmartTagSuggestions: true,
     recentTags: [],
     maxRecentTags: 10,
-    showNavigatorButton: true,
     showTooltips: false,
     enableFrontmatterTag: false,
     frontmatterTag: "resaltados",
@@ -1598,7 +1596,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
      * every line of the selection, so a quote of several lines stays one
      * blockquote. The selection used to arrive already quoted, which with the
      * default template nested its first line one level deeper (`> > `). A
-     * template with no `>` before `{{text}}` still gets each line quoted.
+     * template with `{{text}}` alone at the start of a line still gets each line
+     * quoted; one quoting it inline, such as `«{{text}}»`, gets the text as it
+     * is, without a `>` inside its quotation marks.
      */
     expandQuoteTemplate(file: TFile, text: string, frontmatter: Record<string, unknown> = {}) {
         const sourceUrl = toDisplayString(frontmatter.url || frontmatter.source || frontmatter.link).replace(
@@ -1621,6 +1621,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             .replace(/{{(file|path|date|time|domain|author)}}/g, (_match: string, key: string) => variables[key] || "")
             .replace(/^(.*?){{text}}/gm, (_match: string, prefix: string) => {
                 if (/>\s*$/.test(prefix)) return prefix + lines.join(`\n${prefix}`);
+                if (prefix.trim()) return prefix + lines.join("\n");
                 return prefix + lines.map((line) => `> ${line}`).join("\n");
             });
     }

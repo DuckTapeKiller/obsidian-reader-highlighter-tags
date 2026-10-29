@@ -113,15 +113,14 @@ export class FloatingManager {
      * filtered.
      *
      * With "only show colours with a meaning" on, colours left unnamed are
-     * hidden — a reader using a seven-colour taxonomy should not have to pick
-     * past eight unused swatches. If nothing has been named yet, every colour is
-     * shown rather than an empty palette that looks broken.
+     * hidden, so a reader sees only the colours they use. With none named, no
+     * colour is shown: the setting says so, and showing all six instead put
+     * colours on the toolbar that the reader had asked to hide.
      */
     visiblePaletteColors(): { item: SemanticColor; index: number }[] {
         const all = this.plugin.settings.semanticColors.map((item, index) => ({ item, index }));
         if (!this.plugin.settings.showOnlyAssignedColors) return all;
-        const named = all.filter(({ item }) => (item.meaning || "").trim().length > 0);
-        return named.length > 0 ? named : all;
+        return all.filter(({ item }) => (item.meaning || "").trim().length > 0);
     }
 
     /**
@@ -138,6 +137,18 @@ export class FloatingManager {
     createElements() {
         if (this.containerEl) return;
 
+        // Forget the previous toolbar's parts. Kept after a settings change,
+        // the old palette made a toolbar without one still draw the separator
+        // that follows it.
+        this.highlightBtn = null;
+        this.tagBtn = null;
+        this.removeBtn = null;
+        this.quoteBtn = null;
+        this.annotateBtn = null;
+        this.extractAllBtn = null;
+        this.paletteContainer = null;
+        this.colorButtons = [];
+
         const doc = this.targetDocument();
         // Created through the target document's own body, so the toolbar lands
         // in the window holding the note rather than whichever has focus.
@@ -149,10 +160,13 @@ export class FloatingManager {
         this.highlightBtn = this.createButton("highlighter", "Highlight selection");
 
         // Obsidian's native highlight colours (only if enabled)
-        if (this.plugin.settings.enableColorPalette) {
+        // No palette at all when no colour is to be shown, rather than an empty
+        // row with a separator after it.
+        const paletteColors = this.plugin.settings.enableColorPalette ? this.visiblePaletteColors() : [];
+        if (paletteColors.length > 0) {
             this.paletteContainer = this.containerEl.createDiv({ cls: "reading-highlighter-palette" });
 
-            for (const { item, index } of this.visiblePaletteColors()) {
+            for (const { item, index } of paletteColors) {
                 const colorBtn = this.paletteContainer.createEl("button", {
                     cls: "clickable-icon reading-highlighter-btn reading-highlighter-color-btn",
                 });

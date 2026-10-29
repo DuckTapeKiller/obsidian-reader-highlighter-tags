@@ -34,7 +34,8 @@ const palette = (meanings) => meanings.map((meaning, i) => ({ color: COLORS[i], 
 
 describe("toolbar palette swatches", () => {
     it("draws each button as the native colour it applies, with its name as the label", () => {
-        const { manager } = makeManager(palette(["", "", "", "", "", ""]), true);
+        // All six shown: no meanings, and the option to hide unnamed ones off.
+        const { manager } = makeManager(palette(["", "", "", "", "", ""]), false);
         manager.createElements();
         const buttons = [...manager.paletteContainer.querySelectorAll("button")];
         expect(
@@ -78,9 +79,18 @@ describe("toolbar palette filtering", () => {
         expect(manager.visiblePaletteColors()).toHaveLength(8);
     });
 
-    it("shows every colour when nothing has been named yet", () => {
+    it("shows no colour when none has a meaning", () => {
         const { manager } = makeManager(palette(["", "", ""]), true);
-        expect(manager.visiblePaletteColors()).toHaveLength(3);
+        expect(manager.visiblePaletteColors()).toHaveLength(0);
+    });
+
+    it("draws no palette and no separator when no colour is shown", () => {
+        const { manager } = makeManager(palette(["", "", "", "", "", ""]), true);
+        manager.createElements();
+        expect(manager.paletteContainer).toBeNull();
+        expect(manager.containerEl.querySelector(".reading-highlighter-palette")).toBeNull();
+        expect(manager.containerEl.querySelector(".reading-highlighter-separator")).toBeNull();
+        expect(manager.colorButtons).toHaveLength(0);
     });
 
     it("ignores whitespace-only meanings", () => {
@@ -112,5 +122,18 @@ describe("toolbar palette filtering", () => {
         const buttons = [...manager.paletteContainer.querySelectorAll("button")];
         buttons[5].dispatchEvent(new window.Event("mousedown", { bubbles: true, cancelable: true }));
         expect(applied).toEqual([5]);
+    });
+});
+
+describe("toolbar rebuilt after a settings change", () => {
+    it("drops the separator when the palette is switched off", () => {
+        const { manager } = makeManager(palette(["Uno", "", "", "", "", ""]), true);
+        manager.plugin.settings.showTagButton = true;
+        manager.createElements();
+        expect(manager.containerEl.querySelector(".reading-highlighter-separator")).not.toBeNull();
+        manager.plugin.settings.enableColorPalette = false;
+        manager.refresh();
+        expect(manager.containerEl.querySelector(".reading-highlighter-palette")).toBeNull();
+        expect(manager.containerEl.querySelector(".reading-highlighter-separator")).toBeNull();
     });
 });

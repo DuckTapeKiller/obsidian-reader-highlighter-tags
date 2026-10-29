@@ -176,7 +176,7 @@ Switch between **Highlights**, **Footnotes** and **Both**. The **⋯** button on
 
 ## Global research view
 
-The research view gathers every highlight in your vault in one list. Search their text, filter by any property in your notes' frontmatter, and toggle the colours you have given meanings. Click a highlight to open the note at that spot.
+The research view gathers every highlight in your vault in one list. Search their text, filter by any property in your notes' frontmatter, filter by colour: one chip for each colour your highlights use, named after its meaning when it has one, plus one for highlights in the theme's default colour; and filter by the tags written in front of your highlights: type to pick one or more, nested tags included, or _Untagged_. Search also finds a highlight by its tags. Click a highlight to open the note at that spot.
 
 ![The research view filtered to author Thoreau and the colour Key idea, showing one highlight out of ten.](https://raw.githubusercontent.com/DuckTapeKiller/obsidian-reader-highlighter-tags/main/docs/images/research-filtered.webp)
 
@@ -257,7 +257,7 @@ Every action is a command, so you can give it a hotkey in **Settings → Hotkeys
 | Toolbar position                           | Fixed right side | Next to the text, or fixed at the top, bottom, left or right                                        |
 | Highlight colour                           | Theme default    | The colour the highlighter writes                                                                   |
 | Show colour palette                        | Off              | Shows the six colours in the toolbar                                                                |
-| Only show colours with a meaning           | On               | Hides colours you haven't named; shows all six until you name one                                   |
+| Only show colours with a meaning           | On               | Hides colours you haven't named; with none named, the toolbar shows no colours                      |
 | Colour meanings                            | None             | A name for each colour, shown on hover and used as research filters; the empty fields show examples |
 | Default tag prefix                         | None             | A tag added in front of every highlight                                                             |
 | Smart tag suggestions                      | On               | Suggests recent tags and tags from the note's folder and frontmatter                                |

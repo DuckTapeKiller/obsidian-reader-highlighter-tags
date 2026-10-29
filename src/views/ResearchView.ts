@@ -1,13 +1,74 @@
-import { ItemView, MarkdownView, WorkspaceLeaf, TFile } from "obsidian";
+import { AbstractInputSuggest, App, ItemView, MarkdownView, WorkspaceLeaf, TFile } from "obsidian";
 import type ReadingHighlighterPlugin from "../main";
 import { VaultScanner, type ScanResult } from "../core/VaultScanner";
 import { exportHighlightsToCanvas } from "../utils/canvas";
 import type { Highlight } from "../utils/highlights";
-import type { HighlightColor } from "../utils/colors";
+import { COLOR_LABELS, HIGHLIGHT_COLORS, type HighlightColor } from "../utils/colors";
 
 export const RESEARCH_VIEW = "reader-research-view";
 
 type ResearchHighlight = Highlight & { file: TFile; frontmatter: Record<string, unknown> };
+
+/** A colour filter: one of the native colours, or highlights with none. */
+type ColorFilter = HighlightColor | "plain";
+
+/** The filter for highlights without tags; a tag always starts with `#`. */
+const UNTAGGED = "untagged";
+
+/** A tag to filter by, as offered while typing. */
+interface TagOption {
+    /** Lower case with its `#`, or `UNTAGGED`. */
+    key: string;
+    label: string;
+    count: number;
+}
+
+/**
+ * The tags written in front of a highlight, which is where the Tag button and
+ * the tag prefix put them: lower case, each with its `#`. Obsidian's tags
+ * ignore case.
+ */
+export function highlightTags(h: Highlight): string[] {
+    return String(h.tagsText || "")
+        .split(/\s+/)
+        .filter((token) => token.startsWith("#") && token.length > 1)
+        .map((token) => token.toLowerCase());
+}
+
+/** Whether `tag` is `filter` or nested under it, as `#frases/poesía` under `#frases`. */
+export function tagMatches(tag: string, filter: string): boolean {
+    return tag === filter || tag.startsWith(`${filter}/`);
+}
+
+/** Suggests the tags found on highlights while typing in the tag filter. */
+export class TagFilterSuggest extends AbstractInputSuggest<TagOption> {
+    view: ResearchView;
+
+    constructor(app: App, inputEl: HTMLInputElement, view: ResearchView) {
+        super(app, inputEl);
+        this.view = view;
+    }
+
+    protected getSuggestions(query: string): TagOption[] {
+        const q = query.trim().toLowerCase().replace(/^#/, "");
+        return this.view
+            .tagOptions()
+            .filter((option) => !this.view.activeTags.has(option.key))
+            .filter((option) => !q || option.label.toLowerCase().replace(/^#/, "").includes(q));
+    }
+
+    renderSuggestion(option: TagOption, el: HTMLElement) {
+        el.addClass("research-tag-suggestion");
+        el.createSpan({ text: option.label });
+        el.createSpan({ cls: "research-tag-count", text: String(option.count) });
+    }
+
+    selectSuggestion(option: TagOption) {
+        this.setValue("");
+        this.close();
+        this.view.addTagFilter(option.key);
+    }
+}
 
 /**
  * Stringify a value that may be anything. Objects have no useful string form —
@@ -29,7 +90,10 @@ export class ResearchView extends ItemView {
     filterKey: string;
     filterValue: string;
     allPropertyKeys: Set<string>;
-    activeColors: Set<HighlightColor>;
+    activeColors: Set<ColorFilter>;
+    activeTags: Set<string> = new Set();
+    tagChipsEl: HTMLElement | null = null;
+    colorFilterEl: HTMLElement | null = null;
     isScanning: boolean;
     expandedFiles: Set<string>;
     progressEl: HTMLElement | null;
@@ -122,33 +186,19 @@ export class ResearchView extends ItemView {
             this.renderContent();
         };
 
-        // Semantic Color Filters
-        if (this.plugin.settings.enableColorPalette) {
-            const filterContainer = header.createDiv({ cls: "research-view-color-filters" });
-            this.plugin.settings.semanticColors.forEach((colorItem) => {
-                if (!colorItem.meaning) return; // Only show colors that have a meaning defined
+        // Colour filters: filled in from the highlights each scan finds.
+        this.colorFilterEl = header.createDiv({ cls: "research-view-color-filters" });
 
-                const chip = filterContainer.createEl("button", {
-                    cls: "research-color-chip",
-                });
-
-                // Dot indicator
-                this.colorDot(chip, colorItem.color);
-
-                chip.createSpan({ text: colorItem.meaning });
-
-                chip.onclick = () => {
-                    if (this.activeColors.has(colorItem.color)) {
-                        this.activeColors.delete(colorItem.color);
-                        chip.removeClass("is-active");
-                    } else {
-                        this.activeColors.add(colorItem.color);
-                        chip.addClass("is-active");
-                    }
-                    this.renderContent();
-                };
-            });
-        }
+        // Tag filter: the tags written in front of highlights, offered as you
+        // type; each one chosen becomes a chip that removes it.
+        const tagRow = header.createDiv({ cls: "research-view-tag-filter" });
+        const tagInput = tagRow.createEl("input", {
+            type: "text",
+            placeholder: "Filter by tag...",
+            cls: "research-tag-input",
+        });
+        new TagFilterSuggest(this.app, tagInput, this);
+        this.tagChipsEl = tagRow.createDiv({ cls: "research-tag-chips" });
 
         // Progress bar container (hidden by default)
         this.progressContainer = header.createDiv({
@@ -205,8 +255,141 @@ export class ResearchView extends ItemView {
         } finally {
             this.isScanning = false;
             this.progressContainer.setCssStyles({ display: "none" });
+            this.renderColorFilters();
+            this.renderTagFilter();
             this.renderContent();
         }
+    }
+
+    /**
+     * Every tag found on a highlight, with its parents, so that `#frases` can
+     * be chosen when only `#frases/poesía` is written; and highlights without
+     * tags. Most used first.
+     */
+    tagOptions(): TagOption[] {
+        const highlights = this.collectHighlights();
+        const counts = new Map<string, { label: string; count: number }>();
+        let untagged = 0;
+        for (const h of highlights) {
+            const original = String(h.tagsText || "")
+                .split(/\s+/)
+                .filter((token) => token.startsWith("#") && token.length > 1);
+            if (!original.length) untagged++;
+            const keys = new Map<string, string>();
+            for (const tag of original) {
+                const parts = tag.split("/");
+                for (let i = 1; i <= parts.length; i++) {
+                    const label = parts.slice(0, i).join("/");
+                    keys.set(label.toLowerCase(), label);
+                }
+            }
+            // A highlight counts once per tag, however many of its tags nest under it.
+            for (const [key, label] of keys) {
+                const entry = counts.get(key) ?? { label, count: 0 };
+                entry.count++;
+                counts.set(key, entry);
+            }
+        }
+        const options: TagOption[] = [...counts].map(([key, { label, count }]) => ({ key, label, count }));
+        options.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+        if (untagged) options.push({ key: UNTAGGED, label: "Untagged", count: untagged });
+        return options;
+    }
+
+    addTagFilter(key: string) {
+        this.activeTags.add(key);
+        this.renderTagFilter();
+        this.renderContent();
+    }
+
+    /** The chips for the tags chosen; a chip removes its tag when clicked. */
+    renderTagFilter() {
+        const el = this.tagChipsEl;
+        if (!el) return;
+        el.empty();
+        const options = new Map(this.tagOptions().map((option) => [option.key, option]));
+        // A tag the scan no longer finds would hide everything.
+        for (const key of [...this.activeTags]) if (!options.has(key)) this.activeTags.delete(key);
+        for (const key of this.activeTags) {
+            const chip = el.createEl("button", { cls: "research-tag-chip is-active" });
+            chip.createSpan({ text: options.get(key)?.label ?? key });
+            chip.createSpan({ cls: "research-tag-chip-remove", text: "×" });
+            chip.setAttribute("aria-label", `Remove ${options.get(key)?.label ?? key}`);
+            chip.onclick = () => {
+                this.activeTags.delete(key);
+                this.renderTagFilter();
+                this.renderContent();
+            };
+        }
+    }
+
+    /**
+     * Whether a highlight passes the tag filter: none chosen passes all;
+     * otherwise any chosen tag, or one nested under it, or Untagged for a
+     * highlight with none.
+     */
+    matchesTagFilter(h: Highlight): boolean {
+        if (this.activeTags.size === 0) return true;
+        const tags = highlightTags(h);
+        if (!tags.length) return this.activeTags.has(UNTAGGED);
+        return tags.some((tag) =>
+            [...this.activeTags].some((filter) => filter !== UNTAGGED && tagMatches(tag, filter))
+        );
+    }
+
+    /** Search matches the highlighted text and the highlight's tags. */
+    matchesSearch(h: Highlight): boolean {
+        if (!this.searchQuery) return true;
+        return (
+            h.text.toLowerCase().includes(this.searchQuery) ||
+            highlightTags(h).some((tag) => tag.includes(this.searchQuery))
+        );
+    }
+
+    /** The highlights every filter lets through: properties, search, colour and tag. */
+    filteredHighlights(): ResearchHighlight[] {
+        return this.applyPropertyFilter(this.collectHighlights()).filter(
+            (h) => this.matchesSearch(h) && this.matchesColorFilter(h) && this.matchesTagFilter(h)
+        );
+    }
+
+    /**
+     * One chip per colour the scan found, labelled with its meaning when it has
+     * one, and one for highlights in the theme's default colour. Built from the
+     * highlights, not the settings: a colour without a meaning, or with the
+     * toolbar's palette switched off, is still something to filter by.
+     */
+    renderColorFilters() {
+        const el = this.colorFilterEl;
+        if (!el) return;
+        el.empty();
+        const found = new Set<ColorFilter>(this.collectHighlights().map((h) => h.color ?? "plain"));
+        // A filter for a colour the scan no longer finds would hide everything.
+        for (const key of [...this.activeColors]) if (!found.has(key)) this.activeColors.delete(key);
+        for (const key of [...HIGHLIGHT_COLORS, "plain"] as ColorFilter[]) {
+            if (!found.has(key)) continue;
+            const chip = el.createEl("button", { cls: "research-color-chip" });
+            chip.toggleClass("is-active", this.activeColors.has(key));
+            this.colorDot(chip, key);
+            chip.createSpan({ text: this.colorFilterLabel(key) });
+            chip.onclick = () => {
+                if (this.activeColors.has(key)) this.activeColors.delete(key);
+                else this.activeColors.add(key);
+                chip.toggleClass("is-active", this.activeColors.has(key));
+                this.renderContent();
+            };
+        }
+    }
+
+    colorFilterLabel(key: ColorFilter): string {
+        if (key === "plain") return "Theme default";
+        const meaning = this.plugin.settings.semanticColors.find((c) => c.color === key)?.meaning?.trim();
+        return meaning || COLOR_LABELS[key];
+    }
+
+    /** Whether a highlight passes the colour filter; none chosen passes all. */
+    matchesColorFilter(h: Highlight): boolean {
+        return this.activeColors.size === 0 || this.activeColors.has(h.color ?? "plain");
     }
 
     updatePropertySelector() {
@@ -278,22 +461,8 @@ export class ResearchView extends ItemView {
             return;
         }
 
-        // Collect all highlights with file reference
-        let allHighlights = this.collectHighlights();
-        const totalHighlights = allHighlights.length;
-
-        // Apply property filter
-        allHighlights = this.applyPropertyFilter(allHighlights);
-
-        // Apply search filter
-        if (this.searchQuery) {
-            allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
-        }
-
-        // Apply color filter
-        if (this.activeColors.size > 0) {
-            allHighlights = allHighlights.filter((h) => h.color !== null && this.activeColors.has(h.color));
-        }
+        const totalHighlights = this.collectHighlights().length;
+        const allHighlights = this.filteredHighlights();
 
         // Stats summary
         const statsRow = this.contentEl.createDiv({ cls: "research-stats" });
@@ -376,7 +545,7 @@ export class ResearchView extends ItemView {
     }
 
     /** A dot in the native colour, drawn from the theme's own colour variables. */
-    colorDot(parent: HTMLElement, color: HighlightColor) {
+    colorDot(parent: HTMLElement, color: ColorFilter) {
         parent.createSpan({
             cls: "research-color-dot highlight-swatch reading-highlighter-swatch",
             attr: { "data-highlight": color },
@@ -399,16 +568,7 @@ export class ResearchView extends ItemView {
     async exportToCanvas() {
         if (this.isScanning) return;
 
-        let allHighlights = this.collectHighlights();
-        allHighlights = this.applyPropertyFilter(allHighlights);
-
-        if (this.searchQuery) {
-            allHighlights = allHighlights.filter((h) => h.text.toLowerCase().includes(this.searchQuery));
-        }
-
-        if (this.activeColors.size > 0) {
-            allHighlights = allHighlights.filter((h) => h.color !== null && this.activeColors.has(h.color));
-        }
+        const allHighlights = this.filteredHighlights();
 
         if (allHighlights.length === 0) {
             this.plugin.notify("No highlights to export to canvas.");

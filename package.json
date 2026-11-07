@@ -1,6 +1,6 @@
 {
     "name": "reader-highlighter-tags",
-    "version": "2.0.6",
+    "version": "2.0.7",
     "description": "Highlight text in Reading View",
     "main": "main.js",
     "scripts": {
@@ -31,7 +31,7 @@
         "esbuild": "^0.28.0",
         "eslint": "^9.39.2",
         "eslint-config-prettier": "^10.1.8",
-        "eslint-plugin-obsidianmd": "^0.4.2",
+        "eslint-plugin-obsidianmd": "^0.5.1",
         "globals": "^17.13.0",
         "jsdom": "^30.0.1",
         "obsidian": "^1.13.1",

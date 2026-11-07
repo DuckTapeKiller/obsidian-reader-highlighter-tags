@@ -126,10 +126,12 @@ export class FailureRecoveryModal extends Modal {
         const rule = this.deriveRule(this.report.rawSnippet, this.target());
         if (rule.error) {
             container.setText(`📝 Note: Highlight will apply, but no rule learned (Reason: ${rule.error})`);
-            container.setCssStyles({ color: "var(--text-muted)" });
+            container.removeClass("recovery-rule-preview-learn");
+            container.addClass("recovery-rule-preview-note");
         } else {
             container.setText(`✨ Diagnostic: Will learn to ignore "${rule.stripPattern}"`);
-            container.setCssStyles({ color: "var(--text-success)" });
+            container.removeClass("recovery-rule-preview-note");
+            container.addClass("recovery-rule-preview-learn");
         }
     }
 

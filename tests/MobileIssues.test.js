@@ -161,7 +161,9 @@ async function toolbar() {
         sel.addRange(range);
         doc.dispatchEvent(new window.Event("selectionchange"));
     };
-    const visible = () => plugin.floatingManager.containerEl?.style.display === "flex";
+    const visible = () =>
+        plugin.floatingManager.containerEl?.isConnected === true &&
+        plugin.floatingManager.containerEl.style.display !== "none";
     return { select, visible, plugin, doc, window };
 }
 

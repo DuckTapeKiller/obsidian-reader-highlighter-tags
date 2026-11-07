@@ -21,6 +21,7 @@ body .reading-highlighter-float-container {
     --icon-size: var(--icon-m, 18px);
     position: fixed;
     z-index: var(--layer-menu);
+    display: flex;
     flex-direction: row;
     align-items: center;
     gap: var(--size-2-1);
@@ -28,6 +29,32 @@ body .reading-highlighter-float-container {
     max-height: none;
     max-width: none;
     overflow: visible;
+}
+
+/* The fixed places of the "Toolbar position" setting. "Next to text" is set
+   from the selection's position instead. */
+body .reading-highlighter-float-container.reading-highlighter-pos-top {
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+body .reading-highlighter-float-container.reading-highlighter-pos-bottom {
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+body .reading-highlighter-float-container.reading-highlighter-pos-left {
+    top: 50%;
+    left: 10px;
+    transform: translateY(-50%);
+}
+
+body .reading-highlighter-float-container.reading-highlighter-pos-right {
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
 }
 
 body.is-phone .reading-highlighter-float-container {
@@ -552,6 +579,8 @@ body .highlight-navigator-container .highlight-navigator-list {
 }
 
 .footnote-id {
+    margin-right: 5px;
+    color: var(--text-muted);
     font-size: 0.85em;
     font-weight: 600;
 }
@@ -1227,6 +1256,14 @@ body.is-mobile .research-view-container {
     font-size: 0.9em;
 }
 
+.recovery-rule-preview.recovery-rule-preview-note {
+    color: var(--text-muted);
+}
+
+.recovery-rule-preview.recovery-rule-preview-learn {
+    color: var(--text-success);
+}
+
 .recovery-instruction {
     margin-top: 20px;
     margin-bottom: 8px;
@@ -1422,4 +1459,100 @@ body .reading-highlighter-float-container.is-pdf-view button.markdown-only-btn {
 .research-tag-count {
     color: var(--text-muted);
     font-size: var(--font-ui-smaller);
+}
+
+/* === Settings: support ===
+   The Ko-fi card fills its settings row. Everything reads Obsidian's theme
+   variables, so the card follows the theme, light or dark. */
+.setting-item.rht-support-row {
+    display: block;
+}
+
+.rht-support {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--size-4-2);
+    margin: var(--size-4-4) 0 var(--size-4-2);
+    padding: var(--size-4-6) var(--size-4-4);
+    border: var(--border-width) solid var(--background-modifier-border);
+    border-radius: var(--radius-l);
+    background-color: var(--background-secondary);
+    text-align: center;
+}
+
+.rht-support-icon {
+    display: inline-flex;
+    color: var(--color-red);
+}
+
+.rht-support-icon svg {
+    width: var(--icon-xl);
+    height: var(--icon-xl);
+    fill: currentColor;
+}
+
+.rht-support-title {
+    font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold);
+    color: var(--text-normal);
+}
+
+.rht-support p {
+    max-width: 34em;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    line-height: var(--line-height-normal);
+}
+
+.rht-support-nowrap {
+    white-space: nowrap;
+}
+
+.rht-support-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    margin-top: var(--size-4-2);
+    padding: var(--size-4-2) var(--size-4-4);
+    border-radius: var(--radius-m);
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    font-weight: var(--font-semibold);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.rht-support-button:hover {
+    background-color: var(--interactive-accent-hover);
+    color: var(--text-on-accent);
+}
+
+.rht-support-button-icon {
+    display: inline-flex;
+}
+
+.rht-support-button-icon svg {
+    width: var(--icon-s);
+    height: var(--icon-s);
+}
+
+/* The issues link looks like Obsidian's own buttons in a settings row. */
+.rht-support-link {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--size-4-1) var(--size-4-3);
+    border-radius: var(--button-radius);
+    background-color: var(--interactive-normal);
+    box-shadow: var(--input-shadow);
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.rht-support-link:hover {
+    background-color: var(--interactive-hover);
+    color: var(--text-normal);
 }

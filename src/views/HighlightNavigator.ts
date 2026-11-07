@@ -333,7 +333,6 @@ export class HighlightNavigatorView extends ItemView {
                 idSpan.textContent =
                     footnote.displayNumber != null ? `${footnote.displayNumber} ` : `[^${footnote.id}] `;
                 idSpan.setAttribute("title", `[^${footnote.id}]`);
-                idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
             }
 
             const textSpan = el.createSpan({ cls: "highlight-text" });

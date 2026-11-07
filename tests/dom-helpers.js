@@ -74,9 +74,29 @@ export function polyfillObsidianDom(window) {
         this.remove();
         return this;
     };
+    Element.prototype.addClasses = function (classes) {
+        this.classList.add(...classes.filter(Boolean));
+    };
+    Element.prototype.removeClasses = function (classes) {
+        this.classList.remove(...classes.filter(Boolean));
+    };
     HTMLElement.prototype.setCssStyles = function (styles) {
         for (const [key, value] of Object.entries(styles || {})) this.style[key] = value;
         return this;
+    };
+    // As Obsidian does it: hide() keeps an inline display to put back, show()
+    // restores it, or clears the inline value so the stylesheet decides.
+    HTMLElement.prototype.hide = function () {
+        const display = this.style.display;
+        if (display === "none") return;
+        this.style.display = "none";
+        if (display) this.setAttribute("data-display", display);
+        else this.removeAttribute("data-display");
+    };
+    HTMLElement.prototype.show = function () {
+        if (this.style.display !== "none") return;
+        this.style.display = this.getAttribute("data-display") || "";
+        this.removeAttribute("data-display");
     };
     const createEl = function (tag, opts = {}) {
         const el = this.ownerDocument.createElement(tag);

@@ -201,10 +201,8 @@ export class ResearchView extends ItemView {
         this.tagChipsEl = tagRow.createDiv({ cls: "research-tag-chips" });
 
         // Progress bar container (hidden by default)
-        this.progressContainer = header.createDiv({
-            cls: "research-progress-container",
-            attr: { style: "display: none;" },
-        });
+        this.progressContainer = header.createDiv({ cls: "research-progress-container" });
+        this.progressContainer.hide();
         this.progressTextEl = this.progressContainer.createDiv({ cls: "research-progress-text" });
         const progressTrack = this.progressContainer.createDiv({ cls: "research-progress-track" });
         this.progressEl = progressTrack.createDiv({ cls: "research-progress-bar" });
@@ -220,7 +218,7 @@ export class ResearchView extends ItemView {
         if (this.isScanning) return;
 
         this.isScanning = true;
-        this.progressContainer.setCssStyles({ display: "block" });
+        this.progressContainer.show();
         this.contentEl.empty();
 
         try {
@@ -249,12 +247,14 @@ export class ResearchView extends ItemView {
         } catch (err) {
             console.error(err);
             this.contentEl.createDiv({
-                text: "Error during scan: " + (err instanceof Error ? err.message : String(err)),
+                text:
+                    "Error during scan: " +
+                    (err instanceof Error ? err.message : typeof err === "string" ? err : "unknown error"),
                 cls: "research-error",
             });
         } finally {
             this.isScanning = false;
-            this.progressContainer.setCssStyles({ display: "none" });
+            this.progressContainer.hide();
             this.renderColorFilters();
             this.renderTagFilter();
             this.renderContent();

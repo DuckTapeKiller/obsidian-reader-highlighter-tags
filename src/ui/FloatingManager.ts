@@ -15,6 +15,14 @@ export interface SelectionSnapshot {
     range: Range | null;
 }
 
+// The toolbar's fixed places, set in styles.css.
+const FIXED_POSITION_CLASSES = [
+    "reading-highlighter-pos-top",
+    "reading-highlighter-pos-bottom",
+    "reading-highlighter-pos-left",
+    "reading-highlighter-pos-right",
+];
+
 export class FloatingManager {
     plugin: ReadingHighlighterPlugin;
     app: App;
@@ -424,9 +432,12 @@ export class FloatingManager {
         const pos = this.plugin.settings.toolbarPosition || "text";
         const vertical = pos === "left" || pos === "right";
 
-        // Show + reset dynamic styles & classes
-        this.containerEl.setCssStyles({ display: "flex", top: "", bottom: "", left: "", right: "", transform: "" });
+        // Show + reset dynamic styles & classes. The fixed positions are classes
+        // in styles.css; "Next to text" sets top and left here, as measured.
+        this.containerEl.setCssStyles({ top: "", bottom: "", left: "", right: "", transform: "" });
+        this.containerEl.show();
         this.containerEl.toggleClass("reading-highlighter-vertical", vertical);
+        this.containerEl.removeClasses(FIXED_POSITION_CLASSES);
 
         if (pos === "text") {
             // Measured rather than assumed: the width depends on the buttons
@@ -463,20 +474,14 @@ export class FloatingManager {
                 const left = clampLeft(rect.left + rect.width / 2 - containerWidth / 2);
                 this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
             }
-        } else if (pos === "top") {
-            this.containerEl.setCssStyles({ top: "80px", left: "50%", transform: "translateX(-50%)" });
-        } else if (pos === "bottom") {
-            this.containerEl.setCssStyles({ bottom: "100px", left: "50%", transform: "translateX(-50%)" });
-        } else if (pos === "left") {
-            this.containerEl.setCssStyles({ top: "50%", left: "10px", transform: "translateY(-50%)" });
-        } else if (pos === "right") {
-            this.containerEl.setCssStyles({ top: "50%", right: "10px", transform: "translateY(-50%)" });
+        } else if (pos === "top" || pos === "bottom" || pos === "left" || pos === "right") {
+            this.containerEl.addClass(`reading-highlighter-pos-${pos}`);
         }
     }
 
     hide() {
         if (this.containerEl) {
-            this.containerEl.setCssStyles({ display: "none" });
+            this.containerEl.hide();
         }
     }
 }

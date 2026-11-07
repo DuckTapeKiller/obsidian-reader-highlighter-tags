@@ -168,7 +168,7 @@ export class SelectionLogic {
                 }
             }
         } catch (e) {
-            console.warn("[Highlighter] Regex execution error:", e instanceof Error ? e.message : String(e));
+            console.warn("[Highlighter] Regex execution error:", e instanceof Error ? e.message : e);
         }
         return results;
     }

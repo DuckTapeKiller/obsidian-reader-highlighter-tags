@@ -46,7 +46,7 @@ function selectText(ctx) {
 
 const visible = (ctx) => {
     const el = ctx.plugin.floatingManager.containerEl;
-    return !!el && el.isConnected && el.style.display === "flex";
+    return !!el && el.isConnected && el.style.display !== "none";
 };
 
 describe("floating toolbar survives a settings change", () => {
@@ -78,5 +78,46 @@ describe("floating toolbar survives a settings change", () => {
         const all = ctx.doc.querySelectorAll(".reading-highlighter-float-container");
         expect(all).toHaveLength(1);
         expect(visible(ctx)).toBe(true);
+    });
+});
+
+// The fixed places of "Toolbar position" are classes in styles.css; only
+// "Next to text" writes top and left on the toolbar itself.
+describe("toolbar position", () => {
+    const positionClasses = (el) => [...el.classList].filter((cls) => cls.startsWith("reading-highlighter-pos-"));
+
+    for (const position of ["top", "bottom", "left", "right"]) {
+        it(`puts the toolbar in its fixed place: ${position}`, async () => {
+            const ctx = await setup();
+            ctx.plugin.settings.toolbarPosition = position;
+            selectText(ctx);
+            const el = ctx.plugin.floatingManager.containerEl;
+            expect(visible(ctx)).toBe(true);
+            expect(positionClasses(el)).toEqual([`reading-highlighter-pos-${position}`]);
+            expect(el.hasClass("reading-highlighter-vertical")).toBe(position === "left" || position === "right");
+            for (const side of ["top", "bottom", "left", "right", "transform"]) expect(el.style[side]).toBe("");
+        });
+    }
+
+    it("next to text: no fixed place, top and left from the selection", async () => {
+        const ctx = await setup();
+        ctx.plugin.settings.toolbarPosition = "top";
+        selectText(ctx);
+        ctx.plugin.settings.toolbarPosition = "text";
+        selectText(ctx);
+        const el = ctx.plugin.floatingManager.containerEl;
+        expect(visible(ctx)).toBe(true);
+        expect(positionClasses(el)).toEqual([]);
+        expect(el.style.top).toMatch(/px$/);
+        expect(el.style.left).toMatch(/px$/);
+    });
+
+    it("hides with display none and shows again", async () => {
+        const ctx = await setup();
+        selectText(ctx);
+        ctx.plugin.floatingManager.hide();
+        expect(ctx.plugin.floatingManager.containerEl.style.display).toBe("none");
+        selectText(ctx);
+        expect(ctx.plugin.floatingManager.containerEl.style.display).toBe("");
     });
 });

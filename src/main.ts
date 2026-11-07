@@ -11,6 +11,7 @@ import {
     WorkspaceLeaf,
     loadPdfJs,
     normalizePath,
+    setIcon,
     type SettingDefinitionItem,
 } from "obsidian";
 import { FloatingManager, type SelectionSnapshot } from "./ui/FloatingManager";
@@ -2205,6 +2206,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 }
 
+const KOFI_URL = "https://ko-fi.com/ducktapekiller";
+const ISSUES_URL = "https://github.com/DuckTapeKiller/obsidian-reader-highlighter-tags/issues";
+
 const HIGHLIGHT_COLOUR_DESC =
     "Colour the highlight button writes, as an Obsidian highlight colour (==🟡text==). Extending a highlight keeps its colour.";
 const PALETTE_DESC =
@@ -2443,7 +2447,62 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                       ]
                     : [{ name: "No rules learned yet." }],
             },
+            {
+                type: "group",
+                heading: "Support",
+                items: [
+                    {
+                        name: "Support on Ko-fi",
+                        aliases: ["Donate"],
+                        render: (setting: Setting) => this.renderSupportCard(setting),
+                    },
+                    {
+                        name: "Report a bug or suggest an idea",
+                        desc: "Open an issue on GitHub.",
+                        render: (setting: Setting) => this.renderIssuesLink(setting),
+                    },
+                    {
+                        name: "Version",
+                        desc: this.versionText(),
+                        // A row needs a render to be drawn; this one only shows its name and description.
+                        render: () => undefined,
+                    },
+                ],
+            },
         ];
+    }
+
+    /** The Ko-fi card. It fills its row: the row's name stays for settings search only. */
+    renderSupportCard(setting: Setting) {
+        const { settingEl } = setting;
+        const pluginName = this.plugin.manifest.name;
+        settingEl.empty();
+        settingEl.addClass("rht-support-row");
+        const card = settingEl.createDiv({ cls: "rht-support" });
+        setIcon(card.createDiv({ cls: "rht-support-icon" }), "heart");
+        card.createDiv({ cls: "rht-support-title", text: `Enjoying ${pluginName}?` });
+        const about = card.createEl("p", {
+            text: `${pluginName} is free and open source, made and maintained by DuckTapeKiller. If it is useful to you, you can support its development on `,
+        });
+        // The name is kept on one line, so a narrow screen never breaks it at its hyphen.
+        about.createSpan({ cls: "rht-support-nowrap", text: "Ko-fi" });
+        about.appendText(".");
+        const kofi = card.createEl("a", {
+            cls: "rht-support-button",
+            href: KOFI_URL,
+            attr: { "aria-label": "Support DuckTapeKiller on Ko-fi" },
+        });
+        setIcon(kofi.createSpan({ cls: "rht-support-button-icon" }), "coffee");
+        kofi.createSpan({ text: "Support on Ko-fi" });
+    }
+
+    renderIssuesLink(setting: Setting) {
+        setting.controlEl.createEl("a", { cls: "rht-support-link", text: "Open issues", href: ISSUES_URL });
+    }
+
+    /** The installed version, from the plugin's manifest. */
+    versionText(): string {
+        return `${this.plugin.manifest.name} ${this.plugin.manifest.version}`;
     }
 
     /** Read a declarative control's value out of the plugin's settings. */
@@ -2738,5 +2797,11 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                 btn.buttonEl.addClass("mod-warning");
             });
         }
+        this.sectionHeading("Support", "h3");
+        this.renderSupportCard(new Setting(containerEl).setName("Support on Ko-fi"));
+        this.renderIssuesLink(
+            new Setting(containerEl).setName("Report a bug or suggest an idea").setDesc("Open an issue on GitHub.")
+        );
+        new Setting(containerEl).setName("Version").setDesc(this.versionText());
     }
 }

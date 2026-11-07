@@ -1019,6 +1019,12 @@ var import_obsidian11 = require("obsidian");
 // src/ui/FloatingManager.ts
 var import_obsidian = require("obsidian");
 init_colors();
+var FIXED_POSITION_CLASSES = [
+  "reading-highlighter-pos-top",
+  "reading-highlighter-pos-bottom",
+  "reading-highlighter-pos-left",
+  "reading-highlighter-pos-right"
+];
 var FloatingManager = class {
   constructor(plugin) {
     this.plugin = plugin;
@@ -1320,8 +1326,10 @@ var FloatingManager = class {
     }
     const pos = this.plugin.settings.toolbarPosition || "text";
     const vertical = pos === "left" || pos === "right";
-    this.containerEl.setCssStyles({ display: "flex", top: "", bottom: "", left: "", right: "", transform: "" });
+    this.containerEl.setCssStyles({ top: "", bottom: "", left: "", right: "", transform: "" });
+    this.containerEl.show();
     this.containerEl.toggleClass("reading-highlighter-vertical", vertical);
+    this.containerEl.removeClasses(FIXED_POSITION_CLASSES);
     if (pos === "text") {
       const containerHeight = this.containerEl.offsetHeight || 50;
       const containerWidth = this.containerEl.offsetWidth || 180;
@@ -1343,19 +1351,13 @@ var FloatingManager = class {
         const left = clampLeft(rect.left + rect.width / 2 - containerWidth / 2);
         this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
       }
-    } else if (pos === "top") {
-      this.containerEl.setCssStyles({ top: "80px", left: "50%", transform: "translateX(-50%)" });
-    } else if (pos === "bottom") {
-      this.containerEl.setCssStyles({ bottom: "100px", left: "50%", transform: "translateX(-50%)" });
-    } else if (pos === "left") {
-      this.containerEl.setCssStyles({ top: "50%", left: "10px", transform: "translateY(-50%)" });
-    } else if (pos === "right") {
-      this.containerEl.setCssStyles({ top: "50%", right: "10px", transform: "translateY(-50%)" });
+    } else if (pos === "top" || pos === "bottom" || pos === "left" || pos === "right") {
+      this.containerEl.addClass(`reading-highlighter-pos-${pos}`);
     }
   }
   hide() {
     if (this.containerEl) {
-      this.containerEl.setCssStyles({ display: "none" });
+      this.containerEl.hide();
     }
   }
 };
@@ -1535,7 +1537,7 @@ var SelectionLogic = class {
         }
       }
     } catch (e) {
-      console.warn("[Highlighter] Regex execution error:", e instanceof Error ? e.message : String(e));
+      console.warn("[Highlighter] Regex execution error:", e instanceof Error ? e.message : e);
     }
     return results;
   }
@@ -3522,7 +3524,6 @@ var HighlightNavigatorView = class extends import_obsidian7.ItemView {
         const idSpan = el.createSpan({ cls: "footnote-id" });
         idSpan.textContent = footnote.displayNumber != null ? `${footnote.displayNumber} ` : `[^${footnote.id}] `;
         idSpan.setAttribute("title", `[^${footnote.id}]`);
-        idSpan.setCssStyles({ marginRight: "5px", color: "var(--text-muted)" });
       }
       const textSpan = el.createSpan({ cls: "highlight-text" });
       textSpan.textContent = this.stripMarkdown(item.text);
@@ -4048,10 +4049,8 @@ var ResearchView = class extends import_obsidian8.ItemView {
     });
     new TagFilterSuggest(this.app, tagInput, this);
     this.tagChipsEl = tagRow.createDiv({ cls: "research-tag-chips" });
-    this.progressContainer = header.createDiv({
-      cls: "research-progress-container",
-      attr: { style: "display: none;" }
-    });
+    this.progressContainer = header.createDiv({ cls: "research-progress-container" });
+    this.progressContainer.hide();
     this.progressTextEl = this.progressContainer.createDiv({ cls: "research-progress-text" });
     const progressTrack = this.progressContainer.createDiv({ cls: "research-progress-track" });
     this.progressEl = progressTrack.createDiv({ cls: "research-progress-bar" });
@@ -4061,7 +4060,7 @@ var ResearchView = class extends import_obsidian8.ItemView {
   async startScan() {
     if (this.isScanning) return;
     this.isScanning = true;
-    this.progressContainer.setCssStyles({ display: "block" });
+    this.progressContainer.show();
     this.contentEl.empty();
     try {
       this.scanResults = await this.scanner.scanVault((current, total, lastFile) => {
@@ -4086,12 +4085,12 @@ var ResearchView = class extends import_obsidian8.ItemView {
     } catch (err) {
       console.error(err);
       this.contentEl.createDiv({
-        text: "Error during scan: " + (err instanceof Error ? err.message : String(err)),
+        text: "Error during scan: " + (err instanceof Error ? err.message : typeof err === "string" ? err : "unknown error"),
         cls: "research-error"
       });
     } finally {
       this.isScanning = false;
-      this.progressContainer.setCssStyles({ display: "none" });
+      this.progressContainer.hide();
       this.renderColorFilters();
       this.renderTagFilter();
       this.renderContent();
@@ -4475,10 +4474,12 @@ var FailureRecoveryModal = class extends import_obsidian9.Modal {
     const rule = this.deriveRule(this.report.rawSnippet, this.target());
     if (rule.error) {
       container.setText(`\u{1F4DD} Note: Highlight will apply, but no rule learned (Reason: ${rule.error})`);
-      container.setCssStyles({ color: "var(--text-muted)" });
+      container.removeClass("recovery-rule-preview-learn");
+      container.addClass("recovery-rule-preview-note");
     } else {
       container.setText(`\u2728 Diagnostic: Will learn to ignore "${rule.stripPattern}"`);
-      container.setCssStyles({ color: "var(--text-success)" });
+      container.removeClass("recovery-rule-preview-note");
+      container.addClass("recovery-rule-preview-learn");
     }
   }
   deriveRule(rawSnippet, corrected) {
@@ -6695,6 +6696,8 @@ ${prefix}`);
     }).open();
   }
 };
+var KOFI_URL = "https://ko-fi.com/ducktapekiller";
+var ISSUES_URL = "https://github.com/DuckTapeKiller/obsidian-reader-highlighter-tags/issues";
 var HIGHLIGHT_COLOUR_DESC = "Colour the highlight button writes, as an Obsidian highlight colour (==\u{1F7E1}text==). Extending a highlight keeps its colour.";
 var PALETTE_DESC = "Show Obsidian's six highlight colours in the toolbar. Highlight colours need Obsidian 1.14 or later; older versions show the colour emoji.";
 var ReadingHighlighterSettingTab = class extends import_obsidian11.PluginSettingTab {
@@ -6925,8 +6928,59 @@ var ReadingHighlighterSettingTab = class extends import_obsidian11.PluginSetting
             }
           }
         ] : [{ name: "No rules learned yet." }]
+      },
+      {
+        type: "group",
+        heading: "Support",
+        items: [
+          {
+            name: "Support on Ko-fi",
+            aliases: ["Donate"],
+            render: (setting) => this.renderSupportCard(setting)
+          },
+          {
+            name: "Report a bug or suggest an idea",
+            desc: "Open an issue on GitHub.",
+            render: (setting) => this.renderIssuesLink(setting)
+          },
+          {
+            name: "Version",
+            desc: this.versionText(),
+            // A row needs a render to be drawn; this one only shows its name and description.
+            render: () => void 0
+          }
+        ]
       }
     ];
+  }
+  /** The Ko-fi card. It fills its row: the row's name stays for settings search only. */
+  renderSupportCard(setting) {
+    const { settingEl } = setting;
+    const pluginName = this.plugin.manifest.name;
+    settingEl.empty();
+    settingEl.addClass("rht-support-row");
+    const card = settingEl.createDiv({ cls: "rht-support" });
+    (0, import_obsidian11.setIcon)(card.createDiv({ cls: "rht-support-icon" }), "heart");
+    card.createDiv({ cls: "rht-support-title", text: `Enjoying ${pluginName}?` });
+    const about = card.createEl("p", {
+      text: `${pluginName} is free and open source, made and maintained by DuckTapeKiller. If it is useful to you, you can support its development on `
+    });
+    about.createSpan({ cls: "rht-support-nowrap", text: "Ko-fi" });
+    about.appendText(".");
+    const kofi = card.createEl("a", {
+      cls: "rht-support-button",
+      href: KOFI_URL,
+      attr: { "aria-label": "Support DuckTapeKiller on Ko-fi" }
+    });
+    (0, import_obsidian11.setIcon)(kofi.createSpan({ cls: "rht-support-button-icon" }), "coffee");
+    kofi.createSpan({ text: "Support on Ko-fi" });
+  }
+  renderIssuesLink(setting) {
+    setting.controlEl.createEl("a", { cls: "rht-support-link", text: "Open issues", href: ISSUES_URL });
+  }
+  /** The installed version, from the plugin's manifest. */
+  versionText() {
+    return `${this.plugin.manifest.name} ${this.plugin.manifest.version}`;
   }
   /** Read a declarative control's value out of the plugin's settings. */
   getControlValue(key) {
@@ -7145,5 +7199,11 @@ var ReadingHighlighterSettingTab = class extends import_obsidian11.PluginSetting
         btn.buttonEl.addClass("mod-warning");
       });
     }
+    this.sectionHeading("Support", "h3");
+    this.renderSupportCard(new import_obsidian11.Setting(containerEl).setName("Support on Ko-fi"));
+    this.renderIssuesLink(
+      new import_obsidian11.Setting(containerEl).setName("Report a bug or suggest an idea").setDesc("Open an issue on GitHub.")
+    );
+    new import_obsidian11.Setting(containerEl).setName("Version").setDesc(this.versionText());
   }
 };

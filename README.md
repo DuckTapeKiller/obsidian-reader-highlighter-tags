@@ -270,6 +270,7 @@ Every action is a command, so you can give it a hotkey in **Settings → Hotkeys
 | Show button tooltips                       | Off              | Tooltips on the toolbar's action buttons                                                            |
 | Auto-tag highlight in frontmatter          | Off              | Adds a tag to the note's `tags` property when you highlight                                         |
 | Learned normalization rules                | None             | Rules saved by _Apply & learn_, each one removable                                                  |
+| Support                                    |                  | Ko-fi, a link to report a bug or suggest an idea, and the installed version                         |
 
 ## Compatibility and privacy
 

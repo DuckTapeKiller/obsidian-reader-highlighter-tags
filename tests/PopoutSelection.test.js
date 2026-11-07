@@ -49,7 +49,7 @@ function selectText(ctx) {
 
 const visible = (ctx) => {
     const el = ctx.plugin.floatingManager.containerEl;
-    return !!el && el.isConnected && el.style.display === "flex";
+    return !!el && el.isConnected && el.style.display !== "none";
 };
 
 describe("toolbar in a popout window", () => {

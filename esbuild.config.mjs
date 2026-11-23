@@ -1,4 +1,3 @@
-/* global process -- this build script runs in Node, where `process` is a global */
 import esbuild from "esbuild";
 
 const banner = `/*
